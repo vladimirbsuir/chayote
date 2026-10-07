@@ -31,10 +31,7 @@ pub fn run() {
             // the thing that creates it, or the error is opaque.
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir).map_err(|err| {
-                error::AppError::internal(format!(
-                    "could not create {}: {err}",
-                    dir.display()
-                ))
+                error::AppError::internal(format!("could not create {}: {err}", dir.display()))
             })?;
             let db = Arc::new(db::Database::open(&dir)?);
             app.manage(Services::new(db));
