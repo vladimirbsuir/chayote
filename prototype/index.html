@@ -1,0 +1,1111 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chayote — UI prototype</title>
+<style>
+/* ==========================================================================
+   Chayote UI prototype — tokens from docs/05-ui-ux.md §3
+   Icons: Lucide geometry, inlined as <symbol> (docs/05-ui-ux.md §3.3)
+   Review tool, not an asset. ADR-013, ADR-015.
+   ========================================================================== */
+
+:root {
+  --surface: #ffffff;
+  --surface-raised: #f7f7f8;
+  --surface-sunken: #ededef;
+  --border: #e3e3e6;
+  --border-strong: #c9c9cf;
+  --text: #18181b;
+  --text-muted: #6b6b76;
+  --text-subtle: #9a9aa4;
+  --accent: #2f6fed;
+  --accent-soft: rgba(47, 111, 237, 0.12);
+  --danger: #c0392b;
+  --warning: #b26a00;
+  --success: #1f7a4d;
+
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --r-input: 6px;
+  --r-card: 10px;
+  --r-pill: 999px;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.12);
+
+  --icon-stroke-xs: 2;    /* 16px */
+  --icon-stroke-md: 2;    /* 18px */
+  --icon-stroke-lg: 1.75; /* 20px */
+  --icon-stroke-xl: 1.5;  /* 24px */
+}
+
+[data-theme="dark"] {
+  --surface: #161618;
+  --surface-raised: #1d1d20;
+  --surface-sunken: #101012;
+  --border: #2a2a2f;
+  --border-strong: #3d3d44;
+  --text: #ececef;
+  --text-muted: #9b9ba4;
+  --text-subtle: #6e6e78;
+  --accent: #6f9bff;
+  --accent-soft: rgba(111, 155, 255, 0.16);
+  --danger: #e57366;
+  --warning: #e0a75c;
+  --success: #5cbb8a;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  padding: 28px;
+}
+
+/* ---- Icons: 24x24 grid, round caps, currentColor ---- */
+.icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+.i-16 { width: 16px; height: 16px; stroke-width: var(--icon-stroke-xs); }
+.i-18 { width: 18px; height: 18px; stroke-width: var(--icon-stroke-md); }
+.i-20 { width: 20px; height: 20px; stroke-width: var(--icon-stroke-lg); }
+.i-24 { width: 24px; height: 24px; stroke-width: var(--icon-stroke-xl); }
+.icon.filled { fill: currentColor; }
+
+/* ---- Page chrome ---- */
+.page-head {
+  max-width: 1400px;
+  margin: 0 auto 24px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.page-head h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+.page-head .sub { color: var(--text-muted); font-size: 12px; margin-top: 4px; line-height: 1.6; }
+
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.controls button {
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 12px;
+  border-radius: var(--r-input);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+}
+.controls button:hover { background: var(--surface-raised); }
+.controls button[aria-pressed="true"] {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+
+.sections { max-width: 1400px; margin: 0 auto; }
+.section { margin-bottom: 40px; }
+.section > h2 {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted);
+  margin-bottom: 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.section > .note { font-size: 12px; color: var(--text-subtle); margin-bottom: 12px; max-width: 70ch; line-height: 1.6; }
+
+.frame {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.frame-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-subtle);
+  padding: 6px 10px;
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ==========================================================================
+   Desktop: two-pane — docs/05-ui-ux.md §2.1
+   ========================================================================== */
+
+.app { display: flex; flex-direction: column; height: 720px; }
+
+.topbar {
+  height: 52px;
+  flex: 0 0 52px;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.brand { font-size: 14px; font-weight: 650; letter-spacing: -0.01em; width: 140px; }
+
+.search {
+  flex: 1;
+  max-width: 460px;
+  height: 32px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--surface-raised);
+  color: var(--text-subtle);
+  font-size: 13px;
+}
+.search .ico { color: var(--text-subtle); display: flex; }
+.search kbd {
+  font-family: var(--mono); font-size: 10px; margin-left: auto;
+  padding: 2px 5px; border: 1px solid var(--border-strong);
+  border-radius: 4px; background: var(--surface); color: var(--text-subtle);
+}
+.topbar .spacer { flex: 1; }
+
+.iconbtn {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border-radius: var(--r-input);
+  border: 1px solid transparent;
+  background: transparent; color: var(--text-muted);
+  cursor: pointer;
+}
+.iconbtn:hover { background: var(--surface-raised); color: var(--text); }
+
+.panes { flex: 1; display: flex; min-height: 0; }
+
+/* ---- Sidebar: three stacked regions ---- */
+
+.sidebar {
+  width: 320px; flex: 0 0 320px;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--surface-raised);
+  min-height: 0;
+}
+
+.filters { padding: 12px; display: flex; gap: 4px; }
+.segmented {
+  flex: 1; display: flex;
+  background: var(--surface-sunken);
+  border-radius: var(--r-input);
+  padding: 2px;
+}
+.segmented button {
+  flex: 1;
+  font-family: var(--font); font-size: 12px; font-weight: 500;
+  padding: 6px 0;
+  border: none; border-radius: 4px;
+  background: transparent; color: var(--text-muted);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+}
+.segmented button[aria-selected="true"] {
+  background: var(--surface); color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+}
+
+.side-section { border-top: 1px solid var(--border); }
+.side-section.grow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.side-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 12px 12px 8px;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.side-head .hico { color: var(--text-subtle); display: flex; }
+.side-head .caret { color: var(--text-subtle); display: flex; }
+.side-head .add {
+  margin-left: auto; width: 20px; height: 20px;
+  display: grid; place-items: center;
+  color: var(--text-subtle); cursor: pointer;
+  background: none; border: none; border-radius: 4px; padding: 0;
+}
+.side-head .add:hover { color: var(--accent); background: var(--surface-sunken); }
+
+.tree { padding: 0 8px 10px; overflow-y: auto; }
+.tree-row {
+  display: flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 6px;
+  border-radius: var(--r-input);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.tree-row:hover { background: var(--surface-sunken); }
+.tree-row.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.tree-row .twisty { width: 14px; display: flex; color: var(--text-subtle); }
+.tree-row.active .twisty { color: var(--accent); }
+.tree-row .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-row .fcount { margin-left: auto; font-size: 11px; color: var(--text-subtle); }
+
+.tags { padding: 0 8px 10px; overflow-y: auto; }
+.tag-row {
+  display: flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 8px 0 6px;
+  border-radius: var(--r-input);
+  font-size: 13px; cursor: pointer;
+}
+.tag-row:hover { background: var(--surface-sunken); }
+.tag-row.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.tag-row .tcount { margin-left: auto; font-size: 11px; color: var(--text-subtle); }
+
+.list-head {
+  padding: 10px 12px;
+  font-size: 12px; font-weight: 500;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.list-head .muted { color: var(--text-subtle); font-weight: 400; }
+
+.note-list { flex: 1; overflow-y: auto; padding: 4px; }
+.note-card {
+  padding: 9px 10px;
+  border-radius: var(--r-input);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.note-card:hover { background: var(--surface); }
+.note-card.active { background: var(--surface); border-color: var(--border); }
+.note-card .row1 { display: flex; align-items: baseline; gap: 6px; }
+.note-card .title {
+  font-size: 14px; font-weight: 550; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.note-card .title.un { color: var(--text-subtle); font-weight: 400; font-style: italic; }
+.note-card .pin { color: var(--accent); flex: 0 0 auto; display: flex; align-self: center; }
+.note-card .excerpt {
+  font-size: 13px; line-height: 1.45; color: var(--text-muted);
+  margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.note-card .meta {
+  display: flex; gap: 8px; align-items: center;
+  margin-top: 5px;
+  font-size: 12px; color: var(--text-subtle);
+}
+.note-card .fchip {
+  font-size: 11px; padding: 1px 6px; border-radius: var(--r-pill);
+  background: var(--surface-sunken); color: var(--text-muted);
+  display: flex; align-items: center; gap: 3px;
+}
+.note-card mark { background: var(--accent-soft); color: var(--accent); border-radius: 2px; padding: 0 1px; }
+
+/* ---- Editor ---- */
+
+.editor-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--surface); }
+.editor-scroll { flex: 1; overflow-y: auto; padding: 40px 32px 64px; }
+.editor { max-width: 720px; margin: 0 auto; }
+
+.editor h1 { font-size: 28px; font-weight: 650; line-height: 1.25; margin-bottom: 16px; letter-spacing: -0.015em; }
+.editor h2 { font-size: 22px; font-weight: 600; line-height: 1.3; margin: 28px 0 10px; }
+.editor h3 { font-size: 19px; font-weight: 600; line-height: 1.4; margin: 24px 0 8px; }
+.editor p { font-size: 17px; line-height: 1.7; margin-bottom: 14px; }
+.editor ul, .editor ol { font-size: 17px; line-height: 1.7; margin: 0 0 14px; padding-left: 24px; }
+.editor li { margin-bottom: 4px; }
+.editor blockquote {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 16px; margin: 0 0 14px;
+  color: var(--text-muted);
+}
+.editor pre {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 14px 16px;
+  font-family: var(--mono); font-size: 15px; line-height: 1.55;
+  overflow-x: auto; margin-bottom: 14px;
+}
+.editor code { font-family: var(--mono); font-size: 0.9em; background: var(--surface-sunken); padding: 1px 5px; border-radius: 4px; }
+.editor pre code { background: none; padding: 0; }
+.editor hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+.editor strong { font-weight: 650; }
+.task { list-style: none; margin-left: -22px; }
+.task li { display: flex; gap: 10px; align-items: flex-start; }
+.task .box {
+  width: 18px; height: 18px; margin-top: 7px; flex: none;
+  border: 1.5px solid var(--border-strong); border-radius: 4px;
+  display: grid; place-items: center; color: transparent;
+}
+.task li.done .box { background: var(--accent); border-color: var(--accent); color: #fff; }
+.task li.done span { color: var(--text-subtle); text-decoration: line-through; }
+
+.statusbar {
+  height: 28px; flex: 0 0 28px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised);
+  font-size: 12px; color: var(--text-muted);
+}
+.statusbar .right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+.statusbar .saved { display: flex; align-items: center; gap: 5px; }
+.statusbar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+
+/* ==========================================================================
+   Android: single pane — docs/05-ui-ux.md §2.4
+   ========================================================================== */
+
+.phones { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+.phone-cap {
+  font-family: var(--mono); font-size: 11px; color: var(--text-subtle);
+  margin-bottom: 8px;
+}
+.phone {
+  width: 360px; height: 640px;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  overflow: hidden;
+  background: var(--surface);
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow-pop);
+}
+.m-topbar {
+  height: 52px; flex: 0 0 52px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.m-topbar .micon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--r-input); color: var(--text-muted); }
+.m-topbar .mbrand { font-size: 15px; font-weight: 650; flex: 1; }
+
+.m-search {
+  margin: 12px; height: 40px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  color: var(--text-subtle); font-size: 14px;
+}
+.m-filters { display: flex; gap: 8px; padding: 0 12px 12px; }
+.m-chip {
+  font-size: 13px; padding: 8px 14px;
+  border-radius: var(--r-pill);
+  background: var(--surface-raised); color: var(--text-muted);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; gap: 6px;
+}
+.m-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 500; }
+
+.m-list { flex: 1; overflow-y: auto; }
+.m-card {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.m-card .t { font-size: 15px; font-weight: 550; line-height: 1.4; display: flex; align-items: center; gap: 6px; }
+.m-card .e { font-size: 14px; color: var(--text-muted); line-height: 1.45; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.m-card .m { font-size: 12px; color: var(--text-subtle); margin-top: 6px; }
+.m-card .pin { color: var(--accent); }
+
+.m-editor { flex: 1; overflow-y: auto; padding: 24px 20px 40px; }
+.m-editor .editor h1 { font-size: 24px; }
+.m-editor .editor p, .m-editor .editor ul, .m-editor .editor ol { font-size: 16px; }
+
+/* ==========================================================================
+   Empty and error states — docs/05-ui-ux.md §8
+   ========================================================================== */
+
+.states { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+.state {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 40px 24px;
+  text-align: center;
+  background: var(--surface);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  min-height: 210px; justify-content: center;
+}
+.state .st-title { font-size: 15px; font-weight: 550; display: flex; align-items: center; gap: 7px; }
+.state .st-title .ico { color: var(--text-subtle); display: flex; }
+.state .st-body { font-size: 13px; color: var(--text-muted); max-width: 30ch; line-height: 1.5; }
+.state .st-body kbd {
+  font-family: var(--mono); font-size: 11px;
+  padding: 1px 5px; border: 1px solid var(--border-strong);
+  border-radius: 4px; background: var(--surface-raised); color: var(--text-muted);
+}
+.state .btn {
+  font-family: var(--font); font-size: 13px; font-weight: 500;
+  padding: 8px 16px; margin-top: 4px;
+  border: 1px solid var(--accent); border-radius: var(--r-input);
+  background: var(--accent); color: #fff; cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+}
+.state .btn.ghost { background: var(--surface); color: var(--text-muted); border-color: var(--border-strong); }
+.state .btn.warn { background: var(--surface); color: var(--warning); border-color: var(--border-strong); }
+.state.locked { background: var(--surface-raised); border-style: dashed; }
+.state .st-title.warn { color: var(--warning); }
+
+/* ==========================================================================
+   Dialog — docs/05-ui-ux.md §6.6
+   ========================================================================== */
+
+.dialog-wrap {
+  position: relative;
+  min-height: 320px;
+  display: grid; place-items: center;
+  background: var(--surface-sunken);
+  border-radius: var(--r-card);
+  padding: 24px;
+}
+.dialog {
+  width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+.dialog .dhead { padding: 18px 20px 0; display: flex; align-items: center; gap: 8px; }
+.dialog .dhead .ico { color: var(--text-muted); display: flex; }
+.dialog .dtitle { font-size: 15px; font-weight: 600; }
+.dialog .settings { padding: 16px 20px; display: flex; flex-direction: column; gap: 18px; }
+.field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; }
+.swatches { display: flex; gap: 8px; align-items: center; }
+.swatch {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid transparent; cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.swatch.active { border-color: var(--text); }
+.swatch.custom {
+  background: var(--surface);
+  display: grid; place-items: center;
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.dlg-btns {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+.dlg-btns button {
+  font-family: var(--font); font-size: 13px; font-weight: 500;
+  padding: 8px 16px; border-radius: var(--r-input);
+  border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text); cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+}
+.dlg-btns button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dlg-btns button.danger { color: var(--danger); }
+
+/* ==========================================================================
+   Icon inventory — docs/05-ui-ux.md §3.3
+   ========================================================================== */
+
+.inv { display: flex; flex-wrap: wrap; gap: 10px; }
+.inv-item {
+  width: 108px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  padding: 14px 6px 8px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.inv-item .nm { font-family: var(--mono); font-size: 10px; color: var(--text-subtle); text-align: center; word-break: break-all; line-height: 1.3; }
+.inv-item .sw { display: flex; gap: 10px; align-items: center; color: var(--text-muted); }
+
+.legend { font-size: 12px; color: var(--text-subtle); margin-top: 8px; line-height: 1.7; }
+.legend code { font-family: var(--mono); font-size: 11px; background: var(--surface-sunken); padding: 1px 5px; border-radius: 4px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<!-- ==========================================================================
+     Icon set: Lucide geometry, 24x24 grid, round caps/joins, 2px default stroke.
+     Inlined as symbols so the prototype stays a single file with no network.
+     In the app these come from `lucide-react` (ADR-015) and are tree-shaken.
+     ========================================================================== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 12h16"/><path d="M4 6h16"/><path d="M4 18h16"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+    <symbol id="i-hash" viewBox="0 0 24 24"><path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-file-plus" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18v-6"/><path d="M9 15h6"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+    <symbol id="i-alert-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></symbol>
+    <symbol id="i-rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  </defs>
+</svg>
+
+<div class="page-head">
+  <div>
+    <h1>Chayote — UI prototype</h1>
+    <div class="sub">
+      Tokens and layout follow <code>docs/05-ui-ux.md</code>. Icons are Lucide geometry, inlined
+      as symbols so this file needs no network. ADR-013, ADR-015.
+    </div>
+  </div>
+  <div class="controls">
+    <button id="theme-toggle" aria-pressed="false">
+      <svg class="icon i-18" aria-hidden="true"><use href="#i-moon"/></svg>
+      <span id="theme-label">Dark theme</span>
+    </button>
+    <button id="accent-btn">
+      <svg class="icon i-18" aria-hidden="true"><use href="#i-palette"/></svg>
+      <span id="accent-label">Accent: default</span>
+    </button>
+  </div>
+</div>
+
+<div class="sections">
+
+  <!-- ==================================================================== -->
+  <div class="section">
+    <h2>1 · Desktop — two-pane, 1280 × 820</h2>
+    <div class="note">Sidebar in three stacked regions: filters, structure, note list. Editor column capped at 720 px. Pinned notes sort above everything in every selection.</div>
+    <div class="frame">
+      <div class="frame-label">desktop · light</div>
+      <div class="app">
+        <div class="topbar">
+          <div class="brand">Chayote</div>
+          <div class="search">
+            <span class="ico"><svg class="icon i-16" aria-hidden="true"><use href="#i-search"/></svg></span>
+            <span>Search notes…</span>
+            <kbd>Ctrl F</kbd>
+          </div>
+          <div class="spacer"></div>
+          <button class="iconbtn" title="New note" aria-label="New note">
+            <svg class="icon i-20" aria-hidden="true"><use href="#i-file-plus"/></svg>
+          </button>
+          <button class="iconbtn" title="Toggle theme" aria-label="Toggle theme">
+            <svg class="icon i-20" aria-hidden="true"><use href="#i-sun"/></svg>
+          </button>
+          <button class="iconbtn" title="More" aria-label="More">
+            <svg class="icon i-20" aria-hidden="true"><use href="#i-more"/></svg>
+          </button>
+        </div>
+        <div class="panes">
+          <div class="sidebar">
+            <div class="filters">
+              <div class="segmented" role="tablist">
+                <button role="tab" aria-selected="true">All</button>
+                <button role="tab" aria-selected="false">
+                  <svg class="icon i-16" aria-hidden="true"><use href="#i-pin"/></svg>Pinned
+                </button>
+              </div>
+            </div>
+
+            <div class="side-section">
+              <div class="side-head">
+                <svg class="icon i-16" aria-hidden="true"><use href="#i-folder"/></svg>
+                Folders
+                <button class="add" title="New folder" aria-label="New folder">
+                  <svg class="icon i-16" aria-hidden="true"><use href="#i-plus"/></svg>
+                </button>
+              </div>
+              <div class="tree">
+                <div class="tree-row active">
+                  <span class="twisty"><svg class="icon i-16" aria-hidden="true"><use href="#i-chevron-down"/></svg></span>
+                  <svg class="icon i-16" aria-hidden="true" style="opacity:.7"><use href="#i-folder"/></svg>
+                  <span class="fname">Work</span><span class="fcount">6</span>
+                </div>
+                <div class="tree-row" style="padding-left:22px">
+                  <span class="twisty"></span>
+                  <svg class="icon i-16" aria-hidden="true" style="opacity:.55"><use href="#i-folder"/></svg>
+                  <span class="fname">Projects</span><span class="fcount">3</span>
+                </div>
+                <div class="tree-row" style="padding-left:22px">
+                  <span class="twisty"></span>
+                  <svg class="icon i-16" aria-hidden="true" style="opacity:.55"><use href="#i-folder"/></svg>
+                  <span class="fname">Meetings</span><span class="fcount">3</span>
+                </div>
+                <div class="tree-row">
+                  <span class="twisty"><svg class="icon i-16" aria-hidden="true"><use href="#i-chevron-down"/></svg></span>
+                  <svg class="icon i-16" aria-hidden="true" style="opacity:.7"><use href="#i-folder"/></svg>
+                  <span class="fname">Personal</span><span class="fcount">4</span>
+                </div>
+                <div class="tree-row" style="padding-left:22px">
+                  <span class="twisty"></span>
+                  <svg class="icon i-16" aria-hidden="true" style="opacity:.55"><use href="#i-folder"/></svg>
+                  <span class="fname">Reading</span><span class="fcount">2</span>
+                </div>
+                <div class="tree-row">
+                  <span class="twisty"><svg class="icon i-16" aria-hidden="true"><use href="#i-chevron-right"/></svg></span>
+                  <svg class="icon i-16" aria-hidden="true" style="opacity:.7"><use href="#i-folder"/></svg>
+                  <span class="fname">Archive</span><span class="fcount">11</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="side-section">
+              <div class="side-head">
+                <svg class="icon i-16" aria-hidden="true"><use href="#i-hash"/></svg>
+                Tags
+                <button class="add" title="New tag" aria-label="New tag">
+                  <svg class="icon i-16" aria-hidden="true"><use href="#i-plus"/></svg>
+                </button>
+              </div>
+              <div class="tags">
+                <div class="tag-row"><span style="display:flex;opacity:.7"><svg class="icon i-16" aria-hidden="true"><use href="#i-hash"/></svg></span>work<span class="tcount">14</span></div>
+                <div class="tag-row"><span style="display:flex;opacity:.7"><svg class="icon i-16" aria-hidden="true"><use href="#i-hash"/></svg></span>ideas<span class="tcount">3</span></div>
+                <div class="tag-row"><span style="display:flex;opacity:.7"><svg class="icon i-16" aria-hidden="true"><use href="#i-hash"/></svg></span>urgent<span class="tcount">2</span></div>
+              </div>
+            </div>
+
+            <div class="side-section grow">
+              <div class="list-head">Work <span class="muted">6 notes</span></div>
+              <div class="note-list">
+                <div class="note-card active">
+                  <div class="row1">
+                    <span class="pin"><svg class="icon i-16" aria-hidden="true"><use href="#i-pin"/></svg></span>
+                    <span class="title">Meeting notes</span>
+                  </div>
+                  <div class="excerpt">Discussed the launch date with the team. Action items below.</div>
+                  <div class="meta">
+                    <span>2 min ago</span>
+                    <span class="fchip"><svg class="icon i-16" style="width:12px;height:12px" aria-hidden="true"><use href="#i-hash"/></svg>work</span>
+                  </div>
+                </div>
+                <div class="note-card">
+                  <div class="row1"><span class="title">Q3 roadmap draft</span></div>
+                  <div class="excerpt">Rough outline of the priorities we agreed on. Needs numbers before it goes anywhere.</div>
+                  <div class="meta">
+                    <span>3 h ago</span>
+                    <span class="fchip"><svg class="icon i-16" style="width:12px;height:12px;opacity:.6" aria-hidden="true"><use href="#i-folder"/></svg>Projects</span>
+                  </div>
+                </div>
+                <div class="note-card">
+                  <div class="row1"><span class="title">Standup — Thursday</span></div>
+                  <div class="excerpt">Blocked on the <mark>design review</mark> until Dana is back.</div>
+                  <div class="meta"><span>yesterday</span></div>
+                </div>
+                <div class="note-card">
+                  <div class="row1"><span class="title un">Untitled</span></div>
+                  <div class="excerpt">quick thought about the pricing page — need to check with legal first</div>
+                  <div class="meta"><span>2 d</span></div>
+                </div>
+                <div class="note-card">
+                  <div class="row1">
+                    <span class="pin"><svg class="icon i-16" aria-hidden="true"><use href="#i-pin"/></svg></span>
+                    <span class="title">Onboarding checklist</span>
+                  </div>
+                  <div class="excerpt">Everything a new person needs in week one, in order.</div>
+                  <div class="meta"><span>3 Feb</span></div>
+                </div>
+                <div class="note-card">
+                  <div class="row1"><span class="title">Expense report</span></div>
+                  <div class="excerpt">Submitted. Waiting on approval.</div>
+                  <div class="meta"><span>3 Feb</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="editor-pane">
+            <div class="editor-scroll">
+              <div class="editor">
+                <h1>Meeting notes</h1>
+                <p>Discussed the <strong>launch date</strong> with the team. Action items below, owners assigned.</p>
+                <h2>Decisions</h2>
+                <ul>
+                  <li>Launch moves to the 14th. No further slip.</li>
+                  <li>Beta stays closed until the crash rate drops below 0.5 %.</li>
+                </ul>
+                <blockquote>
+                  <p>Nothing ships until the onboarding flow is finished. That is the one thing everyone agreed on.</p>
+                </blockquote>
+                <h2>Action items</h2>
+                <ul class="task">
+                  <li class="done"><span class="box"><svg class="icon i-16" style="width:12px;height:12px" aria-hidden="true"><use href="#i-check"/></svg></span><span>Draft the announcement</span></li>
+                </ul>
+                <ul class="task">
+                  <li><span class="box"><svg class="icon i-16" style="width:12px;height:12px" aria-hidden="true"><use href="#i-check"/></svg></span><span>Prepare the demo build</span></li>
+                  <li><span class="box"><svg class="icon i-16" style="width:12px;height:12px" aria-hidden="true"><use href="#i-check"/></svg></span><span>Book the room for the 14th</span></li>
+                </ul>
+                <h2>Command</h2>
+                <p>The Android build is <code>npx tauri android dev</code>, and the crash rate lives in the dashboard under <code>releases / android</code>.</p>
+                <hr>
+                <p>Follow-up on Monday. Nothing here is urgent enough to interrupt anyone before then.</p>
+              </div>
+            </div>
+            <div class="statusbar">
+              <span>Work</span>
+              <span style="display:flex;align-items:center;gap:3px">
+                <svg class="icon i-16" style="width:12px;height:12px;opacity:.7" aria-hidden="true"><use href="#i-hash"/></svg>work
+              </span>
+              <span class="right">
+                <span>342 words</span>
+                <span class="saved"><span class="dot"></span>Saved</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <div class="section">
+    <h2>2 · Android — single pane, list and editor</h2>
+    <div class="note">One view at a time, 360 × 640. Back button pops the stack. 44 px touch targets on every icon control. No hover states.</div>
+    <div class="phones">
+      <div class="phone-col">
+        <div class="phone-cap">list view</div>
+        <div class="phone">
+          <div class="m-topbar">
+            <div class="micon" role="img" aria-label="Open sidebar">
+              <svg class="icon i-24" aria-hidden="true"><use href="#i-menu"/></svg>
+            </div>
+            <div class="mbrand">Chayote</div>
+            <div class="micon" role="img" aria-label="New note">
+              <svg class="icon i-24" aria-hidden="true"><use href="#i-file-plus"/></svg>
+            </div>
+          </div>
+          <div class="m-search">
+            <span style="display:flex"><svg class="icon i-18" aria-hidden="true"><use href="#i-search"/></svg></span>
+            <span>Search notes…</span>
+          </div>
+          <div class="m-filters">
+            <span class="m-chip active">All</span>
+            <span class="m-chip"><svg class="icon i-16" aria-hidden="true"><use href="#i-pin"/></svg>Pinned</span>
+            <span class="m-chip"><svg class="icon i-16" aria-hidden="true"><use href="#i-folder"/></svg>Folders</span>
+          </div>
+          <div class="m-list">
+            <div class="m-card">
+              <div style="flex:1">
+                <div class="t"><span class="pin"><svg class="icon i-16" aria-hidden="true"><use href="#i-pin"/></svg></span>Meeting notes</div>
+                <div class="e">Discussed the launch date with the team. Action items below, owners assigned.</div>
+                <div class="m">2 min ago · Work</div>
+              </div>
+            </div>
+            <div class="m-card">
+              <div style="flex:1">
+                <div class="t">Q3 roadmap draft</div>
+                <div class="e">Rough outline of the priorities we agreed on. Needs numbers before it goes anywhere.</div>
+                <div class="m">3 h ago · Projects</div>
+              </div>
+            </div>
+            <div class="m-card">
+              <div style="flex:1">
+                <div class="t">Standup — Thursday</div>
+                <div class="e">Blocked on the design review until Dana is back.</div>
+                <div class="m">yesterday</div>
+              </div>
+            </div>
+            <div class="m-card">
+              <div style="flex:1">
+                <div class="t" style="color:var(--text-subtle);font-weight:400;font-style:italic">Untitled</div>
+                <div class="e">quick thought about the pricing page — need to check with legal first</div>
+                <div class="m">2 d</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="phone-col">
+        <div class="phone-cap">editor view</div>
+        <div class="phone">
+          <div class="m-topbar">
+            <div class="micon" role="img" aria-label="Back to list">
+              <svg class="icon i-24" aria-hidden="true"><use href="#i-arrow-left"/></svg>
+            </div>
+            <div class="mbrand" style="font-size:14px;font-weight:600">Meeting notes</div>
+            <div class="micon" role="img" aria-label="More">
+              <svg class="icon i-24" aria-hidden="true"><use href="#i-more"/></svg>
+            </div>
+          </div>
+          <div class="m-editor">
+            <div class="editor">
+              <h1>Meeting notes</h1>
+              <p>Discussed the <strong>launch date</strong> with the team. Action items below, owners assigned.</p>
+              <h2>Action items</h2>
+              <ul class="task">
+                <li class="done"><span class="box"><svg class="icon i-16" style="width:12px;height:12px" aria-hidden="true"><use href="#i-check"/></svg></span><span>Draft the announcement</span></li>
+              </ul>
+              <ul class="task">
+                <li><span class="box"><svg class="icon i-16" style="width:12px;height:12px" aria-hidden="true"><use href="#i-check"/></svg></span><span>Prepare the demo build</span></li>
+                <li><span class="box"><svg class="icon i-16" style="width:12px;height:12px" aria-hidden="true"><use href="#i-check"/></svg></span><span>Book the room for the 14th</span></li>
+              </ul>
+              <h2>Decisions</h2>
+              <ul>
+                <li>Launch moves to the 14th.</li>
+                <li>Beta stays closed until the crash rate drops below 0.5 %.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="statusbar">
+            <span>Work · #work</span>
+            <span class="right">
+              <span>342 w</span>
+              <span class="saved"><span class="dot"></span>Saved</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <div class="section">
+    <h2>3 · Empty and error states</h2>
+    <div class="note">Every state explains the cause, not just the fact. No illustrations, no emoji. The dashed panel is the first-launch experience — no folders, no tags, no seeding.</div>
+    <div class="states">
+      <div class="state">
+        <div class="st-title"><span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-file-plus"/></svg></span>No notes yet</div>
+        <div class="st-body">Your notes are stored on this device and never leave it.</div>
+        <button class="btn"><svg class="icon i-16" aria-hidden="true"><use href="#i-plus"/></svg>New note</button>
+      </div>
+      <div class="state locked">
+        <div class="st-title"><span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-pin"/></svg></span>Nothing pinned</div>
+        <div class="st-body">Pin a note with <kbd>Ctrl D</kbd> to keep it at the top of the list.</div>
+        <button class="btn ghost"><svg class="icon i-16" aria-hidden="true"><use href="#i-plus"/></svg>New note</button>
+      </div>
+      <div class="state">
+        <div class="st-title"><span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-search"/></svg></span>No results for “roadmap”</div>
+        <div class="st-body">Search covers titles and the full text of every note.</div>
+        <button class="btn ghost"><svg class="icon i-16" aria-hidden="true"><use href="#i-x"/></svg>Clear search</button>
+      </div>
+      <div class="state">
+        <div class="st-title"><span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-folder"/></svg></span>Nothing here</div>
+        <div class="st-body">This folder is empty.</div>
+        <button class="btn ghost"><svg class="icon i-16" aria-hidden="true"><use href="#i-plus"/></svg>New note</button>
+      </div>
+      <div class="state">
+        <div class="st-title"><span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-trash"/></svg></span>Trash is empty</div>
+        <div class="st-body">Deleted notes stay in the trash until you empty it.</div>
+      </div>
+      <div class="state">
+        <div class="st-title warn"><span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-alert-circle"/></svg></span>Couldn't save — retrying</div>
+        <div class="st-body">Your text is safe on this device. Retrying automatically.</div>
+        <button class="btn warn"><svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Retry now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <div class="section">
+    <h2>4 · Settings dialog</h2>
+    <div class="note">Six accent presets plus a custom colour. Settings live in the Tauri store, never in the notes database. The swatch ring is the only selected state — it is never colour alone.</div>
+    <div class="dialog-wrap">
+      <div class="dialog">
+        <div class="dhead">
+          <span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-settings"/></svg></span>
+          <div class="dtitle">Settings</div>
+        </div>
+        <div class="settings">
+          <div class="field">
+            <label>Theme</label>
+            <div class="segmented" style="max-width:260px" role="tablist">
+              <button role="tab"><svg class="icon i-16" aria-hidden="true"><use href="#i-sun"/></svg>Light</button>
+              <button role="tab" aria-selected="true"><svg class="icon i-16" aria-hidden="true"><use href="#i-moon"/></svg>Dark</button>
+              <button role="tab"><svg class="icon i-16" aria-hidden="true"><use href="#i-monitor"/></svg>System</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Accent colour</label>
+            <div class="swatches">
+              <span class="swatch" style="background:#2f6fed" title="Default"></span>
+              <span class="swatch" style="background:#1f7a4d" title="Green"></span>
+              <span class="swatch" style="background:#8b5cf6" title="Violet"></span>
+              <span class="swatch" style="background:#c2410c" title="Rust"></span>
+              <span class="swatch" style="background:#b91c5c" title="Magenta"></span>
+              <span class="swatch" style="background:#0f766e" title="Teal"></span>
+              <span class="swatch custom active" title="Custom colour">
+                <svg class="icon i-16" aria-hidden="true"><use href="#i-palette"/></svg>
+              </span>
+            </div>
+          </div>
+          <div class="field">
+            <label>Default folder for new notes</label>
+            <div style="font-size:13px;color:var(--text-subtle)">None — notes start unfiled</div>
+          </div>
+        </div>
+        <div class="dlg-btns">
+          <button class="danger">
+            <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Reset all settings
+          </button>
+          <div style="flex:1"></div>
+          <button>Cancel</button>
+          <button class="primary">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <div class="section">
+    <h2>5 · Icon inventory — Lucide, 24 × 24 grid</h2>
+    <div class="note">
+      Every icon in v1 comes from this list. No exceptions, no one-off SVGs, no icon fonts, no emoji.
+      Stroke width steps down as size goes up so optical weight stays constant across the UI.
+    </div>
+    <div class="inv">
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-search"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-search"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-search"/></svg></div>
+        <div class="nm">search</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-file-plus"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-file-plus"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-file-plus"/></svg></div>
+        <div class="nm">file-plus<br>new note</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-plus"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-plus"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-plus"/></svg></div>
+        <div class="nm">plus<br>new folder/tag</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-pin"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-pin"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-pin"/></svg></div>
+        <div class="nm">pin</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-folder"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-folder"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-folder"/></svg></div>
+        <div class="nm">folder</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-hash"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-hash"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-hash"/></svg></div>
+        <div class="nm">hash<br>tag</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-trash"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-trash"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-trash"/></svg></div>
+        <div class="nm">trash</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-sun"/></svg></div>
+        <div class="nm">sun</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-moon"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-moon"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-moon"/></svg></div>
+        <div class="nm">moon</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-monitor"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-monitor"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-monitor"/></svg></div>
+        <div class="nm">monitor<br>system theme</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-menu"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-menu"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-menu"/></svg></div>
+        <div class="nm">menu<br>sidebar</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-arrow-left"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-arrow-left"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-arrow-left"/></svg></div>
+        <div class="nm">arrow-left<br>back</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-chevron-down"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-chevron-down"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-chevron-down"/></svg></div>
+        <div class="nm">chevron-down</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-chevron-right"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-chevron-right"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-chevron-right"/></svg></div>
+        <div class="nm">chevron-right</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-more"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-more"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-more"/></svg></div>
+        <div class="nm">more-horizontal</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-settings"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-settings"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-settings"/></svg></div>
+        <div class="nm">settings</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-palette"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-palette"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-palette"/></svg></div>
+        <div class="nm">palette<br>accent</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-check"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-check"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-check"/></svg></div>
+        <div class="nm">check</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-x"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-x"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-x"/></svg></div>
+        <div class="nm">x</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-alert-circle"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-alert-circle"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-alert-circle"/></svg></div>
+        <div class="nm">alert-circle<br>errors</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-rotate-cw"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-rotate-cw"/></svg></div>
+        <div class="nm">rotate-cw<br>retry/reset</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-inbox"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-inbox"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-inbox"/></svg></div>
+        <div class="nm">inbox<br>empty state</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Notes for review</h2>
+    <div class="legend">
+      <div><code>Ctrl B / I / S / E</code> bold, italic, strike, code · <code>Ctrl N</code> new note · <code>Ctrl D</code> pin · <code>Ctrl F</code> search</div>
+      <div style="margin-top:6px">Icon sizes: <code>16</code> inline in text, <code>18</code> controls, <code>20</code> section headers, <code>24</code> mobile top bar. Stroke steps 2, 2, 1.75, 1.5 to hold optical weight.</div>
+      <div style="margin-top:6px">Icons inherit <code>currentColor</code> and are never given a hard-coded colour. An icon never carries meaning alone — the pinned note, the empty state, and the error state all have text.</div>
+      <div style="margin-top:6px">Note list is <strong>not</strong> drag-reorderable in v1 (ADR-011). Folder tree is.</div>
+      <div style="margin-top:6px">The editor is not real. Typography, spacing, token values, and icon weight are the deliverable here.</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const root = document.documentElement;
+const themeBtn = document.getElementById('theme-toggle');
+const themeLabel = document.getElementById('theme-label');
+const accentBtn = document.getElementById('accent-btn');
+const accentLabel = document.getElementById('accent-label');
+
+const accents = [
+  ['#2f6fed', 'default'],
+  ['#1f7a4d', 'green'],
+  ['#8b5cf6', 'violet'],
+  ['#c2410c', 'rust'],
+  ['#b91c5c', 'magenta'],
+  ['#0f766e', 'teal']
+];
+let accentIdx = 0;
+
+themeBtn.addEventListener('click', () => {
+  const dark = root.dataset.theme === 'dark';
+  root.dataset.theme = dark ? 'light' : 'dark';
+  themeLabel.textContent = dark ? 'Dark theme' : 'Light theme';
+  themeBtn.querySelector('use').setAttribute('href', dark ? '#i-moon' : '#i-sun');
+  themeBtn.setAttribute('aria-pressed', String(!dark));
+});
+
+accentBtn.addEventListener('click', () => {
+  accentIdx = (accentIdx + 1) % accents.length;
+  const [hex, name] = accents[accentIdx];
+  root.style.setProperty('--accent', hex);
+  root.style.setProperty('--accent-soft', hex + '20');
+  accentLabel.textContent = 'Accent: ' + name;
+});
+</script>
+
+</body>
+</html>
