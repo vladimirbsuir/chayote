@@ -26,7 +26,16 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(commands::handler())
         .setup(|app| {
+            // Tauri's app data directory is not created for us, and on a first
+            // launch it does not exist at all. Opening the database must not be
+            // the thing that creates it, or the error is opaque.
             let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir).map_err(|err| {
+                error::AppError::internal(format!(
+                    "could not create {}: {err}",
+                    dir.display()
+                ))
+            })?;
             let db = Arc::new(db::Database::open(&dir)?);
             app.manage(Services::new(db));
             Ok(())
