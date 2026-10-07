@@ -208,6 +208,27 @@ Tauri commands exposed to the frontend. This is the complete API for v1; adding 
 
 Settings are read and written with `@tauri-apps/plugin-store`, not with a command.
 
+**Identifiers.** R1 says primary keys are generated "on the client". In this
+table `notes_create` takes only `folder_id` and returns a `Note`, so the
+identifier is minted inside `SqliteNotesRepo` from `uuid::Uuid::now_v7()`.
+"Client" in R1 therefore means the device, not the frontend: an offline device
+must not need a round trip, and it must never take an identifier from a server.
+The frontend never supplies an id on creation, and the post-v1 Postgres column
+default exists only for server-side tooling (`03-data-model.md` §7).
+
+**Deletes.** `folders_delete` and `tags_delete` are permanent in v1: a folder
+takes its subtree and its notes become unfiled, a tag takes its `note_tags`
+rows. There is no `folders_restore` or `tags_restore`, so the trash holds
+notes only — which is what `05-ui-ux.md` §5 describes. The `deleted_at` columns
+remain on all three tables because R3 requires them and the sync phase needs
+them; `07-sync-plan.md` §5.2 and §5.4 say what changes when sync lands.
+
+**`notes_destroy`.** Permanent delete is refused while `rev` has never been
+synced (`07-sync-plan.md` §5.4). That rule is **not** implemented in v1: nothing
+is ever pushed, so `synced_at` is always NULL and the check would refuse every
+deletion, leaving the trash unemptyable against `05-ui-ux.md` §6.2 and §8. It is
+an entry condition for sync Phase B, not a v1 behaviour.
+
 ## 8. Performance budget
 
 | Concern | Budget |

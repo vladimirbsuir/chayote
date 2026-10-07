@@ -2,7 +2,7 @@
 
 **Status:** Frozen. Last updated 2026-10-07.
 
-**Current position: M1, not started.** M0 shipped on 2026-10-07; the frontend scaffold, design tokens, icon layer, IPC seam with its mock backend, Playwright smoke test and CI are in place. Work proceeds in order; a milestone is not "mostly done".
+**Current position: M2, not started.** M0 and M1 shipped on 2026-10-07: the frontend scaffold, design tokens, icon layer, IPC seam with its mock backend, and the full data layer behind repository traits. Work proceeds in order; a milestone is not "mostly done".
 
 ---
 
@@ -221,8 +221,8 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | Milestone | Status | Notes |
 |-----------|--------|-------|
 | M0 | **Done** | 2026-10-07. Scaffold, tokens, icon layer, `ipc.ts` + mock, Playwright, CI. Gates clean. `docs/02-architecture.md` §1.1 version floors updated to TS 6 / Vite 8 / Vitest 5 / uuid 14 |
-| M1 | **Next** | Unblocked. Data layer: `rusqlite`, migrations, repository traits |
-| M2 | Not started | |
+| M1 | **Done** | 2026-10-07. `rusqlite`, migrations 0001–0003, repository traits, `AppError`, settings store, 33 Rust tests + 29 TS tests |
+| M2 | **Next** | Unblocked. Editor: TipTap, autosave, paste, input rules |
 | M3 | Not started | Q2, Q4, Q7 have defaults. Playwright suite starts here |
 | M4 | Not started | Q5 has a default |
 | M5 | Not started | |

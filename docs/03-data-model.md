@@ -10,7 +10,7 @@ Authoritative SQL lives in `src-tauri/migrations/`. This document defines the sc
 
 | Rule | Value |
 |------|-------|
-| Primary key | `id TEXT PRIMARY KEY`, UUIDv7 string, generated client-side (**rule R1**) |
+| Primary key | `id TEXT PRIMARY KEY`, UUIDv7 string, generated on the device (**rule R1**; see `02-architecture.md` §7 for why "client" means the device) |
 | Timestamps | `INTEGER NOT NULL`, UTC epoch milliseconds (**rule R2**) |
 | Soft delete | `deleted_at INTEGER` NULL, filter with `deleted_at IS NULL` (**rule R3**) |
 | Server revision | `rev INTEGER NOT NULL DEFAULT 0` (**rule R4**) |
@@ -128,6 +128,11 @@ Column-by-column rationale:
 
 **Deliberately absent:** `position` (no manual note order in v1), `is_favorite` (folded into `is_pinned`), `html`, `markdown`, `tags` (as text), `attachments`. Tags live in a join table; content has exactly one serialised form.
 
+**Migration count.** There are three migrations, not four. `title_source` ships
+inside `0001_initial.sql` with the rest of the table; the earlier draft of this
+document listed a separate `0004_note_title_source.sql`, which would have been a
+no-op `ALTER TABLE ADD COLUMN` against the schema above.
+
 ### 3.4 `tags`
 
 ```sql
@@ -230,6 +235,8 @@ LIMIT :limit OFFSET :offset;
 **Query sanitisation is mandatory.** `MATCH` takes a query expression, not a string. Wrap every user token:
 
 ```rust
+const KEYWORDS: &[&str] = &["AND", "OR", "NOT", "NEAR", "NULL", "TRUE", "FALSE"];
+
 fn to_fts_match(input: &str) -> Option<String> {
     let tokens: Vec<String> = input
         .split_whitespace()
@@ -238,7 +245,14 @@ fn to_fts_match(input: &str) -> Option<String> {
                 .chars()
                 .filter(|c| c.is_alphanumeric() || *c == '_')
                 .collect();
-            if cleaned.is_empty() { None } else { Some(format!("{cleaned}*")) }
+            if cleaned.is_empty() {
+                None
+            } else if KEYWORDS.contains(&cleaned.to_uppercase().as_str()) {
+                // A bare `AND` would be read as the operator, not the word.
+                Some(format!("\"{cleaned}\"*"))
+            } else {
+                Some(format!("{cleaned}*"))
+            }
         })
         .collect();
     if tokens.is_empty() { None } else { Some(tokens.join(" AND ")) }
@@ -246,6 +260,10 @@ fn to_fts_match(input: &str) -> Option<String> {
 ```
 
 Trailing `*` makes the last token a prefix match, so results appear while typing. If sanitisation yields nothing, the search falls back to `updated_at DESC` over the active filter rather than returning an error.
+
+The keyword quoting is not optional. Without it, typing `and` produces
+`and*`, which FTS5 parses as the operator and rejects; the user searching for
+the word "and" would get an error instead of results.
 
 ### 3.7 `outbox`
 
@@ -394,7 +412,7 @@ Rules:
 2. Every migration is idempotent where SQLite allows it: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE TRIGGER IF NOT EXISTS`. `ALTER TABLE ADD COLUMN` is not idempotent — guard it with a `PRAGMA table_info` check in Rust before running it.
 3. A migration that changes an indexed column must run `INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')` at the end.
 4. A migration must never rewrite the `notes` table with `DROP`/`CREATE`. The FTS triggers reference `notes` by name and `rowid`; recreating the table invalidates the external-content mapping and requires a full rebuild.
-5. `notes.title_source` ships in `0001_initial.sql`. It was previously listed as `0004_note_title_source.sql`, which would have been a no-op migration against the schema in §3.3. `03-data-model.md` §6 and `10-conventions.md` §1 agree now: three migrations, not four.
+5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: three migrations, not four.
 
 ## 7. Migration path to Postgres
 

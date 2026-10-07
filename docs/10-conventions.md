@@ -37,6 +37,7 @@ chayote/
 │   ├── App.tsx
 │   ├── lib/                           # framework-agnostic helpers
 │   │   ├── ipc.ts                     # typed invoke wrappers + Tauri-or-mock adapter (ADR-018)
+│   │   ├── settings.ts                # Tauri store; localStorage fallback outside Tauri
 │   │   ├── debounce.ts
 │   │   ├── relativeTime.ts
 │   │   └── sanitize.ts                # DOMPurify config
@@ -106,38 +107,43 @@ chayote/
     └── src/
         ├── main.rs
         ├── lib.rs
+        ├── constants.rs               # DB_FILENAME and friends, one home each
+        ├── clock.rs                   # monotonic epoch-ms (R2)
         ├── error.rs                   # AppError
         ├── db/
         │   ├── mod.rs                 # Database, pragmas, connection
         │   └── migrate.rs             # migration runner
         ├── repo/
-        │   ├── mod.rs                 # traits + shared types
+        │   ├── mod.rs                 # traits, wire types, shared query helpers
         │   ├── notes.rs               # SqliteNotesRepo
-        │   ├── folders.rs
-        │   └── tags.rs
-        ├── services/                  # business logic, outbox writes
-        │   ├── notes.rs
-        │   ├── folders.rs
-        │   ├── tags.rs
-        │   ├── search.rs
+        │   ├── folders.rs             # SqliteFoldersRepo
+        │   └── tags.rs                # SqliteTagsRepo
+        ├── services/
+        │   ├── search.rs              # FTS5 + bm25, query sanitisation
         │   └── derive.rs              # title, plain_text, excerpt, word_count
         ├── doc/
         │   └── validate.rs            # document invariants from 04-editor.md §1.3
         ├── commands/
-        │   ├── mod.rs
+        │   ├── mod.rs                 # Services, the handler list
         │   ├── notes.rs
         │   ├── folders.rs
         │   ├── tags.rs
         │   └── search.rs
+        ├── tests.rs                   # integration tests over a temp database
         └── sync/                      # empty in v1; reserved for 07-sync-plan.md
 ```
+
+`services/` holds derivation and search rather than per-entity modules: the
+business logic of a write is the transaction in `repo/`, and splitting it
+across `services/notes.rs` would only move the same statements one layer up
+without adding a boundary anything could enforce.
 
 ## 2. Naming
 
 | Kind | Convention | Example |
 |------|-----------|---------|
 | Rust module / type | `snake_case` / `PascalCase` | `soft_delete_note`, `NoteFilter` |
-| Rust function | `snake_case`, verb-first | `recompute_derived`, `trash_snapshots_for` |
+| Rust function | `snake_case`, verb-first | `derive`, `replace_tags`, `trash_snapshots_for` |
 | React component | `PascalCase` | `NoteList`, `FolderTree` |
 | Hook | `use` + PascalCase noun | `useAutosave`, `useFolders` |
 | CSS class | `kebab-case`, utility-first | `.note-card__excerpt` |

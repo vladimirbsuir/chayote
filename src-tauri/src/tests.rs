@@ -1057,7 +1057,9 @@ fn the_wire_shape_matches_the_typescript_types() {
     .expect("folder filter deserialises");
     assert_eq!(
         filter.selection,
-        Selection::Folder { id: "f1".to_owned() }
+        Selection::Folder {
+            id: "f1".to_owned()
+        }
     );
     assert_eq!(filter.limit, Some(20));
 
@@ -1082,8 +1084,7 @@ fn the_wire_shape_matches_the_typescript_types() {
         "createdAt": 1_779_000_000_000_i64,
         "deletedAt": null
     });
-    let value: serde_json::Value =
-        serde_json::from_value(note.clone()).expect("note round-trips");
+    let value: serde_json::Value = serde_json::from_value(note.clone()).expect("note round-trips");
     for field in [
         "id",
         "title",
@@ -1109,8 +1110,10 @@ fn the_wire_shape_matches_the_typescript_types() {
     assert!(wire.get("details").is_none(), "no detail, so no key at all");
 
     // A validation error carries its detail, which the message shows.
-    let wire = serde_json::to_value(crate::error::AppError::Validation("Give the tag a name.".into()))
-        .expect("serialises");
+    let wire = serde_json::to_value(crate::error::AppError::Validation(
+        "Give the tag a name.".into(),
+    ))
+    .expect("serialises");
     assert_eq!(wire["code"], "VALIDATION");
     assert_eq!(wire["message"], "Give the tag a name.");
 }

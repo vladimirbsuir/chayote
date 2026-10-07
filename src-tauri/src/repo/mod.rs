@@ -31,6 +31,7 @@ pub enum Selection {
 
 impl Selection {
     /// The tag this variant serialises with.
+    #[cfg(test)]
     pub fn kind(&self) -> &'static str {
         match self {
             Self::All => "all",
