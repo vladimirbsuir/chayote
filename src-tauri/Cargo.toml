@@ -1,0 +1,30 @@
+[package]
+name = "chayote"
+version = "0.1.0"
+description = "Chayote — a fast, quiet place to write"
+authors = ["Chayote contributors"]
+license = "MIT"
+repository = ""
+edition = "2021"
+
+[lib]
+name = "chayote_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-store = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v7", "serde"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

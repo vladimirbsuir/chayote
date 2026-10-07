@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import './tokens.css';
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+
+  --font-sans: var(--font);
+  --font-mono: var(--mono);
+
+  --radius-input: var(--r-input);
+  --radius-card: var(--r-card);
+  --radius-pill: var(--r-pill);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Icons: Lucide geometry, four fixed sizes, stroke steps down as size rises.
+   05-ui-ux.md §3.3. Never a hard-coded colour; never a free-form size. */
+.icon {
+  display: inline-block;
+  vertical-align: -0.125em;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+.i-16 {
+  width: 16px;
+  height: 16px;
+  stroke-width: var(--icon-stroke-xs);
+}
+
+.i-18 {
+  width: 18px;
+  height: 18px;
+  stroke-width: var(--icon-stroke-md);
+}
+
+.i-20 {
+  width: 20px;
+  height: 20px;
+  stroke-width: var(--icon-stroke-lg);
+}
+
+.i-24 {
+  width: 24px;
+  height: 24px;
+  stroke-width: var(--icon-stroke-xl);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
