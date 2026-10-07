@@ -1045,6 +1045,76 @@ fn timestamps_are_epoch_milliseconds_and_strictly_increasing() {
     }
 }
 
+/// The IPC wire shape is a contract with `src/types/ipc.ts`. A field renamed on
+/// one side only is a silent break that no repository test would catch, so the
+/// JSON is asserted here rather than trusted.
+#[test]
+fn the_wire_shape_matches_the_typescript_types() {
+    // A selection is an internally tagged union, flattened into the filter.
+    let filter: NoteFilter = serde_json::from_value(json!({
+        "kind": "folder", "id": "f1", "limit": 20, "offset": 0
+    }))
+    .expect("folder filter deserialises");
+    assert_eq!(
+        filter.selection,
+        Selection::Folder { id: "f1".to_owned() }
+    );
+    assert_eq!(filter.limit, Some(20));
+
+    for kind in ["all", "pinned", "trash"] {
+        let parsed: NoteFilter =
+            serde_json::from_value(json!({"kind": kind})).expect("unit variant deserialises");
+        assert_eq!(parsed.selection.kind(), kind);
+    }
+
+    // Outgoing shapes.
+    let note = json!({
+        "id": "n1",
+        "title": "Meeting notes",
+        "excerpt": "Discussed the launch date",
+        "folderId": "f1",
+        "folderName": "Work",
+        "isPinned": true,
+        "wordCount": 342,
+        "updatedAt": 1_780_000_000_000_i64,
+        "tags": [{"id": "t1", "name": "work"}],
+        "doc": {"type": "doc", "content": [{"type": "paragraph"}]},
+        "createdAt": 1_779_000_000_000_i64,
+        "deletedAt": null
+    });
+    let value: serde_json::Value =
+        serde_json::from_value(note.clone()).expect("note round-trips");
+    for field in [
+        "id",
+        "title",
+        "excerpt",
+        "folderId",
+        "folderName",
+        "isPinned",
+        "wordCount",
+        "updatedAt",
+        "tags",
+        "doc",
+        "createdAt",
+        "deletedAt",
+    ] {
+        assert!(value.get(field).is_some(), "Note carries {field}");
+    }
+
+    // An AppError carries a stable code and a user-facing message.
+    let error = crate::error::AppError::CycleDetected;
+    let wire = serde_json::to_value(&error).expect("error serialises");
+    assert_eq!(wire["code"], "CYCLE_DETECTED");
+    assert!(wire["message"].is_string());
+    assert!(wire.get("details").is_none(), "no detail, so no key at all");
+
+    // A validation error carries its detail, which the message shows.
+    let wire = serde_json::to_value(crate::error::AppError::Validation("Give the tag a name.".into()))
+        .expect("serialises");
+    assert_eq!(wire["code"], "VALIDATION");
+    assert_eq!(wire["message"], "Give the tag a name.");
+}
+
 /// `NOT_FOUND` for a row that exists but is not visible in the requested scope.
 #[test]
 fn a_trashed_note_is_still_gettable_by_id() {

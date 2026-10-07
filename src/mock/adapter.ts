@@ -8,10 +8,10 @@ import type {
 } from '../types/ipc';
 import type { Uuid } from '../types/note';
 import { EMPTY_DOC } from '../types/note';
-import type { MockDatabase, MockNote } from './derive';
+import type { MockDatabase, MockFolder, MockNote } from './derive';
 import { deriveTitle, plainTextOf, toNote, toSummary, toTree } from './derive';
 import { buildDatabase, uuidFrom } from './generate';
-import { cycleDetected, notFound } from './errors';
+import { cycleDetected, notFound, validation } from './errors';
 import { EMPTY_NOTE, FIXTURE_NOTES, FIXTURE_NOW, FIXTURE_TRASH } from './fixtures';
 
 function nowMs(): number {
@@ -52,10 +52,6 @@ function toFtsMatch(input: string): string[] | null {
 
 function foldCase(value: string): string {
   return value.toLocaleLowerCase();
-}
-
-function tagIdSet(note: MockNote): Set<Uuid> {
-  return new Set(note.tagIds);
 }
 
 export function createMockBackend(db: MockDatabase): Backend {
@@ -122,8 +118,11 @@ export function createMockBackend(db: MockDatabase): Backend {
       return toNote(existing, state);
     },
 
-    notes_move: ({ id, folderId }) => {
+notes_move: ({ id, folderId }) => {
       const note = requireNote(id);
+      if (folderId !== null && !state.folders.some((folder) => folder.id === folderId)) {
+        throw notFound();
+      }
       note.folderId = folderId;
       note.updatedAt = nowMs();
       return toNote(note, state);
@@ -142,8 +141,8 @@ export function createMockBackend(db: MockDatabase): Backend {
     },
 
     notes_destroy: ({ id }) => {
-      const index = state.notes.findIndex((note) => note.id === id);
-      if (index >= 0) state.notes.splice(index, 1);
+      requireNote(id);
+      state.notes = state.notes.filter((note) => note.id !== id);
     },
 
     notes_empty_trash: () => {
@@ -155,10 +154,17 @@ export function createMockBackend(db: MockDatabase): Backend {
     folders_list: () => toTree(state.folders),
 
     folders_create: ({ name, parentId }) => {
+      const clean = name.trim();
+      if (clean.length === 0) {
+        throw validation('Give the folder a name.');
+      }
+      if (parentId !== null && !state.folders.some((folder) => folder.id === parentId)) {
+        throw notFound();
+      }
       const siblings = state.folders.filter((folder) => folder.parentId === parentId);
       const folder = {
-        id: uuidFrom(`f-${name}-${siblings.length}`),
-        name,
+        id: uuidFrom(`f-${clean}-${siblings.length}`),
+        name: clean,
         parentId,
         position: siblings.length,
       };
@@ -171,7 +177,11 @@ export function createMockBackend(db: MockDatabase): Backend {
       if (folder === undefined) {
         throw notFound();
       }
-      folder.name = name;
+      const clean = name.trim();
+      if (clean.length === 0) {
+        throw validation('Give the folder a name.');
+      }
+      folder.name = clean;
       return { ...folder, children: [] };
     },
 
@@ -183,12 +193,19 @@ export function createMockBackend(db: MockDatabase): Backend {
       if (newParentId !== null && collectSubtree(state, id).includes(newParentId)) {
         throw cycleDetected();
       }
+      if (newParentId !== null && !state.folders.some((candidate) => candidate.id === newParentId)) {
+        throw notFound();
+      }
+      // `position` is sibling-local and densified, matching the Rust side.
+      densifyFolders(state, newParentId, id, position);
       folder.parentId = newParentId;
-      folder.position = position;
       return { ...folder, children: [] };
     },
 
     folders_delete: ({ id }) => {
+      if (!state.folders.some((candidate) => candidate.id === id)) {
+        throw notFound();
+      }
       const doomed = collectSubtree(state, id);
       const doomedSet = new Set(doomed);
       state.folders = state.folders.filter((folder) => !doomedSet.has(folder.id));
@@ -199,21 +216,19 @@ export function createMockBackend(db: MockDatabase): Backend {
 
     tags_list: () =>
       state.tags
-        .map((tag) => ({
-          id: tag.id,
-          name: tag.name,
-          count: state.notes.filter((note) => note.deletedAt === null && tagIdSet(note).has(tag.id))
-            .length,
-        }))
+        .map((tag) => ({ id: tag.id, name: tag.name, count: countNotes(state, tag.id) }))
+        // A tag whose notes are all in the trash is hidden, matching
+        // `03-data-model.md` §5: an empty filter in the sidebar is noise.
         .filter((tag) => tag.count > 0)
         .sort((a, b) => a.name.localeCompare(b.name)),
 
     tags_create: ({ name }) => {
-      const existing = state.tags.find((tag) => foldCase(tag.name) === foldCase(name.trim()));
+      const clean = requireName(name, 'Give the tag a name.');
+      const existing = state.tags.find((tag) => foldCase(tag.name) === foldCase(clean));
       if (existing !== undefined) {
-        return { ...existing, count: 0 };
+        return { ...existing, count: countNotes(state, existing.id) };
       }
-      const tag = { id: uuidFrom(`t-${name.trim()}`), name: name.trim() };
+      const tag = { id: uuidFrom(`t-${clean}`), name: clean };
       state.tags.push(tag);
       return { ...tag, count: 0 };
     },
@@ -223,14 +238,14 @@ export function createMockBackend(db: MockDatabase): Backend {
       if (tag === undefined) {
         throw notFound();
       }
-      tag.name = name.trim();
-      const count = state.notes.filter(
-        (note) => note.deletedAt === null && tagIdSet(note).has(tag.id),
-      ).length;
-      return { ...tag, count };
+      tag.name = requireName(name, 'Give the tag a name.');
+      return { ...tag, count: countNotes(state, tag.id) };
     },
 
     tags_delete: ({ id }) => {
+      if (!state.tags.some((tag) => tag.id === id)) {
+        throw notFound();
+      }
       state.tags = state.tags.filter((tag) => tag.id !== id);
       state.notes = state.notes.map((note) =>
         note.tagIds.includes(id)
@@ -293,6 +308,35 @@ export function createMockBackend(db: MockDatabase): Backend {
   }
 
   return { invoke };
+}
+
+/// Sibling-local positions are densified on every move, so the list never
+/// accumulates gaps. A no-op move leaves siblings untouched.
+function densifyFolders(db: MockDatabase, parentId: Uuid | null, movingId: Uuid, target: number): void {
+  const siblings = db.folders
+    .filter((folder) => folder.parentId === parentId && folder.id !== movingId)
+    .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+
+  const index = Math.max(0, Math.min(target, siblings.length));
+  const ordered = [...siblings];
+  ordered.splice(index, 0, db.folders.find((folder) => folder.id === movingId) as MockFolder);
+
+  ordered.forEach((folder, position) => {
+    folder.position = position;
+  });
+}
+
+/// Trashed notes never count towards a tag, on either the Rust or the mock side.
+function countNotes(db: MockDatabase, tagId: Uuid): number {
+  return db.notes.filter((note) => note.deletedAt === null && note.tagIds.includes(tagId)).length;
+}
+
+function requireName(raw: string, message: string): string {
+  const clean = raw.trim();
+  if (clean.length === 0) {
+    throw validation(message);
+  }
+  return clean;
 }
 
 function collectSubtree(db: MockDatabase, rootId: Uuid): Uuid[] {

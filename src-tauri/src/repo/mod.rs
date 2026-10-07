@@ -16,14 +16,30 @@ pub mod folders;
 pub mod notes;
 pub mod tags;
 
+/// `{"kind": "all"}`, `{"kind": "folder", "id": "..."}` — an internally tagged
+/// enum, matching the discriminated union in `src/types/ipc.ts` and the `?S`
+/// / `?1` binding shape in `services/search.rs`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Selection {
     All,
     Pinned,
     Folder { id: Uuid },
     Tag { id: Uuid },
     Trash,
+}
+
+impl Selection {
+    /// The tag this variant serialises with.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Pinned => "pinned",
+            Self::Folder { .. } => "folder",
+            Self::Tag { .. } => "tag",
+            Self::Trash => "trash",
+        }
+    }
 }
 
 /// The single selection model: exactly one of all, pinned, folder, tag or

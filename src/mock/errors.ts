@@ -15,3 +15,11 @@ export function notFound(): MockBackendError {
 export function cycleDetected(): MockBackendError {
   return new MockBackendError('CYCLE_DETECTED', 'A folder cannot be moved inside itself.');
 }
+
+export function validation(message: string): MockBackendError {
+  return new MockBackendError('VALIDATION', message);
+}
+
+export function docInvalid(): MockBackendError {
+  return new MockBackendError('DOC_INVALID', 'This note could not be opened.');
+}

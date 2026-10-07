@@ -4,7 +4,9 @@ import type { TagWithCount } from './tag';
 import type { SearchInput, SearchPage } from './search';
 
 /* Domain shapes crossing the IPC boundary. Rust structs carry
-   #[serde(rename_all = "camelCase")], so every field is camelCase here. */
+   #[serde(rename_all = "camelCase")], so every field is camelCase here.
+   `Selection` and `NoteFilter` are `#[serde(flatten)]` on the Rust side, so
+   they serialise as `{"kind": "folder", "id": "..."}` rather than nested. */
 
 export type SelectionKind = 'all' | 'pinned' | 'folder' | 'tag' | 'trash';
 
