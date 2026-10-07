@@ -41,7 +41,9 @@ chayote/
 │   │   ├── relativeTime.ts
 │   │   └── sanitize.ts                # DOMPurify config
 │   ├── mock/                          # browser fallback backend, never imported by components
-│   │   ├── adapter.ts
+│   │   ├── adapter.ts                 # implements every command in 02-architecture.md §7
+│   │   ├── derive.ts                  # title, excerpt, word_count over JsonDoc
+│   │   ├── errors.ts                  # MockBackendError carrying the AppError code
 │   │   ├── fixtures.ts
 │   │   └── generate.ts                # 10 000-note generator for scroll tests
 │   ├── types/                         # shared domain types
@@ -80,14 +82,15 @@ chayote/
 │   │   ├── ConfirmDialog.tsx
 │   │   ├── SettingsDialog.tsx
 │   │   ├── IconButton.tsx             # icon + optional aria-label, 32/44px hit area
+│   │   ├── EmptyState.tsx             # title + cause + optional action, 05-ui-ux.md §8
 │   │   └── ThemeToggle.tsx
 │   ├── layout/
 │   │   ├── DesktopLayout.tsx
 │   │   ├── MobileLayout.tsx
 │   │   └── viewStack.ts               # in-app navigation stack
 │   ├── styles/
-│   │   ├── tokens.css                 # design tokens from 05-ui-ux.md §3, incl. --accent-preset-1..6
-│   │   ├── base.css
+│   │   ├── tokens.css                 # values copied from prototype/index.html, incl. --accent-preset-1..6
+│   │   ├── base.css                   # Tailwind v4 @theme mapping, .icon and .i-* size classes
 │   │   └── editor.css                 # ProseMirror styles
 │   └── queries/                       # TanStack Query keys and options
 │       └── keys.ts
@@ -99,8 +102,7 @@ chayote/
     ├── migrations/
     │   ├── 0001_initial.sql
     │   ├── 0002_fts.sql
-    │   ├── 0003_outbox.sql
-    │   └── 0004_note_title_source.sql
+    │   └── 0003_outbox.sql
     └── src/
         ├── main.rs
         ├── lib.rs
@@ -181,9 +183,9 @@ export const notesApi = {
 
 Every command's input is a single named argument so that adding a field is not a breaking change. Every command validates its input in Rust before touching storage, and returns a serialisable struct with `camelCase` fields; the Rust structs carry `#[serde(rename_all = "camelCase")]`.
 
-The mock adapter implements the same command names against in-memory fixtures. It is selected when `'__TAURI_INTERNALS__' in window` is false. Rules:
+The mock adapter implements the same command names against in-memory fixtures. It is selected in a dev build when `'__TAURI_INTERNALS__' in window` is false; in any other case the real Tauri adapter is used. Rules:
 
-- The mock lives in `src/lib/mock/`, never in a component.
+- The mock lives in `src/mock/`, never in a component.
 - It must return realistic data: nested folders, notes with and without tags, pinned and unpinned, empty collections, and a generator for 10 000 notes used only by scroll tests.
 - A production build must fail loudly if the mock is reachable, rather than silently shipping a fake backend.
 

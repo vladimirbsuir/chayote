@@ -2,7 +2,7 @@
 
 **Status:** Frozen. Last updated 2026-10-07.
 
-**Current position: M0, not started.** Nothing has been implemented. Work proceeds in order; a milestone is not "mostly done".
+**Current position: M1, not started.** M0 shipped on 2026-10-07; the frontend scaffold, design tokens, icon layer, IPC seam with its mock backend, Playwright smoke test and CI are in place. Work proceeds in order; a milestone is not "mostly done".
 
 ---
 
@@ -53,7 +53,7 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 
 - `rusqlite` with the `bundled` feature; `Database` struct with pragmas from `03-data-model.md` §2.
 - Migration runner: numbered files, forward-only, transactional, tracked in `schema_migrations` (**R8**).
-- Migrations `0001`–`0004` as specified in `03-data-model.md` §6.
+- Migrations `0001`–`0003` as specified in `03-data-model.md` §6.
 - Repository traits `NotesRepo`, `FoldersRepo`, `TagsRepo`.
 - `SqliteNotesRepo` with the queries from `03-data-model.md` §5.
 - Derivation: `title`, `plain_text`, `excerpt`, `word_count` in one transaction with the row write (**R9**).
@@ -208,27 +208,20 @@ Each of these was resolved conservatively. Revisit the moment implementation pro
 | Q5 | Remember collapsed folder-tree state per folder | **Open** | Yes, persist per folder in settings. Cheap, and losing it on every launch is annoying | M4 |
 | Q6 | Accent palette: one configurable colour, or presets plus custom | **Open** | Six presets plus a custom colour picker | M6 |
 | Q7 | Should pinning be visible as a dedicated filter, or only as an ordering? | **Open** | Both — a "Pinned" filter, as specified in `05-ui-ux.md` §5 | M3 |
-| Q8 | Repository directory rename from `notes` to `chayote` | **Answered** — attempted, **blocked by a file lock** | — | Manual step, see below |
+| Q8 | Repository directory rename from `notes` to `chayote` | **Answered** — done, the directory is `D:\Projects\chayote` | — | Resolved |
 
 **None of the open questions blocks M0.** Each has a documented default that can be implemented and changed later without a migration.
 
-### Q8 — manual step required
+### Q8 — resolved
 
-Renaming `D:\Projects\notes` to `D:\Projects\chayote` failed with a file-lock error: the directory is the active working directory of an open shell, and Windows will not rename a directory that is in use. Close any shell, editor, or file watcher with that directory open, then run:
-
-```powershell
-cd D:\Projects
-Rename-Item -LiteralPath "notes" -NewName "chayote"
-```
-
-Nothing in the specification depends on the directory name. If the rename is inconvenient, skip it — the identifier that matters for Android signing is `com.chayote.app`, which is already fixed.
+The directory is `D:\Projects\chayote`. The rename succeeded after the shells holding the old path were closed. Nothing in the specification depended on the directory name; the identifier that matters for Android signing is `com.chayote.app`, fixed in ADR-012.
 
 ## 7. Progress tracker
 
 | Milestone | Status | Notes |
 |-----------|--------|-------|
-| M0 | Not started | Unblocked. Node/Rust/JDK present, Android SDK missing (M7 only) |
-| M1 | Not started | |
+| M0 | **Done** | 2026-10-07. Scaffold, tokens, icon layer, `ipc.ts` + mock, Playwright, CI. Gates clean. `docs/02-architecture.md` §1.1 version floors updated to TS 6 / Vite 8 / Vitest 5 / uuid 14 |
+| M1 | **Next** | Unblocked. Data layer: `rusqlite`, migrations, repository traits |
 | M2 | Not started | |
 | M3 | Not started | Q2, Q4, Q7 have defaults. Playwright suite starts here |
 | M4 | Not started | Q5 has a default |

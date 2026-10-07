@@ -18,14 +18,14 @@ That does not mean a human is never needed. It means the human's attention is sp
 
 ## 2. What an agent can and cannot verify alone
 
-Measured on the development machine, 2026-10-07:
+Measured on the development machine, 2026-10-07. Re-measured at the end of M0:
 
 | Capability | Available | Notes |
 |------------|-----------|-------|
-| Node.js 24, npm 11 | Yes | |
+| Node.js 24.16, npm 11.9 | Yes | |
 | Rust 1.94 stable | Yes | |
-| Git 2.50 | Yes | |
-| Chromium for Playwright | **Yes** — `ms-playwright/chromium-1234` installed | Enables real browser automation and screenshots |
+| Git 2.50 | Yes | Repository initialised at M0 |
+| Chromium for Playwright | **Yes** | `npx playwright install chromium` must have been run for the installed `@playwright/test` revision; a version bump requires running it again |
 | Screen capture of a native window | **Yes** — `System.Drawing` available | Enables capturing the actual Tauri window |
 | JDK 21 | Yes | Sufficient for Android Gradle builds |
 | Android SDK / `adb` | **No** | `ANDROID_HOME` and `ANDROID_SDK_ROOT` both empty |
@@ -105,6 +105,8 @@ Approach, in increasing cost:
 3. **Pixel diffing against the prototype.** Possible but brittle — the prototype and the app will never be pixel-identical, since the prototype is static and the app is live. Only worth doing once the app is stable, and only for the chrome, not the editor.
 
 **Recommendation: do level 1 from M3, level 2 from M6.** Level 3 is probably not worth the maintenance. A brittle visual test that fails on an inconsequential 1 px difference trains people to ignore it.
+
+`e2e/capture.spec.ts` implements level 2 from M0. It writes to `screenshots/`, which is committed, so a reviewer can compare states between runs by eye.
 
 ## 5. Gates per milestone
 

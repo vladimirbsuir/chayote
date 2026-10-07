@@ -386,7 +386,6 @@ src-tauri/migrations/
   0001_initial.sql        -- folders, notes, tags, note_tags
   0002_fts.sql            -- notes_fts + triggers
   0003_outbox.sql         -- outbox, trash_snapshots
-  0004_note_title_source.sql
 ```
 
 Rules:
@@ -395,6 +394,7 @@ Rules:
 2. Every migration is idempotent where SQLite allows it: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE TRIGGER IF NOT EXISTS`. `ALTER TABLE ADD COLUMN` is not idempotent — guard it with a `PRAGMA table_info` check in Rust before running it.
 3. A migration that changes an indexed column must run `INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')` at the end.
 4. A migration must never rewrite the `notes` table with `DROP`/`CREATE`. The FTS triggers reference `notes` by name and `rowid`; recreating the table invalidates the external-content mapping and requires a full rebuild.
+5. `notes.title_source` ships in `0001_initial.sql`. It was previously listed as `0004_note_title_source.sql`, which would have been a no-op migration against the schema in §3.3. `03-data-model.md` §6 and `10-conventions.md` §1 agree now: three migrations, not four.
 
 ## 7. Migration path to Postgres
 

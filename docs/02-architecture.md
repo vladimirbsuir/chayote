@@ -8,11 +8,14 @@
 
 ### 1.1 Frontend
 
+Versions are floors, not pins: install the current stable major and move the
+number here in the same commit. Updated at M0 on 2026-10-07.
+
 | Concern | Choice | Version | Note |
 |---------|--------|---------|------|
-| Language | TypeScript | 5.x | `strict: true`, no `any` in app code |
+| Language | TypeScript | 6.x | `strict: true`, `noUncheckedIndexedAccess`, no `any` in app code |
 | UI library | React | 19.x | |
-| Build tool | Vite | 7.x | Tauri uses it as the dev server |
+| Build tool | Vite | 8.x | Tauri uses it as the dev server |
 | Editor | TipTap | 3.x | Verify current stable at install |
 | Editor core | ProseMirror | via TipTap | |
 | Styling | Tailwind CSS | 4.x | Tokens via CSS custom properties, see `05-ui-ux.md` |
@@ -20,9 +23,9 @@
 | Fonts | `@fontsource/inter` | latest | Bundled locally, no network fetch |
 | Server-state | TanStack Query | 5.x | Wraps the Rust repository commands; see §5 |
 | UI state | Zustand | 5.x | Theme, sidebar, selection, editor prefs |
-| IDs | `uuid` (v7) | 11.x | Time-ordered, client-generated |
+| IDs | `uuid` (v7) | 14.x | Time-ordered, client-generated |
 | Dates | plain `number` (epoch ms) | — | No date library in v1 |
-| Tests | Vitest | 3.x | |
+| Tests | Vitest | 5.x | |
 
 ### 1.2 Backend (Rust)
 

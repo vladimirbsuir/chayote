@@ -18,8 +18,8 @@ They change together — see ADR-016.
 | Bundle identifier | **`com.chayote.app`** |
 | Database filename | `chayote.db` |
 | Licence | MIT (`LICENSE`) |
-| Current milestone | **M0** — scaffold, not started, unblocked |
-| Git repository | **Not initialised** — see §6 |
+| Current milestone | **M1** — data layer, unblocked |
+| Git repository | **Initialised**, `main` buildable, work on topic branches |
 | Android SDK | **Missing** — blocks M7 only, see `docs/11-verification.md` §2 |
 
 ---
@@ -58,12 +58,12 @@ Three documents carry the weight and are worth more attention than the rest: `02
 | Stack and v1 scope | **Decided** |
 | Sync architecture direction | **Decided** (Supabase/Postgres, local-first) |
 | Sync implementation | **Not started** — architecture only, see §5 |
-| Specification | **Complete**, 10 documents |
+| Specification | **Complete**, 11 documents |
 | UI prototype | **Complete and approved** — `prototype/index.html` |
-| Application code | **Not started** |
-| Current milestone | **M0** — scaffold, unblocked |
+| Application code | **M0 complete** — scaffold, tokens, icon layer, IPC seam |
+| Current milestone | **M1** — data layer, unblocked |
 
-**M0 is next.** It is unblocked: the bundle identifier is fixed and every open question in `docs/08-roadmap.md` §6 has a documented default. One manual step remains: renaming the directory to `chayote`, see §6.
+**M1 is next.** M0 shipped: `npm run tauri dev` shows the window, `npm run dev` runs the frontend in a browser through the mock backend, and the gate commands are clean. The repository directory is already named `chayote`; the Android SDK is still missing and blocks M7 only, see §7.
 
 ---
 
@@ -222,30 +222,16 @@ on `docs/07-sync-plan.md`, which would otherwise cost a rewrite of the write pat
 chayote/
 ├── README.md                  ← you are here; also the agent onboarding doc (§4)
 ├── LICENSE                    ← MIT
-├── docs/                      ← specification, 10 documents
+├── docs/                      ← specification, 11 documents
 ├── prototype/index.html       ← visual source of truth, permanent (ADR-016)
-├── src/                       ← React frontend (not created yet)
-├── src-tauri/                 ← Rust backend (not created yet)
-└── package.json, vite.config.ts, tsconfig.json, Cargo.toml (not created yet)
+├── src/                       ← React frontend
+├── src-tauri/                 ← Rust backend
+└── package.json, vite.config.ts, tsconfig.json, src-tauri/Cargo.toml
 ```
 
-## 6. Manual steps outstanding
+The authoritative layout is `docs/10-conventions.md` §1. This is a summary.
 
-Two things cannot be done from inside a working session, because they touch the
-filesystem and the machine's toolchain.
-
-**Rename the directory.** Windows will not rename a directory that is the
-working directory of an open shell. Close every shell, editor, and file watcher
-pointed at it, then:
-
-```powershell
-cd D:\Projects
-Rename-Item -LiteralPath "notes" -NewName "chayote"
-```
-
-If it is inconvenient, skip it. Nothing in the specification depends on the
-directory name — only the two prompts in §4.2 mention the path. The identifier
-that matters for Android signing is `com.chayote.app`, already fixed in ADR-012.
+## 7. Manual steps outstanding
 
 **Install the Android toolchain.** Required before M7, and only M7. Details and
 the exact commands are in `docs/11-verification.md` §3.5. M0–M6 and M8 are
