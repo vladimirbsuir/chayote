@@ -1,6 +1,6 @@
 # 02 — Architecture
 
-**Status:** Frozen. Last updated 2026-10-07.
+**Status:** Frozen. Last updated 2026-10-08.
 
 ---
 
@@ -205,8 +205,17 @@ Tauri commands exposed to the frontend. This is the complete API for v1; adding 
 | `tags_rename` | `{ id, name }` | `TagWithCount` |
 | `tags_delete` | `id` | `()` |
 | `search_query` | `SearchInput { query, filter, limit, offset }` | `SearchPage` |
+| `window_ready` | `()` | `()` |
 
 Settings are read and written with `@tauri-apps/plugin-store`, not with a command.
+
+**`window_ready`.** The one command that is not about data. `06-platform.md` §1
+requires the window to be created hidden and shown after the frontend's first
+paint, so the user never sees a white frame. The frontend calls it once, after
+mount; Rust shows the window. It is on this table because `invoke` appears in
+exactly one file (`10-conventions.md` §5), so every command the frontend can
+reach belongs here. Outside Tauri the mock acknowledges it and does nothing
+(ADR-018).
 
 **Identifiers.** R1 says primary keys are generated "on the client". In this
 table `notes_create` takes only `folder_id` and returns a `Note`, so the
