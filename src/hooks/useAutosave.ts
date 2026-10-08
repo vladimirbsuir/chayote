@@ -106,6 +106,12 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
 
   return {
     noteChanged: (target) => {
+      /* ProseMirror fires `update` while it normalises the initial content, so a
+         freshly opened note reaches here with a document nobody changed. Marking
+         that unsaved would show "Unsaved changes" on a note the user has not
+         touched, which is the one status the bar must never lie about. */
+      if (JSON.stringify(target.doc) === lastSaved) return;
+
       queued = target;
       markUnsaved(target.id);
       scheduleSave(target);

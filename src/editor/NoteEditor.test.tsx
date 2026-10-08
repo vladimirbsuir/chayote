@@ -29,6 +29,7 @@ function mount(doc: JsonDoc): Mounted {
       doc={doc}
       editable
       onChange={() => {}}
+      onFlush={() => {}}
       onReady={(editor) => {
         mounted.editor = editor;
       }}
@@ -109,6 +110,7 @@ describe('NoteEditor', () => {
         }}
         editable
         onChange={() => {}}
+      onFlush={() => {}}
         onReady={() => {}}
         onDispose={() => {}}
       />,
@@ -134,6 +136,7 @@ describe('NoteEditor', () => {
         }}
         editable
         onChange={() => {}}
+      onFlush={() => {}}
         onReady={() => {}}
         onDispose={() => {}}
       />,
@@ -151,6 +154,7 @@ describe('NoteEditor', () => {
         doc={{ type: 'doc', content: [{ type: 'paragraph' }] }}
         editable
         onChange={() => {}}
+      onFlush={() => {}}
         onReady={() => {}}
         onDispose={() => {}}
       />,
@@ -170,6 +174,7 @@ describe('NoteEditor', () => {
         doc={{ type: 'doc', content: [{ type: 'heading', attrs: { level: 2 } }] }}
         editable
         onChange={() => {}}
+      onFlush={() => {}}
         onReady={() => {}}
         onDispose={() => {}}
       />,

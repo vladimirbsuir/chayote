@@ -10,6 +10,7 @@ type NoteEditorProps = {
   doc: JsonDoc;
   editable: boolean;
   onChange: (editor: Editor) => void;
+  onFlush: () => void;
   onReady: (editor: Editor) => void;
   onDispose: () => void;
 };
@@ -24,10 +25,22 @@ type NoteEditorProps = {
  * before the replacement editor mounts, so the outgoing document is still the
  * one on screen and `06-platform.md` §3.2's "flush, then close" has a real hook.
  *
+ * Blur is `onFlush`, not `onChange`. ProseMirror fires blur on mount when
+ * `autofocus` settles, and routing that through `onChange` would put "Unsaved
+ * changes" on a note nobody has touched. The autosave's serialisation check
+ * would skip the write; the status bar would still lie.
+ *
  * §2.1 `immediatelyRender: false` keeps construction out of render, which is
  * what makes the same component usable under StrictMode and in jsdom.
  */
-export function NoteEditor({ doc, editable, onChange, onReady, onDispose }: NoteEditorProps) {
+export function NoteEditor({
+  doc,
+  editable,
+  onChange,
+  onFlush,
+  onReady,
+  onDispose,
+}: NoteEditorProps) {
   const editor = useEditor({
     extensions: EDITOR_EXTENSIONS,
     content: doc,
@@ -39,8 +52,8 @@ export function NoteEditor({ doc, editable, onChange, onReady, onDispose }: Note
     onUpdate: ({ editor: current }) => {
       onChange(current);
     },
-    onBlur: ({ editor: current }) => {
-      onChange(current);
+    onBlur: () => {
+      onFlush();
     },
   });
 

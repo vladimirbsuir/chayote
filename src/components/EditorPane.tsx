@@ -187,6 +187,9 @@ export function EditorPane({ noteId, selectionKey }: EditorPaneProps) {
               doc={data.doc}
               editable
               onChange={onChange}
+              onFlush={() => {
+                void autosave.flush();
+              }}
               onReady={onReady}
               onDispose={onDispose}
             />
