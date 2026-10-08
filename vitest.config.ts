@@ -9,6 +9,7 @@ export default defineConfig({
     // jsdom everywhere: the settings store falls back to `localStorage`
     // outside Tauri, and that fallback is part of what is under test.
     environment: 'jsdom',
+    setupFiles: ['src/test/setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },
 });

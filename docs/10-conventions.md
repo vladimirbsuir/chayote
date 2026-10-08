@@ -47,6 +47,8 @@ chayote/
 │   │   ├── errors.ts                  # MockBackendError carrying the AppError code
 │   │   ├── fixtures.ts
 │   │   └── generate.ts                # 10 000-note generator for scroll tests
+│   ├── test/
+│   │   └── setup.ts                   # jsdom range/layout stubs ProseMirror needs
 │   ├── types/                         # shared domain types
 │   │   ├── note.ts
 │   │   ├── folder.ts
