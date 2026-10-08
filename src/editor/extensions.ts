@@ -4,11 +4,22 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { ReactNodeViewRenderer } from '@tiptap/react'
+import { TaskItemView } from './TaskItemView'
 
 /* The node and mark set is fixed by `04-editor.md` §1.2. Node names must match
    the Rust validator in `src-tauri/src/doc/validate.rs`, because the document in
    SQLite is exactly what this schema produces. Adding a node here without adding
-   it to that validator — and to §1.2 in the same commit — is a storage bug. */
+   it to that validator — and to §1.2 in the same commit — is a storage bug.
+
+   `TaskItem` is extended, not configured, so the node view can be ours. The node
+   name and the `checked` attribute are unchanged; only the rendering is. */
+
+const TaskItemWithCheckbox = TaskItem.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(TaskItemView)
+  },
+})
 
 /* `05-ui-ux.md` §7, editor-local bindings. TipTap merges every extension's
    shortcuts into one keymap, later extensions winning, so this extension has to
@@ -60,7 +71,7 @@ export const EDITOR_EXTENSIONS = [
     undoRedo: { depth: 200, newGroupDelay: 500 },
   }),
   TaskList,
-  TaskItem.configure({ nested: true }),
+  TaskItemWithCheckbox.configure({ nested: true }),
   Typography,
   EditorShortcuts,
   Placeholder.configure({
