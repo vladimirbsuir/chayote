@@ -9,18 +9,20 @@
 ### 1.1 Frontend
 
 Versions are floors, not pins: install the current stable major and move the
-number here in the same commit. Updated at M0 on 2026-10-07.
+number here in the same commit. Updated at M0 on 2026-10-07, at M2 on 2026-10-08
+for the editor stack.
 
 | Concern | Choice | Version | Note |
 |---------|--------|---------|------|
 | Language | TypeScript | 6.x | `strict: true`, `noUncheckedIndexedAccess`, no `any` in app code |
 | UI library | React | 19.x | |
 | Build tool | Vite | 8.x | Tauri uses it as the dev server |
-| Editor | TipTap | 3.x | Verify current stable at install |
-| Editor core | ProseMirror | via TipTap | |
+| Editor | TipTap | 3.x | Installed at M2 as 3.31.4 |
+| Editor core | ProseMirror | via TipTap | `@tiptap/pm` |
 | Styling | Tailwind CSS | 4.x | Tokens via CSS custom properties, see `05-ui-ux.md` |
 | Icons | `lucide-react` | latest | Stroke-only vectors, bundled at build time. **No emoji.** See `05-ui-ux.md` §3.3, ADR-015 |
 | Fonts | `@fontsource/inter` | latest | Bundled locally, no network fetch |
+| Paste sanitisation | `dompurify` | 3.x | Installed at M2 as 3.4.16. Allowlist per `04-editor.md` §4.1 |
 | Server-state | TanStack Query | 5.x | Wraps the Rust repository commands; see §5 |
 | UI state | Zustand | 5.x | Theme, sidebar, selection, editor prefs |
 | IDs | `uuid` (v7) | 14.x | Time-ordered, client-generated |
