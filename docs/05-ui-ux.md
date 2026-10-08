@@ -347,11 +347,22 @@ Settings live in the Tauri store, never in the notes database, so resetting or s
 | Toggle pin | `Ctrl/Cmd+D` |
 | Toggle task complete | `Ctrl/Cmd+Enter` |
 | Undo / redo | `Ctrl/Cmd+Z` · `Ctrl/Cmd+Shift+Z` |
-| Bold / italic / strike / code | `Ctrl/Cmd+B` · `I` · `S` · `E` |
+| Bold / italic / strike / code | `Ctrl/Cmd+B` · `I` · `Shift+X` · `E` |
 | Move focus: sidebar → editor | `Ctrl/Cmd+Enter` (from the list) |
 | Dismiss: search, dialog, sidebar | `Esc` |
 
 Inside the editor, `Tab` inserts two spaces inside `codeBlock` and indents list items; `Shift+Tab` outdents; `Tab` in a paragraph inserts two spaces, which keeps focus inside the editor and never cycles focus rings. Escape is deliberately unbound in the editor. Standard text navigation keys are untouched, including `Ctrl/Cmd+A`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`, `Ctrl/Cmd+X`.
+
+**Strike is `Ctrl/Cmd+Shift+X`, not `Ctrl/Cmd+S`.** An earlier revision of this
+table assigned `Ctrl/Cmd+S` to both *Save now* and *strike*. Save now wins: it is
+a deliberate escape hatch from the 800 ms debounce (`04-editor.md` §5.1), and
+binding it to a formatting mark would make it unreachable. `Shift+X` is also what
+Google Docs uses for the same mark, so the muscle memory is the same.
+
+The four mark shortcuts need editor commands rather than raw keystrokes, so they
+live in the `EditorShortcuts` extension in `src/editor/extensions.ts` and not in
+`editorProps` (`04-editor.md` §2.1). TipTap 3 ships no default keymap for bold,
+italic, or strike, so all four are bound explicitly.
 
 On Android, external keyboards should work. The software keyboard shows a `done` action that closes it rather than a newline, since the editor's block behaviour makes a return key less useful than on desktop.
 

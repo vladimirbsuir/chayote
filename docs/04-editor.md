@@ -72,13 +72,16 @@ A document violating any of these is rejected with `AppError::DOC_INVALID` and t
 ## 2. TipTap configuration
 
 ```ts
+import { Extension } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 
-export const extensions = [
+const EditorShortcuts = Extension.create({ /* §7 bindings */ })
+
+export const EDITOR_EXTENSIONS = [
   StarterKit.configure({
     heading: { levels: [1, 2, 3] },
     codeBlock: { HTMLAttributes: { class: 'code-block' } },
@@ -86,10 +89,12 @@ export const extensions = [
     gapcursor: false,
     link: false,
     trailingNode: false,
+    undoRedo: { depth: 200, newGroupDelay: 500 },
   }),
   TaskList,
   TaskItem.configure({ nested: true }),
   Typography,
+  EditorShortcuts,
   Placeholder.configure({
     placeholder: ({ node }) =>
       node.type.name === 'heading' ? 'Heading' : "Write something…",
@@ -105,6 +110,24 @@ Notes:
 - `trailingNode: false` — prevents an always-present empty paragraph at the end, which would otherwise be picked up as the note title.
 - `link: false` — StarterKit ships with a link module; it must be off in v1 (§1.2).
 - `showOnlyCurrent: true` — the placeholder must not appear in every empty list item at once.
+- `undoRedo` — TipTap 3 renamed the history extension; `depth` and
+  `newGroupDelay` are the §6 values. `newGroupOnInputRule` is `true` by
+  default in this version.
+- **`EditorShortcuts`** is this project's own extension, carrying the
+  editor-local bindings from `05-ui-ux.md` §7 that need editor commands rather
+  than a raw view: the four marks, `Ctrl/Cmd+Enter` for a task item, and `Tab` /
+  `Shift+Tab`. It must come **after** StarterKit, because TipTap merges every
+  extension's shortcuts into one keymap and a later extension wins. That is why
+  it re-implements the list half of `Tab` rather than inheriting StarterKit's
+  `listKeymap`.
+
+Clipboard out (§4.3) is not in this array. ProseMirror's
+`clipboardTextSerializer` is a TipTap **core** extension, configured through the
+editor options:
+
+```ts
+coreExtensionOptions: { clipboardTextSerializer: { blockSeparator: '\n\n' } },
+```
 
 ### 2.1 EditorProps
 
@@ -114,17 +137,30 @@ const editorProps: EditorProps = {
     class: 'note-editor',
     spellcheck: 'true',
     autocapitalize: 'sentences',
+    role: 'textbox',
+    'aria-multiline': 'true',
+    'aria-label': 'Note content',
     'data-testid': 'note-editor',
   },
-  handleKeyDown: (view, event) => { /* see 05-ui-ux.md §7 */ return false },
-  handlePaste: (view, event) => { /* see §4 */ return true },
   handleDrop: () => false,
+  handlePaste: (view, event) => /* §4.1 rule 8: consume an empty paste */,
   transformPastedHTML: (html) => sanitizeAndNormalize(html),
   transformPastedText: (text) => textToParagraphs(text),
 }
 ```
 
 `handleDrop: () => false` prevents ProseMirror from attempting to drop nodes from outside the editor. v1 has no draggable block handles, and an accidental drop of foreign content should not mutate the document.
+
+`handleKeyDown` is **not** part of `editorProps`. The shortcuts in
+`05-ui-ux.md` §7 need editor commands, and a keymap binding is the only place
+that gets them; `EditorShortcuts` in `src/editor/extensions.ts` is that place.
+
+`handlePaste` exists for one reason. Rules 1–7 fall out of
+`transformPastedHTML` and `transformPastedText` plus DOMPurify, but rule 8 — an
+empty paste inserts nothing and leaves the selection untouched — is not something
+the parser infers. Returning `true` from `handlePaste` consumes the event and
+leaves the document and the selection alone; returning `false` hands the
+already-sanitised markup back to ProseMirror, which does the insert.
 
 ## 3. Input rules (Markdown shortcuts)
 
