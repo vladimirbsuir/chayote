@@ -62,6 +62,7 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 - Tauri commands from `02-architecture.md` §7, with `AppError` (**R7**).
 - Settings store via `@tauri-apps/plugin-store`.
 - **Done when:** `cargo test` covers every repository method, UUIDv7 IDs are generated, and a test asserts that a failed write leaves no orphan outbox row.
+- **Shipped 2026-10-07.** Every item above is in place. 33 Rust tests, including all eight required tests from `10-conventions.md` §10 that apply to this milestone. One item shipped differently from the plan above: `services/` holds derivation and search rather than a module per entity, because the business logic of a write is the transaction in `repo/`.
 
 ### M2 — Editor
 
