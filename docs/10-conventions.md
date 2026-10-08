@@ -1,6 +1,6 @@
 # 10 — Engineering Conventions
 
-**Status:** Frozen. Last updated 2026-10-07.
+**Status:** Frozen. Last updated 2026-10-08.
 
 ---
 
@@ -70,6 +70,7 @@ chayote/
 │   │   ├── editorProps.ts
 │   │   ├── pasteSanitizer.ts
 │   │   ├── clipboardSerializer.ts
+│   │   ├── TaskItemView.tsx            # task-checkbox node view; ADR-015 check icon
 │   │   └── NoteEditor.tsx
 │   ├── components/                    # presentational, one responsibility each
 │   │   ├── TopBar.tsx

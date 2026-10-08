@@ -1,8 +1,11 @@
 # 08 — Roadmap
 
-**Status:** Frozen. Last updated 2026-10-07.
+**Status:** Frozen. Last updated 2026-10-08.
 
-**Current position: M2, not started.** M0 and M1 shipped on 2026-10-07: the frontend scaffold, design tokens, icon layer, IPC seam with its mock backend, and the full data layer behind repository traits. Work proceeds in order; a milestone is not "mostly done".
+**Current position: M3, not started.** M0, M1, and M2 shipped on 2026-10-07 and
+2026-10-08: the frontend scaffold, the data layer behind repository traits, and
+the editor with autosave, paste sanitisation, and the §7 key bindings. Work
+proceeds in order; a milestone is not "mostly done".
 
 ---
 
@@ -76,6 +79,16 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 - Placeholder per node type.
 - `05-ui-ux.md` §7 editor shortcuts: bold, italic, strike, code, task toggle, Tab behaviour.
 - **Done when:** paste from Word, Google Docs, and plain text all produce clean documents; a hard kill within 800 ms of typing loses at most the debounce window, verified by an automated test.
+- **Shipped 2026-10-08.** Every item above is in place: TipTap 3.31 with the §2 extension set, a node view for the task checkbox, `useAutosave` as a controller, the status bar, DOMPurify paste sanitisation, `clipboardTextSerializer` as a core option, and the §7 bindings. 65 TypeScript tests and 22 Playwright tests; the three `10-conventions.md` §10 tests that apply here are the paste-sanitisation one, the undo-per-note one, and the editor-keyboard coverage in `e2e/editor.spec.ts`.
+
+  Four things shipped differently from the plan, each recorded in `04-editor.md`:
+
+  - **`transformPastedText` is not used.** ProseMirror treats its return value as text, so §4.1 rule 7 is built as a `Slice` in `handlePaste`. §2.1 now says so.
+  - **`handleDrop` returns `true`, not `false`.** The sketch had the polarity backwards relative to the intent in the same paragraph. §2.1 records the correction.
+  - **`EditorShortcuts` is an extension**, not `EditorProps.handleKeyDown`, because the §7 bindings need editor commands and must come after StarterKit to take `Tab` over from `listKeymap`.
+  - **The status bar ships title, word count, and save state.** The folder and tag elements of §9 of `04-editor.md` need M4's data and land with it, rather than as controls that do nothing.
+
+  **Outstanding:** the hard-kill half of "Done when". The frontend half is covered — a save commits within the debounce, and `03-data-model.md` §2's WAL and `synchronous = NORMAL` are asserted by the Rust tests. Killing the real process and checking the file needs the native window (`11-verification.md` §3.4), so it is a human check, not an automated one.
 
 ### M3 — UI shell
 
@@ -223,9 +236,9 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 |-----------|--------|-------|
 | M0 | **Done** | 2026-10-07. Scaffold, tokens, icon layer, `ipc.ts` + mock, Playwright, CI. Gates clean. `docs/02-architecture.md` §1.1 version floors updated to TS 6 / Vite 8 / Vitest 5 / uuid 14 |
 | M1 | **Done** | 2026-10-07. `rusqlite`, migrations 0001–0003, repository traits, `AppError`, settings store, 33 Rust tests + 29 TS tests |
-| M2 | **Next** | Unblocked. Editor: TipTap, autosave, paste, input rules |
-| M3 | Not started | Q2, Q4, Q7 have defaults. Playwright suite starts here |
-| M4 | Not started | Q5 has a default |
+| M2 | **Done** | 2026-10-08. TipTap 3.31, paste sanitisation, `clipboardTextSerializer`, autosave controller, status bar, task-checkbox node view. 65 TS tests + 22 Playwright tests. Four deviations from the plan recorded in §2. Hard-kill check still outstanding |
+| M3 | **Next** | Q2, Q4, Q7 have defaults. The sidebar replaces the M2 shell; the note list must be virtualised from its first commit |
+| M4 | Not started | Q5 has a default. Folder and tag slots land in the status bar here |
 | M5 | Not started | |
 | M6 | Not started | Q6 has a default. Screenshot review of the full UI starts here |
 | M7 | Not started | **Blocked** — needs Android SDK, `docs/11-verification.md` §3.5 |

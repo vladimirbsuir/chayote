@@ -34,6 +34,7 @@ for (const [name, spec] of Object.entries(STATES)) {
 
     await page.goto('/');
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
     await page.screenshot({ path: `screenshots/${name}.png`, fullPage: false });
   });
 }

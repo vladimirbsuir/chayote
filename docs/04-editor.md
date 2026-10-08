@@ -1,6 +1,6 @@
 # 04 — Editor Specification
 
-**Status:** Frozen. Last updated 2026-10-07.
+**Status:** Frozen. Last updated 2026-10-08.
 
 ---
 

@@ -1,6 +1,6 @@
 # 05 — UI & UX Specification
 
-**Status:** Frozen. Last updated 2026-10-07.
+**Status:** Frozen. Last updated 2026-10-08.
 
 ---
 
@@ -180,7 +180,7 @@ Four sizes only. Not a free-form `size` prop. A fifth size is a design decision,
 
 - Icons are `fill: none; stroke: currentColor` and inherit text colour. **Never** a hard-coded colour value.
 - Icons are never the only signal. A pinned note shows a pin icon *and* sorts first. An error shows an icon *and* text. This is also the accessibility requirement in §10.
-- `fill: currentColor` is permitted for one exception: the checked task-list box, where a filled state reads faster than an outline at 12 px.
+- `fill: currentColor` is permitted for one exception: the checked task-list box, where a filled state reads faster than an outline at 12 px. This is why the task checkbox is a node view rather than a native `input`: the native control ignores the border, the radius, and the accent token, and renders blue in every theme. The input stays in the DOM, hidden and focusable, so the item remains keyboard-operable — see `04-editor.md` §2.
 
 #### Inventory
 
