@@ -25,10 +25,10 @@ const EditorShortcuts = Extension.create({
       'Mod-Shift-x': () => this.editor.commands.toggleStrike(),
       'Mod-e': () => this.editor.commands.toggleCode(),
       'Mod-Enter': () =>
-        this.editor.commands.first(() => [
+        this.editor.commands.first(({ commands }) => [
           () =>
             this.editor.isActive('taskItem') &&
-            this.editor.commands.updateAttributes('taskItem', {
+            commands.updateAttributes('taskItem', {
               checked: this.editor.getAttributes('taskItem').checked !== true,
             }),
         ]),

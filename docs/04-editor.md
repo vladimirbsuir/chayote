@@ -142,25 +142,50 @@ const editorProps: EditorProps = {
     'aria-label': 'Note content',
     'data-testid': 'note-editor',
   },
-  handleDrop: () => false,
-  handlePaste: (view, event) => /* §4.1 rule 8: consume an empty paste */,
+  handleDrop: (view, event) => {
+    event.preventDefault()
+    return true
+  },
+  handlePaste: (view, event) => {
+    /* §4.1 rules 7 and 8, see below */
+  },
   transformPastedHTML: (html) => sanitizeAndNormalize(html),
-  transformPastedText: (text) => textToParagraphs(text),
 }
 ```
 
-`handleDrop: () => false` prevents ProseMirror from attempting to drop nodes from outside the editor. v1 has no draggable block handles, and an accidental drop of foreign content should not mutate the document.
+**There is no `transformPastedText`.** That hook is the obvious place for §4.1
+rule 7 and it does not work there: ProseMirror treats its return value as *text*,
+splits it on newlines, and wraps each piece in a paragraph. Returning
+`<p>one<br>two</p>` therefore inserts those characters literally, and a single
+newline is dropped rather than becoming a hard break. Rule 7 is implemented in
+`handlePaste` instead, which builds a `Slice` with `hardBreak` nodes between the
+lines and `paragraph` nodes between the blocks. `src/editor/pasteSanitizer.ts`
+owns it.
+
+`handlePaste` therefore has two jobs. For the HTML flavour it only decides
+whether to insert at all, and defers the actual work to `transformPastedHTML`. For
+the plain-text flavour it builds the slice itself and dispatches it. Rules 1–6 are
+`transformPastedHTML`: DOMPurify strips everything outside the allowlist,
+presentational attributes, and every `href`/`src`, then the DOM pass flattens
+table cells and deep nesting.
+
+Rule 8 is the part ProseMirror's parser cannot infer: a paste that yields nothing
+must insert nothing and leave the selection untouched. Returning `true` consumes
+the event; returning `false` hands it back.
 
 `handleKeyDown` is **not** part of `editorProps`. The shortcuts in
 `05-ui-ux.md` §7 need editor commands, and a keymap binding is the only place
 that gets them; `EditorShortcuts` in `src/editor/extensions.ts` is that place.
 
-`handlePaste` exists for one reason. Rules 1–7 fall out of
-`transformPastedHTML` and `transformPastedText` plus DOMPurify, but rule 8 — an
-empty paste inserts nothing and leaves the selection untouched — is not something
-the parser infers. Returning `true` from `handlePaste` consumes the event and
-leaves the document and the selection alone; returning `false` hands the
-already-sanitised markup back to ProseMirror, which does the insert.
+`handleDrop` blocks every drop. v1 has no draggable block handles, so there is no
+internal drag worth preserving, and `06-platform.md` §3.6 requires an external
+file drop to change nothing: not insert content, not navigate the window away.
+
+**The polarity matters and was wrong in an earlier revision of this sketch.**
+Returning `false` from a ProseMirror `handleDrop` means *not handled*, which
+hands the event to the browser default — the opposite of the intent stated in the
+same paragraph. Blocking requires returning `true`, plus an explicit
+`preventDefault()` so the drop never reaches the navigation handlers.
 
 ## 3. Input rules (Markdown shortcuts)
 
@@ -205,12 +230,25 @@ Paste is the single largest source of ugly content in a WYSIWYG editor. v1 treat
 4. `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`, `<form>`, `<input>`, `<meta>`, `<link>` are removed with their subtree.
 5. Nesting deeper than 12 levels is unwrapped.
 6. Pasted block structure is preserved: lists stay lists, table cells are flattened to paragraphs in reading order.
-7. Pasted plain text is split on blank lines into paragraphs; single newlines become `hardBreak`.
+7. Pasted plain text is split on blank lines into paragraphs; single newlines become `hardBreak`. This is built as a ProseMirror `Slice` in `handlePaste`, not in `transformPastedText` — see §2.1 for why.
 8. A paste that yields an empty document inserts nothing and leaves the selection untouched.
 
 ### 4.2 Sanitiser
 
 `DOMPurify` at paste time in the WebView, configured with an explicit tag allowlist matching §1.2 and `FORBID_TAGS` covering everything in §4.1 rule 4. Run it *before* ProseMirror parses the HTML, not after — sanitising the resulting ProseMirror tree means writing a second, easier-to-get-wrong traversal.
+
+Two details that are not obvious and cost time to find:
+
+- **Table elements are on the allowlist.** Rule 6 says table cells flatten to
+  paragraphs *in reading order*, which needs cell order to survive sanitisation.
+  So `<table>`, `<tr>`, `<td>` and friends pass through DOMPurify and are
+  converted to `<p>` in a DOM pass afterwards, then unwrapped. Letting DOMPurify
+  drop the table element leaves loose text nodes whose reading order is not
+  guaranteed.
+- **`ALLOWED_URI_REGEXP` is set to a pattern that matches nothing.** This is
+  redundant while `ALLOWED_ATTR` omits `href` and `src`, and it stays that way on
+  purpose: adding a URL attribute later cannot silently reopen a `javascript:`
+  surface.
 
 ### 4.3 Clipboard out
 
@@ -234,6 +272,20 @@ Autosave is the most important behaviour in the app. A user who loses work will 
 | Conflict | A note dirty locally *and* dirty in the incoming version is the user's call — see §5.4 |
 
 Debouncing on the document rather than the transaction count means a continuous typing burst produces exactly one write, and an idle period produces none.
+
+**Implementation shape.** `useAutosave` is a controller object, not a bag of
+refs inside the component, and `EditorPane` passes the note to write as an
+argument to every call. Two properties depend on that:
+
+- A note switch flushes the *outgoing* note from inside `NoteEditor`'s unmount
+  cleanup. React runs that cleanup before the replacement editor mounts, so the
+  document being flushed is still the one on screen — but a cleanup cannot be
+  awaited, so the target has to be captured rather than looked up.
+- The serialisation comparison uses the document at the moment of the write, not
+  the one captured at the keystroke. Anything else skips a real change.
+
+The pending timer is dropped on unmount and on note switch, and there is never
+more than one write in flight for a note.
 
 ### 5.2 Save indicator
 
@@ -310,6 +362,13 @@ Untitled · 342 words            Saved
 | Save state | Frontend save state machine, §5.2 |
 | Folder | Note's folder name, click to change |
 | Tags | Note's tags, click to add or remove |
+
+M2 ships title, word count, and save state. The folder and tag elements need M4's
+data and arrive with it, rather than as controls that do nothing.
+
+The save state carries the note it belongs to. A failure on a note the user has
+already left must not paint the status bar of the note now open, so the store
+holds both the state and its subject.
 
 Nothing else. No cursor position, no selection statistics, no formatting hints. Those are editor-chrome features this app does not have.
 
