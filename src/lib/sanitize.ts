@@ -96,7 +96,7 @@ export function sanitizeAndNormalize(html: string): string {
     KEEP_CONTENT: true,
     RETURN_DOM: false,
     WHOLE_DOCUMENT: false,
-  }) as string
+  })
 
   if (clean.length === 0) return ''
 
@@ -117,15 +117,14 @@ export function textToParagraphs(text: string): string {
 
   if (blocks.length === 0) return ''
 
-  return blocks.map((block) => `<p>${escapeHtml(block.split('\n').join('<br>'))}</p>`).join('')
+  return blocks.map((block) => `<p>${escapeHtml(block).split('\n').join('<br>')}</p>`).join('')
 }
 
 /** True when the sanitised markup would leave something visible in the document. */
 export function hasVisibleContent(html: string): boolean {
   if (html.length === 0) return false
   if (/<(?:hr|br)\s*\/?>/i.test(html)) return true
-  const doc = parse(html)
-  return doc === null ? false : (doc.body?.textContent?.trim().length ?? 0) > 0
+  return bodyOf(html).textContent.trim().length > 0
 }
 
 /**
@@ -136,20 +135,22 @@ export function hasVisibleContent(html: string): boolean {
  * `doc/validate.rs` never has to reject a depth it should have flattened.
  */
 function reshape(html: string): string {
-  const doc = parse(html)
-  const { body } = doc ?? {}
-  if (body === null || body === undefined) return html
+  const body = bodyOf(html)
 
   for (const cell of Array.from(body.querySelectorAll('td, th'))) {
     replaceWithParagraph(cell)
+  }
+
+  for (const wrapper of Array.from(body.querySelectorAll('table, thead, tbody, tr'))) {
+    unwrap(wrapper)
   }
 
   flatten(body, 1)
   return body.innerHTML
 }
 
-function parse(html: string): Document | null {
-  return new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+function bodyOf(html: string): HTMLElement {
+  return new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html').body
 }
 
 function replaceWithParagraph(cell: Element): void {
