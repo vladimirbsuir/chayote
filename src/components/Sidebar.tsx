@@ -35,6 +35,10 @@ type SidebarProps = {
   onSelect: (selection: Selection) => void;
   onOpenNote: (id: Uuid) => void;
   onNewNote: () => void;
+  /** `05-ui-ux.md` §6.3a. Absent in the trash, where a deleted note's pin is not
+      something the user can act on. */
+  onTogglePin?: (id: Uuid) => void;
+  pinPendingId?: Uuid | null;
   onToggleFolder: (id: Uuid) => void;
   /** §6.3: creating a folder is an inline input in the tree, committed with `Enter`.
       Returns a promise so the input can stay open on a rejected write, rather than
@@ -67,6 +71,8 @@ export function Sidebar({
   onSelect,
   onOpenNote,
   onNewNote,
+  onTogglePin,
+  pinPendingId,
   onToggleFolder,
   onCreateFolder,
   onCreateTag,
@@ -200,6 +206,8 @@ export function Sidebar({
             folderNames={folderNames}
             showFolder={!scoped}
             onOpen={onOpenNote}
+            onTogglePin={selection.kind === 'trash' ? undefined : onTogglePin}
+            pinPendingId={pinPendingId ?? null}
             empty={emptyFor(selection, onNewNote)}
           />
         )}

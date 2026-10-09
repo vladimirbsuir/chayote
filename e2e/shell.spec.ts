@@ -579,7 +579,150 @@ test.describe('folder organisation', () => {
     await expect(source).toHaveAttribute('data-dragging', 'true');
     await expect(target.locator('[data-testid="drop-inside"]')).toBeVisible();
   });
+});
 
+/* `05-ui-ux.md` §6.3a. These drive the real command through the mock backend, so
+   the ordering claim is checked against storage rather than against a component
+   that would re-sort it for us. */
+test.describe('pinning', () => {
+  test('pins from a card and moves the note to the top of the list', async ({ page }) => {
+    await open(page);
+
+    const cards = page.getByTestId('note-card');
+    const lastTitle = await cards.last().locator('.text-\\[14px\\]').innerText();
+    expect(await cards.first().innerText()).toContain('Meeting notes');
+
+    await cards.last().hover();
+    await page.getByRole('button', { name: `Pin ${lastTitle}` }).click();
+
+    /* §6.3a: pinned notes sort above every other note in every selection. The first
+       card changing identity is the whole claim — a pin indicator alone would not
+       prove it. */
+    await expect(cards.first().locator('.text-\\[14px\\]')).toHaveText(lastTitle);
+  });
+
+  test('shows the pin control on unpinned cards, revealed on hover', async ({ page }) => {
+    await open(page);
+
+    /* Before hover the control exists but is not laid out — §9 keeps hover styling
+       at `pointer: fine`. Asserting the absence would be wrong: it is in the DOM. */
+    const card = page.getByTestId('note-card').first();
+    const pin = card.getByTestId('pin-toggle');
+    await expect(pin).toHaveCount(1);
+
+    await card.hover();
+    await expect(pin).toBeVisible();
+  });
+
+  test('does not open the note when the pin is pressed', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('note-card').first().click();
+    const openId = await page.getByTestId('note-card').first().getAttribute('data-note-id');
+
+    await page.getByTestId('note-card').first().hover();
+    await page.getByTestId('note-card').first().getByTestId('pin-toggle').click();
+
+    /* A pin that also opened the note would be useless on a row the user was
+       already reading. */
+    await expect(page.locator(`[data-testid="note-card"][data-note-id="${openId}"]`)).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  test('toggles the pin of the open note with Ctrl+D', async ({ page }) => {
+    await open(page);
+
+    const pin = page.getByTestId('editor-pin-toggle');
+    /* The seeded note is already pinned, so the test asserts a *toggle* rather than
+       a direction: read the state, press, require the opposite. A test that assumed
+       an initial value would pass for the wrong reason the day the fixture changed. */
+    const before = await pin.getAttribute('aria-pressed');
+
+    await page.getByRole('textbox', { name: 'Note content' }).click();
+    await page.keyboard.press('Control+d');
+
+    await expect(pin).toHaveAttribute('aria-pressed', before === 'true' ? 'false' : 'true');
+    await expect(pin).toHaveAttribute(
+      'aria-label',
+      before === 'true' ? 'Pin note' : 'Unpin note',
+    );
+
+    await page.keyboard.press('Control+d');
+    await expect(pin).toHaveAttribute('aria-pressed', before ?? 'false');
+  });
+
+  test('keeps a Ctrl+D pin through the next keystroke, rather than being overwritten by the autosave', async ({ page }) => {
+    await open(page);
+
+    const editor = page.getByRole('textbox', { name: 'Note content' });
+    const pin = page.getByTestId('editor-pin-toggle');
+    await editor.click();
+
+    /* Pressed twice, so the note ends up in the opposite state to the one it was
+       seeded in, and the check is a comparison rather than an assumption. */
+    const before = await pin.getAttribute('aria-pressed');
+    await page.keyboard.press('Control+d');
+    await expect(pin).not.toHaveAttribute('aria-pressed', before ?? 'false');
+    const pinned = await pin.getAttribute('aria-pressed');
+
+    /* The autosave target carries `isPinned`. If the in-memory value were not
+       updated with it, this keystroke would save the old flag and silently undo the
+       pin — the failure this test exists for. */
+    await editor.press('End');
+    await page.keyboard.type(' more');
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
+
+    await expect(pin).toHaveAttribute('aria-pressed', pinned ?? 'false');
+
+    /* The same flag on the card, addressed by id rather than by position: the save
+       just moved the note, so "the first card" is no longer necessarily this one. */
+    const noteId = await page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }).getAttribute('data-note-id');
+    await expect(
+      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`).getByTestId('pin-toggle'),
+    ).toHaveAttribute('aria-pressed', pinned ?? 'false');
+  });
+
+  test('offers no pin control in the trash', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('filter-trash').click();
+    await expect(page.getByTestId('note-card').first()).toBeVisible();
+    await expect(page.getByTestId('note-card').first().getByTestId('pin-toggle')).toHaveCount(0);
+
+    /* The pin of a deleted note is still shown — as an icon, since there is nothing
+       to toggle. */
+    const indicators = page.locator('[data-testid="pin-indicator"]');
+    if ((await indicators.count()) > 0) {
+      await expect(indicators.first()).toBeVisible();
+    }
+  });
+
+  test('unpinning the last note leaves the Pinned filter empty, as its copy claims', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('filter-pinned').click();
+    const cards = page.getByTestId('note-card');
+    await expect(cards).toHaveCount(2);
+
+    /* Unpin both, through the card control rather than a shortcut, so the empty
+       state is reached the way a user reaches it. */
+    for (const index of [0, 0]) {
+      const card = page.getByTestId('note-card').first();
+      await card.hover();
+      await card.getByTestId('pin-toggle').click();
+      await expect(cards).toHaveCount(1 - index);
+    }
+
+    /* §8: "Nothing pinned" · "Pin a note with Ctrl+D to keep it at the top." The copy
+       names the shortcut, so the copy and the binding are asserted together — this
+       was the promise the M3 UI made with nothing behind it. */
+    await expect(page.getByText('Nothing pinned')).toBeVisible();
+    await expect(page.getByText(/Ctrl\+D/)).toBeVisible();
+  });
+});
+
+test.describe('folder organisation', () => {
   test('nests a new folder inside the row that asked for it', async ({ page }) => {
     await open(page);
 
@@ -595,6 +738,28 @@ test.describe('folder organisation', () => {
     await expect(nested).toBeVisible();
     /* Nested means indented one level deeper, which is what makes it a child. */
     await expect(nested).toHaveAttribute('aria-level', '2');
+  });
+
+  test('nests a new folder inside the row that asked for it, by keyboard too', async ({ page }) => {
+    await open(page);
+
+    /* The menu path is tested above; this one is the keyboard route to the same
+       editor, which §10 requires for every action. */
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.focus();
+    await page.keyboard.press('ContextMenu');
+
+    await expect(page.getByTestId('folder-menu-create')).toBeVisible();
+    await page.getByTestId('folder-menu-create').click();
+
+    const input = page.getByTestId('folder-name-input');
+    await input.fill('Clients');
+    await input.press('Enter');
+
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Clients' })).toHaveAttribute(
+      'aria-level',
+      '2',
+    );
   });
 });
 

@@ -733,6 +733,131 @@ fn pinned_notes_sort_first_in_every_selection() {
 }
 
 #[test]
+fn pinning_flips_the_flag_without_touching_the_document() {
+    let f = fixture("pin-flag");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    repo.save(&SaveNoteInput {
+        id: id.clone(),
+        doc: json!({
+            "type": "doc",
+            "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "body" }] }]
+        }),
+        folder_id: None,
+        tag_ids: vec![],
+        is_pinned: false,
+    })
+    .expect("save");
+
+    let saved = repo.get(&id).expect("reload");
+    let pinned = repo.set_pinned(&id, true).expect("pin");
+
+    assert!(pinned.summary.is_pinned, "flag flipped");
+    /* The whole reason this command exists: the note list holds a summary with no
+    document, so pinning from a card must not send or rewrite one. Compared
+    against the note as it stood immediately before the pin, the body and every
+    derived column are byte-identical. */
+    assert_eq!(pinned.doc, saved.doc, "document untouched");
+    assert_eq!(pinned.summary.title, saved.summary.title);
+    assert_eq!(pinned.summary.word_count, saved.summary.word_count);
+    assert_eq!(pinned.summary.excerpt, saved.summary.excerpt);
+
+    let unpinned = repo.set_pinned(&id, false).expect("unpin");
+    assert!(!unpinned.summary.is_pinned, "and back again");
+    assert_eq!(unpinned.doc, saved.doc, "still untouched");
+}
+
+#[test]
+fn pinning_raises_the_note_to_the_top_of_the_list() {
+    let f = fixture("pin-order");
+    let repo = notes(&f.db);
+
+    let oldest = repo.create(None).expect("create");
+    let middle = repo.create(None).expect("create");
+    let newest = repo.create(None).expect("create");
+
+    let listed = repo.list(&NoteFilter::new(Selection::All)).expect("list");
+    assert_eq!(
+        listed[0].id, newest.summary.id,
+        "newest first before pinning"
+    );
+
+    repo.set_pinned(&oldest.summary.id, true).expect("pin");
+
+    /* `updated_at` moves with the flag, the same as `move_to`: a pinned note sorts
+    above everything in every selection, so pinning one is a change to where it
+    appears, not a change to what it contains. */
+    let listed = repo.list(&NoteFilter::new(Selection::All)).expect("list");
+    assert_eq!(
+        listed[0].id, oldest.summary.id,
+        "pinned first after pinning"
+    );
+
+    let pinned_only = repo
+        .list(&NoteFilter::new(Selection::Pinned))
+        .expect("pinned filter");
+    assert_eq!(pinned_only.len(), 1);
+    assert_eq!(pinned_only[0].id, oldest.summary.id);
+    assert!(
+        listed.iter().any(|n| n.id == middle.summary.id),
+        "the others remain"
+    );
+}
+
+#[test]
+fn pinning_appends_exactly_one_outbox_row_and_a_failed_pin_leaves_none() {
+    let f = fixture("pin-outbox");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    let before =
+        f.db.with_conn(|conn| {
+            let n: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE entity_id = ?1",
+                [&id],
+                |row| row.get(0),
+            )?;
+            Ok(n)
+        })
+        .expect("count");
+
+    repo.set_pinned(&id, true).expect("pin");
+
+    let after =
+        f.db.with_conn(|conn| {
+            let n: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE entity_id = ?1",
+                [&id],
+                |row| row.get(0),
+            )?;
+            Ok(n)
+        })
+        .expect("count");
+    assert_eq!(after, before + 1, "row and outbox commit together (R5)");
+
+    // A refused pin writes nothing at all: no flag change, no outbox row (R5).
+    assert_eq!(
+        repo.set_pinned("missing", true)
+            .expect_err("must fail")
+            .code(),
+        "NOT_FOUND"
+    );
+    let after_failure =
+        f.db.with_conn(|conn| {
+            let n: i64 = conn.query_row("SELECT COUNT(*) FROM outbox", [], |row| row.get(0))?;
+            Ok(n)
+        })
+        .expect("count");
+    assert_eq!(
+        after_failure, after,
+        "a refused pin leaves no orphan outbox row"
+    );
+}
+
+#[test]
 fn recency_order_is_strict_and_stable() {
     let f = fixture("recency");
     let repo = notes(&f.db);

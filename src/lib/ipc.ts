@@ -77,6 +77,8 @@ export const notesApi = {
   create: (folderId: Uuid | null): Promise<Note> => invoke('notes_create', { folderId }),
   save: (input: SaveNoteInput): Promise<Note> => invoke('notes_save', { input }),
   move: (id: Uuid, folderId: Uuid | null): Promise<Note> => invoke('notes_move', { id, folderId }),
+  setPinned: (id: Uuid, isPinned: boolean): Promise<Note> =>
+    invoke('notes_set_pinned', { id, isPinned }),
   softDelete: (id: Uuid): Promise<void> => invoke('notes_soft_delete', { id }),
   restore: (id: Uuid): Promise<void> => invoke('notes_restore', { id }),
   destroy: (id: Uuid): Promise<void> => invoke('notes_destroy', { id }),

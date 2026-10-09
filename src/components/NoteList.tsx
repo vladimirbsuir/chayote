@@ -35,6 +35,11 @@ type NoteListProps = {
       redundant; `all` and `pinned` span folders and show it. */
   showFolder: boolean;
   onOpen: (id: Uuid) => void;
+  /** `05-ui-ux.md` §6.3a. Absent in the trash, where the pin of a deleted note is
+      not something the user can act on. */
+  onTogglePin?: (id: Uuid) => void;
+  /** The note with a pin write in flight, so its control can be disabled. */
+  pinPendingId?: Uuid | null;
   /** Copy for the empty state, which differs per selection (§8). */
   empty: { title: string; body: string; action?: ReactNode };
 };
@@ -46,6 +51,8 @@ export function NoteList({
   folderNames,
   showFolder,
   onOpen,
+  onTogglePin,
+  pinPendingId = null,
   empty,
 }: NoteListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -118,6 +125,8 @@ export function NoteList({
                 }
                 showFolder={showFolder}
                 onOpen={onOpen}
+                onTogglePin={onTogglePin}
+                pinPending={pinPendingId === note.id}
               />
             </div>
           );

@@ -173,6 +173,13 @@ pub trait NotesRepo: Send + Sync {
     fn create(&self, folder_id: Option<&str>) -> Result<Note, crate::error::AppError>;
     fn save(&self, input: &SaveNoteInput) -> Result<Note, crate::error::AppError>;
     fn move_to(&self, id: &str, folder_id: Option<&str>) -> Result<Note, crate::error::AppError>;
+    /// Flips `is_pinned` without touching `doc_json`.
+    ///
+    /// Separate from `save` because the note list carries only a `NoteSummary`
+    /// (`03-data-model.md` §3.3): pinning from a card has no document to send, and
+    /// loading one to change a boolean would put the body of every pinned note on
+    /// the save path. `save` stays the whole-document write the editor uses.
+    fn set_pinned(&self, id: &str, is_pinned: bool) -> Result<Note, crate::error::AppError>;
     /// Sets `deleted_at`; the row stays, so the deletion can propagate (R3).
     fn soft_delete(&self, id: &str) -> Result<(), crate::error::AppError>;
     fn restore(&self, id: &str) -> Result<(), crate::error::AppError>;

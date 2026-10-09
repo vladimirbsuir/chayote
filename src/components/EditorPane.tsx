@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Editor } from '@tiptap/core';
@@ -9,10 +9,11 @@ import { openNote, selectSaveState, useEditorStore } from '../stores/editor';
 import { qk } from '../queries/keys';
 import { IconButton } from './IconButton';
 import type { JsonDoc, Uuid } from '../types/note';
-import type { Note, SaveNoteInput } from '../types/ipc';
+import type { Note, NoteSummary, SaveNoteInput } from '../types/ipc';
 import { NoteEditor } from '../editor/NoteEditor';
 import { EditorStatusBar } from './EditorStatusBar';
 import { EmptyState } from './EmptyState';
+import { summaryOf } from './summaryOf';
 
 type EditorPaneProps = {
   noteId: Uuid | null;
@@ -24,6 +25,10 @@ type EditorPaneProps = {
 };
 
 const UNTITLED = 'Untitled';
+
+/* The status bar renders on the no-note and recovery screens too, where there is
+   no pin to change. */
+const NOOP = (): void => {};
 
 /* The folder, tags, and pin state of the note the mounted editor holds. Held in
    a ref because they change only on a save, and read only from an event handler
@@ -46,8 +51,25 @@ type Active = {
 export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
   const queryClient = useQueryClient();
   const activeRef = useRef<Active>({ folderId: null, tagIds: [], isPinned: false });
+  /* Mirrors `activeRef.isPinned` as state. The status-bar control has to re-render
+     when the pin changes, and a ref write renders nothing — the button would keep
+     showing the state the note had when it opened. */
+  const [pinned, setPinned] = useState(false);
   const autosave = useAutosave((saved) => {
+    /* `10-conventions.md` §7: a save does not invalidate the list, because the
+       response already carries the fresh summary — so the entry is patched in
+       place. `updatedAt` and `isPinned` both move with a save (the pin through
+       `notes_set_pinned`, the timestamp through every write), and the list orders
+       by exactly those two, so patching only the open note's own cache entry would
+       leave a card showing a pin the note no longer has until the next refetch. */
     queryClient.setQueryData(qk.note(saved.id), saved);
+    queryClient.setQueriesData(
+      { queryKey: ['notes'] },
+      (existing: NoteSummary[] | undefined) =>
+        Array.isArray(existing)
+          ? existing.map((summary) => (summary.id === saved.id ? { ...summary, ...summaryOf(saved) } : summary))
+          : existing,
+    );
   });
   const saveState = useEditorStore((state) => selectSaveState(state, noteId));
 
@@ -92,6 +114,9 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
         tagIds: data.tags.map((tag) => tag.id),
         isPinned: data.isPinned,
       };
+      /* The mirror has to follow the load too, or a note opened after a pin toggle
+         elsewhere would show the previous note's state. */
+      setPinned(data.isPinned);
       autosave.setBaseline(targetOf(editor) as SaveNoteInput);
     },
     [autosave, noteId, queryClient, targetOf],
@@ -108,6 +133,31 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
   const onDispose = useCallback((): void => {
     void autosave.flush();
   }, [autosave]);
+
+  /* `05-ui-ux.md` §6.3a: `Ctrl/Cmd+D` toggles the pin of the open note.
+
+     Deliberately *not* routed through the autosave debounce. `04-editor.md` §5.1
+     makes the serialised document the comparison, so a write that changes only
+     `isPinned` would be judged unchanged and skipped — and the pin would move in
+     the UI and never reach the database. It is a metadata write, so it goes
+     straight to `notes_set_pinned`.
+
+     The important half is `activeRef`: the autosave target carries `isPinned`, so
+     without updating it the next keystroke would save the *old* flag and silently
+     undo the pin the user just pressed. One ref write, and the next save carries
+     the new value. */
+  const togglePin = useCallback((): void => {
+    if (noteId === null) return;
+    const next = !pinned;
+    setPinned(next);
+    activeRef.current = { ...activeRef.current, isPinned: next };
+    void notesApi.setPinned(noteId, next).catch(() => {
+      /* Put both back, so a failed write cannot leave the editor showing a pin the
+         database does not have. The next autosave then writes the truth. */
+      setPinned(!next);
+      activeRef.current = { ...activeRef.current, isPinned: !next };
+    });
+  }, [noteId, pinned]);
 
   useEffect(() => {
     openNote(noteId);
@@ -146,25 +196,36 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
      save dialog would otherwise fire under Playwright. */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
-      event.preventDefault();
-      void autosave.flush();
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+
+      if (key === 's') {
+        event.preventDefault();
+        void autosave.flush();
+        return;
+      }
+      /* `Ctrl/Cmd+D` is the pin, not the bookmark dialog: it is §7's shortcut and the
+         empty state promises it by name. Browser default suppressed either way. */
+      if (key === 'd') {
+        event.preventDefault();
+        togglePin();
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [autosave]);
+  }, [autosave, togglePin]);
 
   if (noteId === null) {
     return (
       <Shell
-        status={<EditorStatusBar title="" wordCount={0} saveState="saved" />}
-        editor={
-          <Centred>
-            <EmptyState
-              title="No note open"
+status={<EditorStatusBar title="" wordCount={0} saveState="saved" isPinned={false} onTogglePin={NOOP} />}
+      editor={
+        <Centred>
+          <EmptyState
+            title="No note open"
               body="Pick a note from the list, or create one with Ctrl+N."
               icon={<AlertCircle className="icon i-20" aria-hidden="true" />}
             />
@@ -187,6 +248,8 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
           title={data === undefined ? '' : displayTitle(data.title)}
           wordCount={data?.wordCount ?? 0}
           saveState={saveState}
+          isPinned={pinned}
+          onTogglePin={togglePin}
         />
       }
       editor={
@@ -261,7 +324,7 @@ function MobileEditorBar({ title, onBack }: { title: string; onBack?: () => void
 function RecoveryScreen({ code, onRetry }: { code: string; onRetry: () => void }) {
   return (
     <Shell
-      status={<EditorStatusBar title="" wordCount={0} saveState="saved" />}
+      status={<EditorStatusBar title="" wordCount={0} saveState="saved" isPinned={false} onTogglePin={NOOP} />}
       editor={
         <Centred>
           <EmptyState

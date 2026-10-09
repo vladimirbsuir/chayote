@@ -45,6 +45,15 @@ pub fn notes_move(
 }
 
 #[tauri::command]
+pub fn notes_set_pinned(
+    services: State<'_, Services>,
+    id: String,
+    is_pinned: bool,
+) -> Result<Note, AppError> {
+    services.notes.set_pinned(&id, is_pinned)
+}
+
+#[tauri::command]
 pub fn notes_soft_delete(services: State<'_, Services>, id: String) -> Result<(), AppError> {
     services.notes.soft_delete(&id)
 }

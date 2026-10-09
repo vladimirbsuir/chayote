@@ -5,6 +5,7 @@ import { isInsideSubtree } from './components/folderRows';
 import { useNow, useNotes } from './hooks/useNotes';
 import { countByFolder, folderNamesById, useFolders } from './hooks/useFolders';
 import { useTags } from './hooks/useTags';
+import { useTogglePin } from './hooks/useTogglePin';
 import {
   openNote as setOpenNote,
   select as setSelection,
@@ -80,6 +81,7 @@ function Shell() {
   const { notes, isPending, refetch } = useNotes(selection);
   const { folders } = useFolders();
   const { tags } = useTags();
+  const { togglePin, pendingId: pinPendingId } = useTogglePin();
   const now = useNow();
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
@@ -295,6 +297,12 @@ function Shell() {
       onNewNote={() => {
         void createNote();
       }}
+      onTogglePin={(id) => {
+        const current = notes?.find((note) => note.id === id);
+        if (current === undefined) return;
+        togglePin(id, !current.isPinned);
+      }}
+      pinPendingId={pinPendingId}
       onToggleFolder={useSettingsStore.getState().toggleFolderCollapsed}
       onCreateFolder={createFolder}
       onCreateTag={NOOP}

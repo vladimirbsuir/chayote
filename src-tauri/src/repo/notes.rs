@@ -245,6 +245,35 @@ impl NotesRepo for SqliteNotesRepo {
         })
     }
 
+    /// `updated_at` moves with the pin. A pinned note sorts above everything, so
+    /// pinning one is a change to where it appears in every list — a note pinned
+    /// six months ago should come to the top when the user pins it now, not resume
+    /// its old position. Same reasoning as `move_to`.
+    fn set_pinned(&self, id: &str, is_pinned: bool) -> Result<Note, AppError> {
+        let note_id = id.to_owned();
+        let now = crate::clock::now_ms();
+
+        self.db.with_conn(move |conn| {
+            /* `base_rev` rather than `base_rev_of`: the helper exists for the folder
+            and tag repos, whose tables have no per-note shortcut, and it reports
+            a missing row as `None` rather than `NotFound`. Pinning a note that
+            does not exist has to be `NOT_FOUND` — `10-conventions.md` §6 lists it
+            as "close the editor, refresh the list", and a silent success would do
+            neither. */
+            let base_rev = base_rev(conn, &note_id)?;
+            let payload = serde_json::json!({ "id": note_id, "isPinned": is_pinned }).to_string();
+
+            let tx = conn.transaction()?;
+            tx.execute(
+                "UPDATE notes SET is_pinned = ?2, dirty = 1, updated_at = ?3 WHERE id = ?1",
+                rusqlite::params![note_id, i64::from(is_pinned), now],
+            )?;
+            append_outbox(&tx, "note", &note_id, "upsert", Some(&payload), base_rev)?;
+            tx.commit()?;
+            self.load(conn, &note_id)
+        })
+    }
+
     fn soft_delete(&self, id: &str) -> Result<(), AppError> {
         let note_id = id.to_owned();
         let now = crate::clock::now_ms();

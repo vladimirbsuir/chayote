@@ -195,6 +195,7 @@ Tauri commands exposed to the frontend. This is the complete API for v1; adding 
 | `notes_create` | `folder_id: Option<Uuid>` | `Note` |
 | `notes_save` | `SaveNoteInput { id, doc, folder_id, tag_ids, is_pinned }` | `Note` |
 | `notes_move` | `{ id, folder_id }` | `Note` |
+| `notes_set_pinned` | `{ id, is_pinned }` | `Note` |
 | `notes_soft_delete` | `note_id` | `()` |
 | `notes_restore` | `note_id` | `()` |
 | `notes_destroy` | `note_id` | `()` |
@@ -228,6 +229,22 @@ identifier is minted inside `SqliteNotesRepo` from `uuid::Uuid::now_v7()`.
 must not need a round trip, and it must never take an identifier from a server.
 The frontend never supplies an id on creation, and the post-v1 Postgres column
 default exists only for server-side tooling (`03-data-model.md` §7).
+
+**`notes_set_pinned`.** Added at M4, and the reason is worth recording because the
+obvious alternative is wrong. `05-ui-ux.md` §6.3a requires a pin control on a note
+*card*, and a card holds a `NoteSummary` with no document (`03-data-model.md` §3.3).
+Reusing `notes_save` would mean either loading the body of every note the user pins
+or sending a stale one — the first puts a document on a write that changes a boolean,
+the second overwrites whatever the editor has since typed. So the flag gets its own
+command: one `UPDATE`, one outbox row, one transaction (R5), and `doc_json` and every
+derived column untouched. `notes_save` stays the whole-document write the autosave
+path uses, and `SaveNoteInput.isPinned` stays because the editor's own pin has to
+survive the next keystroke.
+
+`updated_at` moves with the flag, exactly as it does for `notes_move`: a pinned note
+sorts above everything in every selection, so pinning one is a change to where it
+appears rather than to what it contains. A note pinned six months ago comes to the
+top when it is pinned now, not back to its old position.
 
 **Deletes.** `folders_delete` and `tags_delete` are permanent in v1: a folder
 takes its subtree and its notes become unfiled, a tag takes its `note_tags`

@@ -314,6 +314,14 @@ Creating a folder is inline: a single text input in place, `Enter` commits, `Esc
 
 There is no cap on pinned notes. If a user pins 50 notes, the ordering stops being useful, and the right fix is for them to unpin some — not for the app to impose a limit.
 
+**On a card, the pin is the button.** A pinned note shows a visible pin control that unpins; an unpinned one has the same control revealed on hover at `pointer: fine`. A permanently visible pin on every card would make the pinned one stop meaning anything, and a control that appears only on pinned rows is undiscoverable — the user would have to know a note is pinned before they can unpin it. The card is also a click target, so the control stops propagation: a pin that also opened the note would be useless on a row the user was trying to read.
+
+**In the trash the pin is a plain icon, not a disabled button.** The pin of a deleted note is not something the user can act on, and a disabled control reads as one that is broken rather than as one that does not belong here.
+
+**In the editor, `Ctrl/Cmd+D` does not go through the autosave debounce.** `04-editor.md` §5.1 makes the serialised document the comparison, so a write that changes only `isPinned` would be judged unchanged and skipped — the pin would move in the UI and never reach the database. It is a metadata write and goes to `notes_set_pinned` directly. The editor's own autosave target carries `isPinned`, so the value in memory has to change at the same moment or the next keystroke saves the old flag and silently undoes the pin.
+
+**The card toggle is optimistic and the response reconciles.** A pin reorders every list in the app at once, and a row that jumps a moment after the press reads as a dropped interaction. The optimistic patch applies to every cached list, not only the visible one, so switching selection does not briefly show a stale pin; the response then replaces the open note's entry, because it carries the authoritative `updated_at` the ordering depends on.
+
 ### 6.4 Tags
 
 A tag is created by typing a new name into the tag editor; existing names complete. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; a tag disappears from the sidebar only when its note count reaches zero (`03-data-model.md` §5).

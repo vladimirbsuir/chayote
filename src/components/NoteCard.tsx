@@ -23,6 +23,12 @@ type NoteCardProps = {
   folderName: string | null;
   showFolder: boolean;
   onOpen: (id: string) => void;
+  /** `05-ui-ux.md` §6.3a: the pin control on a card. Present on every selection but
+      Trash, where a trashed note's pin is not something the user can act on. */
+  onTogglePin?: (id: string) => void;
+  /** A write is in flight for this card, so its pin control is disabled rather than
+      accepting a second press that would race the first. */
+  pinPending?: boolean;
 };
 
 /* `memo` is not premature here: this is the component that renders once per
@@ -36,6 +42,8 @@ export const NoteCard = memo(function NoteCard({
   folderName,
   showFolder,
   onOpen,
+  onTogglePin,
+  pinPending = false,
 }: NoteCardProps) {
   const untitled = note.title.length === 0;
 
@@ -55,15 +63,33 @@ export const NoteCard = memo(function NoteCard({
           onOpen(note.id);
         }
       }}
-      className={`cursor-pointer rounded-[var(--r-input)] border px-[10px] py-[9px] transition-colors ${
+      className={`group relative cursor-pointer rounded-[var(--r-input)] border px-[10px] py-[9px] transition-colors ${
         isOpen
           ? 'border-[var(--border)] bg-[var(--surface)]'
           : 'border-transparent hover:bg-[var(--surface)]'
       }`}
     >
       <div className="flex items-baseline gap-[6px]">
-        {note.isPinned ? (
-          <span className="flex flex-none self-center text-[var(--accent)]">
+        {/* The pin is a control wherever there is anything to toggle, and a plain
+            icon where there is not — the trash, where a deleted note's pin is not
+            something the user can act on. A disabled button would read as a control
+            that is broken rather than as one that does not exist here. */}
+        {onTogglePin !== undefined ? (
+          note.isPinned ? (
+            <PinButton note={note} pending={pinPending} onTogglePin={onTogglePin} pinned />
+          ) : (
+            /* Unpinned rows get the control too, revealed on hover at `pointer:
+               fine` (§9). A permanently visible pin on every card would make the
+               pinned one stop meaning anything. */
+            <span className="hidden flex-none self-center pointer-fine:group-hover:flex">
+              <PinButton note={note} pending={pinPending} onTogglePin={onTogglePin} pinned={false} />
+            </span>
+          )
+        ) : note.isPinned ? (
+          <span
+            data-testid="pin-indicator"
+            className="flex flex-none self-center text-[var(--accent)]"
+          >
             <Pin className="icon i-16" aria-hidden="true" />
           </span>
         ) : null}
@@ -92,6 +118,45 @@ export const NoteCard = memo(function NoteCard({
     </div>
   );
 });
+
+function PinButton({
+  note,
+  pinned,
+  pending,
+  onTogglePin,
+}: {
+  note: NoteSummary;
+  pinned: boolean;
+  pending: boolean;
+  onTogglePin?: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      /* `aria-pressed` rather than a label that changes with the state: the control
+         is one thing that is on or off, and a screen reader announcing
+         "Pin"/"Unpin" forces the user to infer which is which. */
+      aria-pressed={pinned}
+      aria-label={`${pinned ? 'Unpin' : 'Pin'} ${note.title.length === 0 ? UNTITLED : note.title}`}
+      data-testid="pin-toggle"
+      data-note-id={note.id}
+      disabled={pending || onTogglePin === undefined}
+      onClick={(event) => {
+        /* The card is also a click target, and a pin that also opened the note would
+           make the control useless on a row the user was trying to read. */
+        event.stopPropagation();
+        onTogglePin?.(note.id);
+      }}
+      className={`grid h-[18px] w-[18px] flex-none place-items-center rounded transition-opacity disabled:opacity-50 ${
+        pinned
+          ? 'text-[var(--accent)]'
+          : 'text-[var(--text-subtle)] hover:text-[var(--accent)]'
+      }`}
+    >
+      <Pin className="icon i-16" aria-hidden="true" />
+    </button>
+  );
+}
 
 function FolderChip({ name }: { name: string }) {
   return (
