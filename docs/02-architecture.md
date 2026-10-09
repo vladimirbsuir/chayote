@@ -10,7 +10,7 @@
 
 Versions are floors, not pins: install the current stable major and move the
 number here in the same commit. Updated at M0 on 2026-10-07, at M2 on 2026-10-08
-for the editor stack.
+for the editor stack, at M3 on 2026-10-09 for list virtualisation.
 
 | Concern | Choice | Version | Note |
 |---------|--------|---------|------|
@@ -24,10 +24,12 @@ for the editor stack.
 | Fonts | `@fontsource/inter` | latest | Bundled locally, no network fetch |
 | Paste sanitisation | `dompurify` | 3.x | Installed at M2 as 3.4.16. Allowlist per `04-editor.md` §4.1 |
 | Server-state | TanStack Query | 5.x | Wraps the Rust repository commands; see §5 |
+| List virtualisation | `@tanstack/react-virtual` | 3.x | Installed at M3 as 3.14.13. Same author as Query, so one measurement and one render idiom |
 | UI state | Zustand | 5.x | Theme, sidebar, selection, editor prefs |
 | IDs | `uuid` (v7) | 14.x | Time-ordered, client-generated |
 | Dates | plain `number` (epoch ms) | — | No date library in v1 |
 | Tests | Vitest | 5.x | |
+| Virtualised list | `@tanstack/react-virtual` | 3.x | Added at M3 on 2026-10-09 as 3.14.13. The note list must be virtualised from its first commit (`§8`); this is the library that does it |
 
 ### 1.2 Backend (Rust)
 

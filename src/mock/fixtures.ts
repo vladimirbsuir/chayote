@@ -1,5 +1,6 @@
 import type { Uuid, JsonDoc } from '../types/note';
 import { EMPTY_DOC } from '../types/note';
+import { uuidFrom } from './generate';
 
 export const CONTENT_SAMPLES: JsonDoc[] = [
   {
@@ -136,6 +137,20 @@ export type Fixture = {
 
 export const FIXTURE_NOW = Date.UTC(2026, 9, 7, 12, 0, 0);
 
+/* Folder and tag ids must be the ones `generate.ts` mints from the same seeds.
+   Writing the literal `'f-work'` here instead produced notes whose `folder_id`
+   matched no row in the tree, so every folder selection came back empty — a
+   mock that silently disagreed with itself rather than failing. */
+const F_WORK = uuidFrom('f-work');
+const F_PROJECTS = uuidFrom('f-projects');
+const F_MEETINGS = uuidFrom('f-meetings');
+const F_PERSONAL = uuidFrom('f-personal');
+const F_ARCHIVE = uuidFrom('f-archive');
+
+const T_WORK = uuidFrom('t-work');
+const T_URGENT = uuidFrom('t-urgent');
+const T_IDEAS = uuidFrom('t-ideas');
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -155,22 +170,22 @@ export const FIXTURE_NOTES: Fixture[] = [
   {
     id: '01980000-0000-7000-8000-000000000001',
     doc: CONTENT_SAMPLES[0] ?? EMPTY_DOC,
-    folderId: 'f-work',
+    folderId: F_WORK,
     isPinned: true,
     createdAt: FIXTURE_NOW - 3 * DAY,
     updatedAt: FIXTURE_NOW - 2 * MINUTE,
     deletedAt: null,
-    tagIds: ['t-work', 't-urgent'],
+    tagIds: [T_WORK, T_URGENT],
   },
   {
     id: '01980000-0000-7000-8000-000000000002',
     doc: CONTENT_SAMPLES[1] ?? EMPTY_DOC,
-    folderId: 'f-projects',
+    folderId: F_PROJECTS,
     isPinned: false,
     createdAt: FIXTURE_NOW - 5 * DAY,
     updatedAt: FIXTURE_NOW - 3 * HOUR,
     deletedAt: null,
-    tagIds: ['t-work'],
+    tagIds: [T_WORK],
   },
   {
     id: '01980000-0000-7000-8000-000000000003',
@@ -192,7 +207,7 @@ export const FIXTURE_NOTES: Fixture[] = [
         },
       ],
     },
-    folderId: 'f-meetings',
+    folderId: F_MEETINGS,
     isPinned: false,
     createdAt: FIXTURE_NOW - 4 * DAY,
     updatedAt: FIXTURE_NOW - DAY,
@@ -202,7 +217,7 @@ export const FIXTURE_NOTES: Fixture[] = [
   {
     id: '01980000-0000-7000-8000-000000000004',
     doc: CONTENT_SAMPLES[2] ?? EMPTY_DOC,
-    folderId: 'f-meetings',
+    folderId: F_MEETINGS,
     isPinned: false,
     createdAt: FIXTURE_NOW - 3 * DAY,
     updatedAt: FIXTURE_NOW - 2 * DAY,
@@ -238,12 +253,12 @@ export const FIXTURE_NOTES: Fixture[] = [
         },
       ],
     },
-    folderId: 'f-work',
+    folderId: F_WORK,
     isPinned: true,
     createdAt: FIXTURE_NOW - 40 * DAY,
     updatedAt: FIXTURE_NOW - 4 * DAY,
     deletedAt: null,
-    tagIds: ['t-work', 't-ideas'],
+    tagIds: [T_WORK, T_IDEAS],
   },
   {
     id: '01980000-0000-7000-8000-000000000006',
@@ -258,7 +273,7 @@ export const FIXTURE_NOTES: Fixture[] = [
         { type: 'paragraph', content: [{ type: 'text', text: 'Submitted. Waiting on approval.' }] },
       ],
     },
-    folderId: 'f-personal',
+    folderId: F_PERSONAL,
     isPinned: false,
     createdAt: FIXTURE_NOW - 40 * DAY,
     updatedAt: FIXTURE_NOW - 4 * DAY,
@@ -284,11 +299,11 @@ export const FIXTURE_TRASH: Fixture[] = [
         },
       ],
     },
-    folderId: 'f-archive',
+    folderId: F_ARCHIVE,
     isPinned: false,
     createdAt: FIXTURE_NOW - 90 * DAY,
     updatedAt: FIXTURE_NOW - 6 * DAY,
     deletedAt: FIXTURE_NOW - 6 * DAY,
-    tagIds: ['t-ideas'],
+    tagIds: [T_IDEAS],
   },
 ];

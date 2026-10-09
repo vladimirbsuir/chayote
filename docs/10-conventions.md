@@ -45,10 +45,10 @@ chayote/
 │   │   ├── adapter.ts                 # implements every command in 02-architecture.md §7
 │   │   ├── derive.ts                  # title, excerpt, word_count over JsonDoc
 │   │   ├── errors.ts                  # MockBackendError carrying the AppError code
-│   │   ├── fixtures.ts
+│   │   ├── fixtures.ts                # seeded notes; ids come from generate.ts
 │   │   └── generate.ts                # 10 000-note generator for scroll tests
 │   ├── test/
-│   │   └── setup.ts                   # jsdom range/layout stubs ProseMirror needs
+│   │   └── setup.ts                   # jsdom stubs: Range for ProseMirror, rects for the virtualiser
 │   ├── types/                         # shared domain types
 │   │   ├── note.ts
 │   │   ├── folder.ts
@@ -71,14 +71,14 @@ chayote/
 │   │   ├── pasteSanitizer.ts
 │   │   ├── clipboardSerializer.ts
 │   │   ├── TaskItemView.tsx            # task-checkbox node view; ADR-015 check icon
-│   │   └── NoteEditor.tsx
+│   │   └── NoteEditor.tsx              # one instance per note_id; see §6
 │   ├── components/                    # presentational, one responsibility each
 │   │   ├── TopBar.tsx
-│   │   ├── Sidebar.tsx
-│   │   ├── FolderTree.tsx
-│   │   ├── TagList.tsx
-│   │   ├── NoteList.tsx
-│   │   ├── NoteCard.tsx
+│   │   ├── Sidebar.tsx                # filters + folder tree + tag rows + list; M3
+│   │   ├── FolderTree.tsx             # M4: drag to re-parent, inline create
+│   │   ├── TagList.tsx                # M4: inline rename, counts
+│   │   ├── NoteList.tsx               # M3: virtualised, measured rows
+│   │   ├── NoteCard.tsx               # M3
 │   │   ├── EditorPane.tsx
 │   │   ├── EditorStatusBar.tsx
 │   │   ├── TagEditor.tsx
@@ -89,12 +89,15 @@ chayote/
 │   │   ├── EmptyState.tsx             # title + cause + optional action, 05-ui-ux.md §8
 │   │   └── ThemeToggle.tsx
 │   ├── layout/
-│   │   ├── DesktopLayout.tsx
-│   │   ├── MobileLayout.tsx
-│   │   └── viewStack.ts               # in-app navigation stack
+│   │   ├── DesktopLayout.tsx          # two panes + the resize separator
+│   │   ├── MobileLayout.tsx           # single pane, one view at a time
+│   │   ├── breakpoints.ts             # §9 ranges as pure functions, tested
+│   │   ├── useBreakpoint.ts           # the one resize listener
+│   │   └── viewStack.ts               # in-app navigation stack reducer
 │   ├── styles/
 │   │   ├── tokens.css                 # values copied from prototype/index.html, incl. --accent-preset-1..6
-│   │   ├── base.css                   # Tailwind v4 @theme mapping, .icon and .i-* size classes
+│   │   ├── base.css                   # Tailwind v4 @theme mapping, .icon and .i-* size classes.
+│   │   │                             # The reset lives in @layer base or it overrides every utility
 │   │   └── editor.css                 # ProseMirror styles
 │   └── queries/                       # TanStack Query keys and options
 │       └── keys.ts
@@ -244,7 +247,7 @@ Invalidation discipline: `notes_save` does not invalidate the list — the save 
 
 The budgets in `02-architecture.md` §8 are acceptance criteria, not aspirations.
 
-- The note list is virtualised from the first commit.
+- The note list is virtualised from the first commit. Rows are **measured**, not assumed: a note card has an optional excerpt, so its height genuinely varies and a fixed row height overlaps neighbours.
 - `NoteSummary` never includes the document body. `03-data-model.md` §3.3 provides `excerpt` and `word_count` precisely so the list does not need to.
 - Folders and tags load once and are cached; they change rarely.
 - The autosave serialisation runs on the UI thread — `JSON.stringify` on a 5 MB document would block. Above 64 KB, defer serialisation to a worker.
@@ -283,6 +286,32 @@ Required tests, because each verifies a rule that is easy to break silently:
 10. Pasted script tags and inline styles do not survive into the document.
 11. The mock adapter returns the same shape as the real IPC for every command in `02-architecture.md` §7.
 12. Every icon in the `05-ui-ux.md` §3.3 inventory renders at all four sizes and inherits `currentColor`.
+
+Two more that M3 added, for the same reason as the ones above — both verify
+something that is invisible to a single-element assertion:
+
+13. **No two rendered note cards overlap.** A wrong virtualiser row height does not
+    make a wrong card: the card is correctly sized and merely positioned over its
+    neighbour, clipping the text between them. Only pairwise geometry catches it.
+14. **The editor's padding utilities compute to non-zero.** Tailwind v4 emits
+    utilities into `@layer utilities`, and an unlayered reset such as
+    `* { padding: 0 }` beats every `px-*` in the app regardless of specificity. The
+    result looks almost right, which is why the fix belongs in `@layer base` and the
+    test exists as an alarm.
+
+### Driving the editor from Playwright
+
+Two races in `e2e/` are properties of the driver rather than of the app, and both
+are handled in `editor.spec.ts` rather than worked around:
+
+- **Settle one animation frame after a click before pressing a shortcut.** A click
+  returns to the driver before ProseMirror has processed it, so a shortcut is
+  evaluated against the *previous* selection and appears to do nothing. Polling
+  `window.getSelection()` does not help: the DOM caret is already correct while the
+  editor state is not. A frame is when ProseMirror's own DOM observer runs.
+- **Wait for the editor to be mounted before driving it.** It is code-split and
+  autofocuses the caret on mount, so a chunk landing mid-test takes focus away from
+  whatever the test was using.
 
 ## 11. Git and workflow
 

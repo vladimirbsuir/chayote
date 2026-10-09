@@ -1,10 +1,11 @@
 # 08 — Roadmap
 
-**Status:** Frozen. Last updated 2026-10-08.
+**Status:** Frozen. Last updated 2026-10-09.
 
-**Current position: M3, not started.** M0, M1, and M2 shipped on 2026-10-07 and
-2026-10-08: the frontend scaffold, the data layer behind repository traits, and
-the editor with autosave, paste sanitisation, and the §7 key bindings. Work
+**Current position: M4, not started.** M0, M1, M2, and M3 shipped between
+2026-10-07 and 2026-10-09: the frontend scaffold, the data layer behind repository
+traits, the editor with autosave and paste sanitisation, and the UI shell with the
+sidebar, the virtualised note list, and the three responsive layouts. Work
 proceeds in order; a milestone is not "mostly done".
 
 ---
@@ -101,6 +102,29 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 - Selection model with all five kinds (`05-ui-ux.md` §5).
 - Relative timestamps: "now", "2 min", "3 h", "yesterday", then an absolute date.
 - **Done when:** 10 000 seeded notes scroll at 60 fps and the list never loads a document body.
+- **Shipped 2026-10-09.** Every item above is in place: `stores/selection.ts` and
+  `stores/settings.ts`, the three layouts with a JS breakpoint, the resizable
+  sidebar, `NoteCard` and a measured virtualised `NoteList`, `relativeTime` with
+  its table tested boundary by boundary, and `Ctrl+N` / `Ctrl+F` / `Ctrl+\`.
+  98 TypeScript tests and 49 Playwright tests.
+
+  Four things shipped differently from the plan, each recorded in the document it
+  belongs to:
+
+  - **The list measures its rows.** The plan implied a fixed row height from the
+    prototype's clamp. A card is a title line, an *optional* two-line excerpt, and
+    a meta line, so its height genuinely varies; a fixed height overlapped the next
+    card and clipped its text. `NoteList` uses `measureElement` with an estimate.
+    The pairwise overlap assertion in `e2e/shell.spec.ts` is what caught it.
+  - **`@tanstack/react-virtual` was added** rather than hand-rolling windowing, so
+    `02-architecture.md` §1.1 lists it.
+  - **No sidebar toggle in the desktop top bar.** `Ctrl/Cmd+\` collapses it and the
+    prototype's desktop bar has no such control; the button appears only in the
+    tablet band, where the sidebar is a drawer. Recorded in `05-ui-ux.md` §9.
+  - **Trash is a filter tab, not a fourth section.** `05-ui-ux.md` §2.2 describes
+    the Filters region as "All notes, Pinned", but §5 requires all five selections
+    to be reachable and §8 has a trash empty state, so trash sits beside them in
+    the segmented control where it is one click rather than buried in structure.
 
 ### M4 — Organisation
 
@@ -216,12 +240,12 @@ Each of these was resolved conservatively. Revisit the moment implementation pro
 | # | Question | Status | Default if unanswered | Blocks |
 |---|----------|--------|----------------------|--------|
 | Q1 | Product name, bundle identifier, database filename | **Answered** — Chayote, `com.chayote.app`, `chayote.db` | — | Resolved |
-| Q2 | Default folder on first launch, or everything unfiled? | **Open** | Everything unfiled. No folder is created until the user creates one | M3 |
+| Q2 | Default folder on first launch, or everything unfiled? | **Answered** — everything unfiled, by ADR-014 | — | Resolved |
 | Q3 | `is_pinned` versus `is_favorite` | **Answered** — `is_pinned` only. `is_favorite` removed from the schema | — | Resolved |
-| Q4 | Timestamp style in the note list | **Open** | Relative only, no tooltip. `Updated 3 Feb` appears on hover | M3 |
+| Q4 | Timestamp style in the note list | **Answered** — relative only, no tooltip, per `05-ui-ux.md` §6.5a. The default in this table had contradicted itself; §6.5a now settles it | — | Resolved |
 | Q5 | Remember collapsed folder-tree state per folder | **Open** | Yes, persist per folder in settings. Cheap, and losing it on every launch is annoying | M4 |
 | Q6 | Accent palette: one configurable colour, or presets plus custom | **Open** | Six presets plus a custom colour picker | M6 |
-| Q7 | Should pinning be visible as a dedicated filter, or only as an ordering? | **Open** | Both — a "Pinned" filter, as specified in `05-ui-ux.md` §5 | M3 |
+| Q7 | Should pinning be visible as a dedicated filter, or only as an ordering? | **Answered** — both, per `05-ui-ux.md` §5 and §6.3a. The filter ships in M4 with the rest of the pinning work; the ordering already does | — | Resolved |
 | Q8 | Repository directory rename from `notes` to `chayote` | **Answered** — done, the directory is `D:\Projects\chayote` | — | Resolved |
 
 **None of the open questions blocks M0.** Each has a documented default that can be implemented and changed later without a migration.
@@ -237,8 +261,8 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | M0 | **Done** | 2026-10-07. Scaffold, tokens, icon layer, `ipc.ts` + mock, Playwright, CI. Gates clean. `docs/02-architecture.md` §1.1 version floors updated to TS 6 / Vite 8 / Vitest 5 / uuid 14 |
 | M1 | **Done** | 2026-10-07. `rusqlite`, migrations 0001–0003, repository traits, `AppError`, settings store, 33 Rust tests + 29 TS tests |
 | M2 | **Done** | 2026-10-08. TipTap 3.31, paste sanitisation, `clipboardTextSerializer`, autosave controller, status bar, task-checkbox node view. 65 TS tests + 22 Playwright tests. Four deviations from the plan recorded in §2. Hard-kill check still outstanding |
-| M3 | **Next** | Q2, Q4, Q7 have defaults. The sidebar replaces the M2 shell; the note list must be virtualised from its first commit |
-| M4 | Not started | Q5 has a default. Folder and tag slots land in the status bar here |
+| M3 | **Done** | 2026-10-09. `Sidebar`, `NoteCard`, a measured virtualised `NoteList`, `stores/selection.ts` + `stores/settings.ts`, `relativeTime`, three layouts, resizable sidebar, `Ctrl+N`/`Ctrl+F`/`Ctrl+\`. 98 TS tests + 49 Playwright tests. Four deviations recorded in §2 |
+| M4 | **Next** | Q5 has a default. The sidebar already renders the folder tree and tag rows; this milestone makes them interactive. Folder and tag slots land in the status bar here |
 | M5 | Not started | |
 | M6 | Not started | Q6 has a default. Screenshot review of the full UI starts here |
 | M7 | Not started | **Blocked** — needs Android SDK, `docs/11-verification.md` §3.5 |

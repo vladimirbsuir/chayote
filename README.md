@@ -18,7 +18,7 @@ They change together — see ADR-016.
 | Bundle identifier | **`com.chayote.app`** |
 | Database filename | `chayote.db` |
 | Licence | MIT (`LICENSE`) |
-| Current milestone | **M3** — UI shell, not started |
+| Current milestone | **M4** — Organisation, not started |
 | Git repository | **Initialised**, `main` buildable, work on topic branches |
 | Android SDK | **Missing** — blocks M7 only, see `docs/11-verification.md` §2 |
 
@@ -60,10 +60,10 @@ Three documents carry the weight and are worth more attention than the rest: `02
 | Sync implementation | **Not started** — architecture only, see §5 |
 | Specification | **Complete**, 11 documents |
 | UI prototype | **Complete and approved** — `prototype/index.html` |
-| Application code | **M0, M1, M2 complete** — scaffold, tokens, icon layer, IPC seam, SQLite data layer, editor with autosave |
-| Current milestone | **M3** — UI shell, not started |
+| Application code | **M0–M3 complete** — scaffold, tokens, icon layer, IPC seam, SQLite data layer, editor with autosave, UI shell with sidebar and virtualised note list |
+| Current milestone | **M4** — Organisation: folders, tags, pinning, trash |
 
-**M3 is next.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 33 Rust tests, 65 TypeScript tests, and 22 Playwright tests cover the data layer and the editor, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The repository directory is already named `chayote`; the Android SDK is still missing and blocks M7 only, see §7.
+**M4 is next.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08, M3 on 2026-10-09. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 33 Rust tests, 98 TypeScript tests, and 49 Playwright tests cover the data layer, the editor, and the shell, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The sidebar renders the folder tree and tag rows and both selections already filter the list; M4 makes that structure interactive — drag to re-parent, inline create and rename, the tag editor, pinning, and trash. The Android SDK is still missing and blocks M7 only, see §7.
 
 ---
 

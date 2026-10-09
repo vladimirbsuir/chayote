@@ -28,10 +28,26 @@
   --radius-pill: var(--r-pill);
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* Inside `@layer base`, and this must stay there.
+
+   Tailwind v4 emits its utilities into `@layer utilities`. An unlayered rule
+   beats a layered one whatever its specificity, so a bare `* { padding: 0 }` in
+   the stylesheet — not in a layer — silently overrides *every* padding and margin
+   utility in the app. The symptom is a layout that looks almost right: elements
+   are the right size and in the right place, but every `px-*`, `py-*`, and
+   `pt-*` computes to 0 px, so text touches the pane edges and the editor column
+   loses its 32 px measure entirely.
+
+   The editor's own `padding: 40px 32px 64px` from the prototype is written as
+   utilities on `EditorContent` for the same reason: a literal padding in
+   `editor.css` would win over the layer order and be inconsistent with the rest
+   of the spacing scale. */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 }
 
 html,

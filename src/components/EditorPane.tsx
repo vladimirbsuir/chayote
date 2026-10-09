@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Editor } from '@tiptap/core';
-import { AlertCircle, RotateCw } from 'lucide-react';
+import { AlertCircle, ArrowLeft, MoreHorizontal, RotateCw } from 'lucide-react';
 import { notesApi } from '../lib/ipc';
 import { useAutosave } from '../hooks/useAutosave';
 import { openNote, selectSaveState, useEditorStore } from '../stores/editor';
 import { qk } from '../queries/keys';
+import { IconButton } from './IconButton';
 import type { JsonDoc, Uuid } from '../types/note';
-import type { SaveNoteInput } from '../types/ipc';
+import type { Note, SaveNoteInput } from '../types/ipc';
 import { NoteEditor } from '../editor/NoteEditor';
 import { EditorStatusBar } from './EditorStatusBar';
 import { EmptyState } from './EmptyState';
@@ -17,6 +18,9 @@ type EditorPaneProps = {
   noteId: Uuid | null;
   /** Bumped by the sidebar when the selection changes: a flush condition (§5.1). */
   selectionKey: string;
+  /** Backs the mobile editor view's back affordance (§2.4). A no-op on desktop,
+      where there is no view stack to pop. */
+  onClose?: () => void;
 };
 
 const UNTITLED = 'Untitled';
@@ -39,7 +43,7 @@ type Active = {
  * editor at the moment of the write, which keeps a large document off the render
  * path entirely.
  */
-export function EditorPane({ noteId, selectionKey }: EditorPaneProps) {
+export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
   const queryClient = useQueryClient();
   const activeRef = useRef<Active>({ folderId: null, tagIds: [], isPinned: false });
   const autosave = useAutosave((saved) => {
@@ -66,9 +70,22 @@ export function EditorPane({ noteId, selectionKey }: EditorPaneProps) {
     };
   }, [noteId]);
 
+  /* All three callbacks are stable for the lifetime of the editor instance.
+
+     `NoteEditor` runs its setup effect on `[editor, onDispose, onReady]`, so a
+     callback that changes identity re-runs that effect — which re-issues
+     `onReady`, re-establishing the autosave baseline, and re-runs the cleanup,
+     which flushes. Both land in the middle of a typing burst. The observable
+     symptom is the selection resetting, so a mark applies to three characters
+     instead of six and `Ctrl+Enter` toggles nothing: the keystroke arrives, the
+     editor is re-baselined, and the selection is gone before the command runs.
+
+     So none of these may depend on `note.data`. The data a save returns is read
+     through `useEditorStore.getState()` inside `onReady` instead of closing over
+     the query result, which is what keeps the identity stable across saves. */
   const onReady = useCallback(
     (editor: Editor): void => {
-      const data = note.data;
+      const data = queryClient.getQueryData<Note>(qk.note(noteId ?? ''));
       if (data === undefined) return;
       activeRef.current = {
         folderId: data.folderId,
@@ -77,7 +94,7 @@ export function EditorPane({ noteId, selectionKey }: EditorPaneProps) {
       };
       autosave.setBaseline(targetOf(editor) as SaveNoteInput);
     },
-    [autosave, note.data, targetOf],
+    [autosave, noteId, queryClient, targetOf],
   );
 
   const onChange = useCallback(
@@ -182,6 +199,7 @@ export function EditorPane({ noteId, selectionKey }: EditorPaneProps) {
                 Your text is still on this device. The save will be retried automatically.
               </span>
             ) : null}
+            <MobileEditorBar title={displayTitle(data.title)} onBack={onClose} />
             <NoteEditor
               key={data.id}
               doc={data.doc}
@@ -211,6 +229,31 @@ function Shell({ editor, status }: { editor: ReactNode; status: ReactNode }) {
 
 function Centred({ children }: { children: ReactNode }) {
   return <div className="flex flex-1 items-center justify-center p-8">{children}</div>;
+}
+
+/* `05-ui-ux.md` §2.4: the editor view on a small screen has its own top bar,
+   because it needs a back affordance and the note title, and because it does not
+   reuse the desktop top bar.
+
+   `onBack` is `undefined` on desktop, and that is load-bearing rather than a
+   shortcut: the bar is not rendered at all there. Hiding it with `md:hidden`
+   would leave its two icon buttons in the tab order and in the layout above a
+   `display: none` boundary, which moves focus out of the editor — the caret is
+   in ProseMirror, not in the button, so `Ctrl+Enter` then toggles nothing. Not
+   rendering is also the honest answer: there is no back affordance to offer. */
+function MobileEditorBar({ title, onBack }: { title: string; onBack?: () => void }) {
+  if (onBack === undefined) return null;
+  return (
+    <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2">
+      <IconButton label="Back to list" onClick={onBack} size="mobile">
+        <ArrowLeft className="icon i-24" aria-hidden="true" />
+      </IconButton>
+      <span className="flex-1 truncate text-[14px] font-semibold">{title}</span>
+      <IconButton label="More" size="mobile">
+        <MoreHorizontal className="icon i-24" aria-hidden="true" />
+      </IconButton>
+    </header>
+  );
 }
 
 /* `04-editor.md` §8.4 — a deliberate dead end, not an editor. The stored version
