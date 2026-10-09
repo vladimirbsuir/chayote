@@ -706,12 +706,14 @@ test.describe('pinning', () => {
     await expect(cards).toHaveCount(2);
 
     /* Unpin both, through the card control rather than a shortcut, so the empty
-       state is reached the way a user reaches it. */
-    for (const index of [0, 0]) {
+       state is reached the way a user reaches it. Counted down as the presses go,
+       because the list shrinks under the control that is being pressed. */
+    await expect(cards).toHaveCount(2);
+    for (const remaining of [1, 0]) {
       const card = page.getByTestId('note-card').first();
       await card.hover();
       await card.getByTestId('pin-toggle').click();
-      await expect(cards).toHaveCount(1 - index);
+      await expect(cards).toHaveCount(remaining);
     }
 
     /* §8: "Nothing pinned" · "Pin a note with Ctrl+D to keep it at the top." The copy
@@ -925,6 +927,172 @@ test.describe('responsive layouts', () => {
         .map((el) => `${el.tagName}.${el.className}`),
     );
     expect(offenders).toEqual([]);
+  });
+});
+
+/* §6.2: soft delete with a six-second undo toast, restore, permanent delete, empty
+   trash. Driven end to end through the mock backend, because the parts that matter —
+     that the note actually leaves the list, that undo brings it back with its text,
+     and that the editor closes when the note it holds goes away — are all about
+     state the components do not own. */
+test.describe('trash', () => {
+  test('moves a note to the trash and offers an undo for six seconds', async ({ page }) => {
+    await open(page);
+
+    const before = await page.getByTestId('note-card').count();
+    const card = page.getByTestId('note-card').first();
+    const title = await card.locator('.text-\\[14px\\]').innerText();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+
+    /* The soft delete is immediate and the row is gone from the live list — §6.2 is
+       exact that the write has already happened and undo merely restores. */
+    await expect(page.getByTestId('note-card')).toHaveCount(before - 1);
+    const toast = page.getByTestId('undo-toast');
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText(title);
+  });
+
+  test('undo brings the note back where it was in the list', async ({ page }) => {
+    await open(page);
+
+    const before = await page.getByTestId('note-card').count();
+    const card = page.getByTestId('note-card').first();
+    const noteId = await card.getAttribute('data-note-id');
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+    await expect(page.getByTestId('note-card')).toHaveCount(before - 1);
+
+    await page.getByTestId('undo-toast-undo').click();
+
+    await expect(page.getByTestId('note-card')).toHaveCount(before);
+    await expect(
+      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`),
+    ).toBeVisible();
+    await expect(page.getByTestId('undo-toast')).toHaveCount(0);
+  });
+
+  test('the toast expires on its own', async ({ page }) => {
+    await open(page);
+
+    const card = page.getByTestId('note-card').first();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+    await expect(page.getByTestId('undo-toast')).toBeVisible();
+
+    /* Six seconds is §6.2's number, and it is the one user-visible duration in the
+       app. Asserted with a real wait rather than a fake clock, because this is the
+       test that would catch the constant being changed. */
+    await expect(page.getByTestId('undo-toast')).toBeHidden({ timeout: 8000 });
+  });
+
+  test('closing the editor when the open note is deleted', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+
+    const card = page.getByTestId('note-card').first();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+
+    /* `10-conventions.md` §6: a note that is not there means close the editor. A
+       deleted note still rendering in the editor would be a save into the void. */
+    await expect(page.getByText('No note open')).toBeVisible();
+  });
+
+  test('deletes with Ctrl+Backspace from the editor', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+    const before = await page.getByTestId('note-card').count();
+
+    await page.getByRole('textbox', { name: 'Note content' }).click();
+    await page.keyboard.press('Control+Backspace');
+
+    await expect(page.getByTestId('note-card')).toHaveCount(before - 1);
+    await expect(page.getByTestId('undo-toast')).toBeVisible();
+  });
+
+  test('restores a trashed note and re-opens it', async ({ page }) => {
+    await open(page);
+
+    const card = page.getByTestId('note-card').first();
+    const noteId = await card.getAttribute('data-note-id');
+    const title = await card.locator('.text-\\[14px\\]').innerText();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+    await page.getByTestId('undo-toast-dismiss').click();
+
+    await page.getByTestId('filter-trash').click();
+    const trashed = page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`);
+    await expect(trashed).toBeVisible();
+
+    await trashed.hover();
+    await trashed.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-restore').click();
+
+    /* Closing the editor after a restore would make undo look like it acted on the
+       wrong note, so a restored note comes back open. */
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await expect(page.locator('.ProseMirror')).toContainText(title);
+  });
+
+  test('permanent delete asks first, and then really goes', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('filter-trash').click();
+
+    const trashed = page.getByTestId('note-card').first();
+    const noteId = await trashed.getAttribute('data-note-id');
+    await trashed.hover();
+    await trashed.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-destroy').click();
+
+    /* §6.2: only permanent delete and empty trash confirm. */
+    await expect(page.getByRole('dialog')).toContainText('cannot be undone');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`)).toBeVisible();
+
+    await trashed.hover();
+    await trashed.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-destroy').click();
+    await page.getByTestId('confirm-dialog-confirm').click();
+
+    await expect(page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`)).toHaveCount(0);
+  });
+
+  test('empties the trash from the list header, confirming first', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('filter-trash').click();
+
+    /* The fixture trash holds one note, so emptying it empties it. */
+    await expect(page.getByTestId('empty-trash')).toBeVisible();
+    await page.getByTestId('empty-trash').click();
+    await expect(page.getByRole('dialog')).toContainText('cannot be undone');
+
+    await page.getByTestId('confirm-dialog-confirm').click();
+
+    await expect(page.getByText('Trash is empty')).toBeVisible();
+    /* §8's empty state, not a blank panel. */
+    await expect(page.getByTestId('empty-trash')).toHaveCount(0);
+  });
+
+  test('offers no trash actions in a live list', async ({ page }) => {
+    await open(page);
+
+    const card = page.getByTestId('note-card').first();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+
+    /* A permanent delete reachable from a live list is the failure this whole
+       milestone cares about. */
+    await expect(page.getByTestId('note-menu-delete')).toBeVisible();
+    await expect(page.getByTestId('note-menu-destroy')).toHaveCount(0);
+    await expect(page.getByTestId('note-menu-restore')).toHaveCount(0);
+    await expect(page.getByTestId('empty-trash')).toHaveCount(0);
   });
 });
 

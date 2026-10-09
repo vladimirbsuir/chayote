@@ -6,6 +6,10 @@ import { useNow, useNotes } from './hooks/useNotes';
 import { countByFolder, folderNamesById, useFolders } from './hooks/useFolders';
 import { useTags } from './hooks/useTags';
 import { useTogglePin } from './hooks/useTogglePin';
+import { useTrashActions } from './hooks/useTrashActions';
+import { UndoToast } from './components/UndoToast';
+import { useUndoToast } from './components/useUndoToast';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import {
   openNote as setOpenNote,
   select as setSelection,
@@ -82,6 +86,50 @@ function Shell() {
   const { folders } = useFolders();
   const { tags } = useTags();
   const { togglePin, pendingId: pinPendingId } = useTogglePin();
+  const { toast: undoToast, show: showUndoToast } = useUndoToast();
+
+  /* `05-ui-ux.md` §6.2: a note that leaves the trash closes the editor, and one that
+     comes back re-opens it — closing after a restore would make undo look like it
+     acted on the wrong note. */
+  const trash = useTrashActions({
+    onOpenNoteGone: (goneId) => {
+      if (goneId === null || goneId === useSelectionStore.getState().openNoteId) {
+        setOpenNote(null);
+        if (useSelectionStore.getState().selection.kind === 'folder') {
+          setSelection({ kind: 'all' });
+        }
+      }
+    },
+    onRestored: (id) => {
+      setOpenNote(id);
+    },
+  });
+
+  /* One entry point for a soft delete, wherever it was triggered from, so the toast's
+     text always names the note the user actually deleted and the restore always
+     targets the same id. A second copy of this in the key handler is how a toast ends
+     up offering to undo the wrong note. */
+  const softDeleteWithToast = useCallback(
+    (id: Uuid): void => {
+      const note = notes?.find((candidate) => candidate.id === id);
+      const title = note === undefined || note.title.length === 0 ? 'Untitled' : note.title;
+      trash.softDelete(id);
+      showUndoToast(id, title, () => {
+        void trash.restore(id);
+      });
+    },
+    [notes, showUndoToast, trash],
+  );
+
+  /* `05-ui-ux.md` §6.2: permanent delete and empty trash confirm; nothing else here
+     does. One piece of state rather than two, because a user cannot have two
+     destructive confirmations open at once and two flags would only be a way to get
+     that wrong. */
+  const [confirm, setConfirm] = useState<
+    | { kind: 'destroy'; id: Uuid; title: string }
+    | { kind: 'empty' }
+    | null
+  >(null);
   const now = useNow();
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
@@ -225,6 +273,16 @@ function Shell() {
     [folders, foldersChanged],
   );
 
+  /* §6.2 and §7: `Ctrl/Cmd+Backspace` deletes the open note. Bound on the window so
+     it works with focus in the editor or in the list, and `preventDefault` because
+     Backspace in a WebView navigates back otherwise — which on Android would pop the
+     view stack out from under a note the user is deleting. */
+  const deleteOpenNote = useCallback((): void => {
+    const id = useSelectionStore.getState().openNoteId;
+    if (id === null) return;
+    softDeleteWithToast(id);
+  }, [softDeleteWithToast]);
+
   const openFromList = useCallback(
     (id: Uuid) => {
       setOpenNote(id);
@@ -260,6 +318,13 @@ function Shell() {
         } else {
           useSettingsStore.getState().toggleSidebarCollapsed();
         }
+        return;
+      }
+      /* §7: `Delete note` is `Ctrl/Cmd+Backspace`. Not plain Backspace — in a WebView
+         that navigates back, and in the editor that deletes a character. */
+      if (key === 'backspace') {
+        event.preventDefault();
+        deleteOpenNote();
       }
     };
 
@@ -267,7 +332,7 @@ function Shell() {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [createNote, tablet]);
+  }, [createNote, deleteOpenNote, tablet]);
 
   /* Leaving the editor on a small screen pops the view stack (§2.4), which is
      what the Android back button does natively in M7. */
@@ -303,6 +368,31 @@ function Shell() {
         togglePin(id, !current.isPinned);
       }}
       pinPendingId={pinPendingId}
+      /* Which actions the list offers is the selection's business, not the caller's:
+     a live list offers delete and nothing else, the trash offers restore and
+     permanent delete and not delete. Passing all three unconditionally would put a
+     "Delete permanently" control on every note the user has not deleted yet — the
+     one mistake §6.2 is written to prevent. */
+onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
+      onRestoreNote={
+        selection.kind === 'trash'
+          ? (id) => {
+              void trash.restore(id);
+            }
+          : undefined
+      }
+      onDestroyNote={
+        selection.kind === 'trash'
+          ? (id) => {
+              const note = notes?.find((candidate) => candidate.id === id);
+              const title = note === undefined || note.title.length === 0 ? 'Untitled' : note.title;
+              setConfirm({ kind: 'destroy', id, title });
+            }
+          : undefined
+      }
+      onEmptyTrash={() => {
+        setConfirm({ kind: 'empty' });
+      }}
       onToggleFolder={useSettingsStore.getState().toggleFolderCollapsed}
       onCreateFolder={createFolder}
       onCreateTag={NOOP}
@@ -393,6 +483,49 @@ function Shell() {
           onResize={useSettingsStore.getState().setSidebarWidth}
         />
       )}
+
+      {/* The undo toast floats above the whole app rather than living in the
+          sidebar: a delete can be triggered from the editor's keyboard shortcut, and
+          a toast pinned to the sidebar would then be off-screen from where the user
+          is looking. Bottom-centred, out of the way of both panes. */}
+      {undoToast === null ? null : (
+        <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
+          <UndoToast toast={undoToast} />
+        </div>
+      )}
+
+      {confirm?.kind === 'destroy' ? (
+        <ConfirmDialog
+          title={`Delete “${confirm.title}” permanently?`}
+          /* §6.2 gives soft delete an undo toast and permanent delete a
+             confirmation. This one cannot be undone and there is no count to name,
+             so it is a different shape from the folder's — which exists to say how
+             many folders go with it. */
+          body="This cannot be undone. The note and its text are removed from this device."
+          confirmLabel="Delete permanently"
+          onCancel={() => {
+            setConfirm(null);
+          }}
+          onConfirm={() => {
+            const target = confirm.id;
+            setConfirm(null);
+            void trash.destroy(target);
+          }}
+        />
+      ) : confirm?.kind === 'empty' ? (
+        <ConfirmDialog
+          title="Empty the trash?"
+          body="Every note in the trash is removed from this device. This cannot be undone."
+          confirmLabel="Empty trash"
+          onCancel={() => {
+            setConfirm(null);
+          }}
+          onConfirm={() => {
+            setConfirm(null);
+            void trash.emptyTrash();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

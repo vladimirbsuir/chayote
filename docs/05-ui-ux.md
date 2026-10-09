@@ -284,6 +284,16 @@ The new note's folder is resolved in this order:
 
 Delete moves the note to trash with an **undo toast** for 6 seconds offering "Undo". The soft delete is already persisted; undo simply restores. Permanent delete and empty trash require `ConfirmDialog`.
 
+**The actions a note row offers are the selection's, not the shell's.** A live list offers exactly one item — *Move to trash*. The trash offers *Restore* and *Delete permanently*, and never *Move to trash* again. Emptiness drives the whole thing: a live note cannot have a "delete permanently" control on it, and a trashed note cannot be moved to the trash a second time. This is the one mistake in this section worth being pedantic about.
+
+**A deleted note's row is menu-keyed, not a boolean.** Opening a menu remembers which note it is for and where; when the note's id, timestamp or available actions change, the key stops matching and the menu is simply not rendered. A boolean would need an effect to close it, and an effect repairs state one render late — showing the wrong note's actions for a frame, in a menu whose whole purpose is destructive actions.
+
+**The note row menu is portalled and positioned against the viewport.** The note list is virtualised, and every row is a transformed, absolutely positioned element — which creates a stacking context, so a menu rendered inside a row cannot be lifted above the rows after it by `z-index`, and the scroll container's `overflow` clips it as well. Measured in the click handler rather than in an effect, because the geometry is available at the click. It opens upward when there is no room below, which is the common case for the last card and not only for the last card.
+
+**The undo toast names the note it deleted**, sits at the bottom of the window rather than inside the sidebar, and moves no focus. A delete can come from `Ctrl/Cmd+Backspace` while the caret is in the editor, so a toast pinned to the sidebar would be off-screen from where the user is looking — and a focus move would break the keystroke in progress. It announces politely rather than assertively, for the same reason: an assertive announcement interrupts whatever a screen reader is reading. A second delete replaces the toast and its timer rather than stacking a second one; two timers racing would restore whichever note each was pointed at.
+
+**`Ctrl/Cmd+Backspace` deletes the open note**, not plain `Backspace` — in a WebView that navigates back, and in the editor that deletes a character.
+
 ### 6.3 Folders
 
 Creating a folder is inline: a single text input in place, `Enter` commits, `Esc` cancels, empty input cancels. Renaming is the same. Deleting a folder with children requires confirmation naming the count. Reordering and re-parenting by drag; `position` values are densified in one transaction (`03-data-model.md` §3.2).

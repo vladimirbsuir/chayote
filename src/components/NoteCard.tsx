@@ -1,5 +1,6 @@
-import { memo } from 'react';
-import { Folder, Hash, Pin } from 'lucide-react';
+import { memo, useState } from 'react';
+import { Folder, Hash, MoreHorizontal, Pin } from 'lucide-react';
+import { NoteRowMenu } from './NoteRowMenu';
 import type { NoteSummary } from '../types/ipc';
 
 /* One row of the note list: title, excerpt, relative timestamp, pinned
@@ -11,6 +12,21 @@ import type { NoteSummary } from '../types/ipc';
    13 px excerpt clamped to two lines, 12 px meta row. */
 
 const UNTITLED = 'Untitled';
+
+/** The menu's own metrics, from the prototype's popover: 168 px is the narrowest that
+    fits "Delete permanently" at 13 px with its icon, and 120 px is its height with
+    three items. Used only to decide which way it opens — enough to know whether there
+    is room below, without laying it out first. */
+const MENU_WIDTH = 168;
+const MENU_ESTIMATED_HEIGHT = 120;
+
+/** Which note's menu is open, and where. Keyed rather than a boolean, so a row whose
+    note, timestamp or available actions change simply stops matching — no effect
+    needed to close a menu whose row has gone or moved. */
+type MenuState = {
+  key: string;
+  placement: { top: number; left: number };
+};
 
 type NoteCardProps = {
   note: NoteSummary;
@@ -29,6 +45,12 @@ type NoteCardProps = {
   /** A write is in flight for this card, so its pin control is disabled rather than
       accepting a second press that would race the first. */
   pinPending?: boolean;
+  /** §6.2. Absent in the trash for `onDelete`, and in every live list for the other
+      two: a card offers the actions its selection can actually perform, so there is
+      never a control that would delete something permanently by accident. */
+  onDelete?: (id: string) => void;
+  onRestore?: (id: string) => void;
+  onDestroy?: (id: string) => void;
 };
 
 /* `memo` is not premature here: this is the component that renders once per
@@ -44,8 +66,55 @@ export const NoteCard = memo(function NoteCard({
   onOpen,
   onTogglePin,
   pinPending = false,
+  onDelete,
+  onRestore,
+  onDestroy,
 }: NoteCardProps) {
   const untitled = note.title.length === 0;
+  const hasRowActions = onDelete !== undefined || onRestore !== undefined || onDestroy !== undefined;
+
+  /* Which note's menu is open, held by id rather than as a boolean.
+    A boolean has to be reset in an effect whenever the row changes underneath it —
+     when the note is deleted, pinned, or its actions change with the selection — and
+     an effect that repairs state after the render in which it went stale shows the
+     wrong menu for a frame, with actions aimed at a note that is no longer there.
+     Keying it by id makes that impossible: the menu is open only for the note it was
+     opened for, and anything else renders none.
+
+     `updatedAt` is part of the key because a note whose content changed has re-sorted
+     under the pointer, and a menu left open over a list that has moved is a set of
+     actions aimed at a row the user is no longer looking at. */
+  const [menuFor, setMenuFor] = useState<MenuState | null>(null);
+  const menuStamp = `${note.id}:${note.updatedAt}:${String(hasRowActions)}`;
+  const openMenuFor = menuFor !== null && menuFor.key === menuStamp ? menuFor : null;
+
+  /* Measured here, in the click handler, and handed to the menu as a plain value.
+
+     Measuring inside the menu would need an effect, and an effect that measures the
+     DOM and then sets state is a second render for something already known at the
+     moment of the click. A click is an event; the geometry is available there.
+
+     The list is a scroll container, so a menu opening downward is clipped at the
+     bottom edge and one opening upward is covered at the top — and both happen
+     routinely, because the first and last cards are the two a user is most likely to
+     act on. Measured against the viewport rather than computed from the row's index,
+     because the list is virtualised: the same index sits at a different height in a
+     scrolled list, in a shorter window, and on a phone. */
+  const openMenu = (button: HTMLElement): void => {
+    if (openMenuFor !== null) {
+      setMenuFor(null);
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    const up = rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight && rect.top > MENU_ESTIMATED_HEIGHT;
+    setMenuFor({
+      key: menuStamp,
+      placement: {
+        top: up ? rect.top - 4 : rect.bottom + 4,
+        left: Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8),
+      },
+    });
+  };
 
   return (
     <div
@@ -114,10 +183,57 @@ export const NoteCard = memo(function NoteCard({
         <span>{timestamp}</span>
         {showFolder && folderName !== null ? <FolderChip name={folderName} /> : null}
         {note.tags.length > 0 ? <TagChip name={note.tags[0]?.name ?? ''} /> : null}
+        {hasRowActions ? (
+          /* §9: hover styling exists at `pointer: fine` and nowhere else, and the
+             menu button stays out of the tab order because the row's own keydown
+             opens it — the same two rules the folder rows follow. */
+          <span className="ml-auto hidden flex-none pointer-fine:group-hover:flex">
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={`${titleOf(note)} actions`}
+              aria-haspopup="menu"
+              aria-expanded={openMenuFor !== null}
+              title={`${titleOf(note)} actions`}
+              data-testid="note-menu-button"
+              data-note-id={note.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                openMenu(event.currentTarget);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'ContextMenu') {
+                  event.preventDefault();
+                  openMenu(event.currentTarget);
+                }
+              }}
+              className="grid h-[20px] w-[20px] place-items-center rounded text-[var(--text-subtle)] transition-colors hover:bg-[var(--surface-sunken)] hover:text-[var(--text)]"
+            >
+              <MoreHorizontal className="icon i-16" aria-hidden="true" />
+            </button>
+          </span>
+        ) : null}
       </div>
+
+      {openMenuFor !== null ? (
+        <NoteRowMenu
+          note={note}
+          placement={openMenuFor.placement}
+          onDelete={onDelete}
+          onRestore={onRestore}
+          onDestroy={onDestroy}
+          onClose={() => {
+            setMenuFor(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 });
+
+function titleOf(note: NoteSummary): string {
+  return note.title.length === 0 ? UNTITLED : note.title;
+}
 
 function PinButton({
   note,

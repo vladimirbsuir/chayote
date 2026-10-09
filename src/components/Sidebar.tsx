@@ -39,6 +39,12 @@ type SidebarProps = {
       something the user can act on. */
   onTogglePin?: (id: Uuid) => void;
   pinPendingId?: Uuid | null;
+  /** §6.2: delete, and — in the trash — restore and permanent delete. Absent in the
+      trash's own list header for `onEmptyTrash` when there is nothing to empty. */
+  onDeleteNote?: (id: Uuid) => void;
+  onRestoreNote?: (id: Uuid) => void;
+  onDestroyNote?: (id: Uuid) => void;
+  onEmptyTrash?: () => void;
   onToggleFolder: (id: Uuid) => void;
   /** §6.3: creating a folder is an inline input in the tree, committed with `Enter`.
       Returns a promise so the input can stay open on a rejected write, rather than
@@ -73,6 +79,10 @@ export function Sidebar({
   onNewNote,
   onTogglePin,
   pinPendingId,
+  onDeleteNote,
+  onRestoreNote,
+  onDestroyNote,
+  onEmptyTrash,
   onToggleFolder,
   onCreateFolder,
   onCreateTag,
@@ -186,12 +196,24 @@ export function Sidebar({
           <span className="truncate" data-testid="list-header">
             {header.title}
           </span>
-          <span
-            className="shrink-0 pl-2 font-normal text-[var(--text-subtle)]"
-            data-testid="list-count"
-          >
-            {header.count}
-          </span>
+          <div className="flex shrink-0 items-center gap-2 pl-2">
+            <span className="font-normal text-[var(--text-subtle)]" data-testid="list-count">
+              {header.count}
+            </span>
+            {/* §6.2: emptying the trash is destructive and irreversible, so it is
+                here rather than on a card, and only when there is something to
+                empty. */}
+            {selection.kind === 'trash' && onEmptyTrash !== undefined && (notes?.length ?? 0) > 0 ? (
+              <button
+                type="button"
+                data-testid="empty-trash"
+                onClick={onEmptyTrash}
+                className="text-[12px] text-[var(--danger)] hover:underline"
+              >
+                Empty trash
+              </button>
+            ) : null}
+          </div>
         </header>
 
         {isPending ? (
@@ -208,6 +230,9 @@ export function Sidebar({
             onOpen={onOpenNote}
             onTogglePin={selection.kind === 'trash' ? undefined : onTogglePin}
             pinPendingId={pinPendingId ?? null}
+            onDeleteNote={onDeleteNote}
+            onRestoreNote={onRestoreNote}
+            onDestroyNote={onDestroyNote}
             empty={emptyFor(selection, onNewNote)}
           />
         )}
