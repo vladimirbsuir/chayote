@@ -355,6 +355,8 @@ function collectSubtree(db: MockDatabase, rootId: Uuid): Uuid[] {
   return found;
 }
 
+/** The seeded database the browser fallback starts from: nested folders, tags
+    with counts, pinned and unpinned notes, and one trashed note. */
 export function buildMockDatabase(): MockDatabase {
   const generated = buildDatabase({ noteCount: 0 });
   return {
@@ -362,6 +364,16 @@ export function buildMockDatabase(): MockDatabase {
     tags: generated.tags,
     notes: [...FIXTURE_NOTES, ...FIXTURE_TRASH, { ...EMPTY_NOTE }],
   };
+}
+
+/** The empty database of ADR-014: zero folders, zero tags, zero notes.
+
+    First launch is the first thing every user sees and it is a real screen, so
+    it has to be reachable in a browser rather than only on a fresh install. The
+    choice lives here rather than in a component so a test can ask for it and get
+    the same thing a new device gets. */
+export function buildEmptyMockDatabase(): MockDatabase {
+  return { folders: [], tags: [], notes: [] };
 }
 
 export { deriveTitle, FIXTURE_NOW };

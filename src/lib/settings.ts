@@ -12,6 +12,9 @@ export type Settings = {
   /** `null` means notes start unfiled; nothing is pre-created. */
   defaultFolderId: Uuid | null;
   sidebarWidth: number;
+  /** `true` when the sidebar is hidden. Width is remembered separately, so
+      toggling back restores 320 px rather than the minimum. */
+  sidebarCollapsed: boolean;
   collapsedFolders: Uuid[];
   lastNoteId: Uuid | null;
   lastSelection: Selection;
@@ -22,6 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: '#2f6fed',
   defaultFolderId: null,
   sidebarWidth: 320,
+  sidebarCollapsed: false,
   collapsedFolders: [],
   lastNoteId: null,
   lastSelection: { kind: 'all' },

@@ -1,6 +1,6 @@
 # 05 — UI & UX Specification
 
-**Status:** Frozen. Last updated 2026-10-08.
+**Status:** Frozen. Last updated 2026-10-09.
 
 ---
 
@@ -150,6 +150,9 @@ Rules: the dark palette is not a mechanical inversion — contrast is verified p
 | Note list timestamp | 12 px · 400 · 1.3 |
 | UI label | 13 px · 500 |
 | Sidebar section header | 11 px · 600, uppercase, 0.06 em tracking |
+
+The sidebar resize separator is painted as a 1 px rule in `--border`, hovering or
+focused in `--accent`, and is hit-tested at 9 px rather than 1 px. See §9 for why.
 
 Font: `Inter` bundled locally via `@fontsource`, falling back to the system UI stack. Bundling avoids a network fetch and a FOUT. Code blocks use `ui-monospace, SFMono-Regular, Menlo, monospace` at 15 px.
 
@@ -305,7 +308,12 @@ Search results are ordered by `bm25` relevance, **not** by the pinned/updated or
 
 ### 6.5a Timestamps in the note list
 
-Relative by default: `now`, `2 min`, `3 h`, `yesterday`, then a short absolute date once older than a week (`3 Feb`). No tooltip on desktop — the relative form is what matters, and a hover state on every row is visual noise. The exact timestamp is visible in the editor's detail area when the note is open, where there is room for it.
+Relative by default: `now`, `2 min`, `3 h`, `yesterday`, then a short absolute date once older than a week (`3 Feb`). **No tooltip on desktop** — the relative form is what matters, and a hover state on every row is visual noise. The exact timestamp is visible in the editor's detail area when the note is open, where there is room for it.
+
+This settles what `08-roadmap.md` §6 Q4 left open. The question asked whether a
+`Updated 3 Feb` affordance should appear on hover and recorded the default as
+"relative only, no tooltip" — the two halves of that sentence disagreed. The rule
+here is the second half, and **Q4 is answered: relative only, no tooltip.**
 
 | Age | Shown |
 |------|-------|
@@ -391,7 +399,35 @@ Every empty state explains the cause, not just the fact. No illustration, no mas
 | 768–1023 px | Sidebar as overlay drawer, editor full width |
 | < 768 px | Single pane, view stack, no hover states |
 
+The sidebar is **collapsible on desktop and dismissible as a drawer on tablet**, and
+the two are different affordances:
+
+| Range | Visible control | Shortcut |
+|-------|-----------------|----------|
+| ≥ 1024 px | **None.** The sidebar is always shown; `Ctrl/Cmd+\` collapses it. | `Ctrl/Cmd+\` |
+| 768–1023 px | A `menu` icon button in the top bar, plus the `Ctrl/Cmd+\` shortcut | both |
+
+The desktop bar has no toggle button deliberately. A control whose only effect
+would be to hide something that must be visible at that width is a button that
+changes nothing, and `prototype/index.html`'s desktop top bar has none — ADR-016
+makes the prototype authoritative for appearance. Collapsing the desktop sidebar
+is a power-user action with a shortcut, not something the chrome advertises.
+
+The collapsed state and the width are **two separate settings**, so collapsing and
+expanding restores the width the user chose rather than snapping back to the
+default.
+
 Hover styling exists only at `pointer: fine`. Every hover affordance has a tap equivalent. Touch targets are at least 44 × 44 px on Android. Long-press opens the context menu on Android; hover shows it on desktop.
+
+**The sidebar resize separator is a 1 px rule with a wider hit area.** §3.3 sets
+32 × 32 px for icon buttons; a drag handle one pixel wide is correct to look at
+and unusable to grab, and it moves as the sidebar resizes, so a narrow target also
+loses the pointer mid-drag. It is painted as a 1 px hairline and hit-tested at
+9 px, centred on it.
+
+**The top bar is not rendered on the mobile list view.** The Android list view
+carries its own bar with a `menu` button, the app name, and a new-note button
+(§2.4); the desktop bar would be a second bar above it.
 
 ## 10. Accessibility
 

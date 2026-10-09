@@ -4,7 +4,12 @@ import type { TagWithCount } from '../types/tag';
 import type { Note, NoteFilter, NoteSummary, SaveNoteInput } from '../types/ipc';
 import type { SearchInput, SearchPage } from '../types/search';
 import type { Uuid } from '../types/note';
-import { buildMockDatabase, createMockBackend } from '../mock/adapter';
+import {
+  buildEmptyMockDatabase,
+  buildMockDatabase,
+  createMockBackend,
+} from '../mock/adapter';
+import type { MockDatabase } from '../mock/derive';
 
 export { cycleDetected, MockBackendError, notFound } from '../mock/errors';
 
@@ -28,10 +33,19 @@ function tauriBackend(): Backend {
 
 let active: Backend | null = null;
 
+/** `?seed=empty` starts the browser fallback from an empty database, which is the
+    ADR-014 first-launch state. It is read here, in the one module that owns the
+    adapter choice, so a test reaches it by URL rather than by importing the mock
+    into a component — which `10-conventions.md` §5 forbids. */
+function mockDatabaseForUrl(): MockDatabase {
+  const seed = new URLSearchParams(window.location.search).get('seed');
+  return seed === 'empty' ? buildEmptyMockDatabase() : buildMockDatabase();
+}
+
 function resolve(): Backend {
   if (active !== null) return active;
   if (import.meta.env.DEV && !isTauri) {
-    active = createMockBackend(buildMockDatabase());
+    active = createMockBackend(mockDatabaseForUrl());
     return active;
   }
   active = tauriBackend();

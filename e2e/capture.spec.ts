@@ -33,6 +33,13 @@ for (const [name, spec] of Object.entries(STATES)) {
     );
 
     await page.goto('/');
+    /* §2.4: below 768 px only the list is on screen at rest — the editor is a
+       pushed view. Capturing the mobile editor therefore means opening a note,
+       which is the real user path and not a special case in the test. */
+    if (spec.width < 768) {
+      await expect(page.getByTestId('note-list')).toBeVisible();
+      await page.getByTestId('note-card').first().click();
+    }
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
     await expect(page.getByTestId('save-state')).toHaveText('Saved');
     await page.screenshot({ path: `screenshots/${name}.png`, fullPage: false });
