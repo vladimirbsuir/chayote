@@ -66,6 +66,37 @@ export function visibleFolderRows(
   return rows;
 }
 
+/** Count every folder strictly below `rootId`.
+    `05-ui-ux.md` §6.3: deleting a folder with children needs a confirmation that
+    *names the count*. Counting in the frontend rather than asking the backend is
+    deliberate — the tree is already loaded, and a count the user can see before
+    committing is the whole point of the confirmation. A folder's own notes are not
+    counted: they survive as unfiled (`03-data-model.md` §3.3, `ON DELETE SET
+    NULL`), so calling them descendants would be a lie. */
+export function descendantCount(nodes: FolderNode[], rootId: Uuid): number {
+  const find = (list: FolderNode[]): FolderNode | null => {
+    for (const node of list) {
+      if (node.id === rootId) return node;
+      const hit = find(node.children);
+      if (hit !== null) return hit;
+    }
+    return null;
+  };
+
+  const root = find(nodes);
+  if (root === null) return 0;
+
+  let count = 0;
+  const walk = (list: FolderNode[]): void => {
+    for (const node of list) {
+      count += 1;
+      walk(node.children);
+    }
+  };
+  walk(root.children);
+  return count;
+}
+
 export type TreeKeyAction =
   | { kind: 'move'; id: Uuid }
   | { kind: 'select'; id: Uuid }

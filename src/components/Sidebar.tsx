@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { FilePlus, Folder, Hash, Pin, Plus, Trash } from 'lucide-react';
 import type { NoteSummary, Selection } from '../types/ipc';
@@ -36,8 +36,16 @@ type SidebarProps = {
   onOpenNote: (id: Uuid) => void;
   onNewNote: () => void;
   onToggleFolder: (id: Uuid) => void;
-  onCreateFolder: () => void;
+  /** §6.3: creating a folder is an inline input in the tree, committed with `Enter`.
+      Returns a promise so the input can stay open on a rejected write, rather than
+      closing and losing what was typed. */
+  onCreateFolder: (name: string, parentId: Uuid | null) => Promise<void>;
   onCreateTag: () => void;
+  onRenameFolder: (id: Uuid, name: string) => Promise<void>;
+  onDeleteFolder: (id: Uuid) => Promise<void>;
+  /** Shown where a folder write failed. `AppError.message` is user-facing copy
+      by contract (`10-conventions.md` §6). */
+  onFolderError?: (message: string) => void;
 };
 
 export function Sidebar({
@@ -59,11 +67,20 @@ export function Sidebar({
   onToggleFolder,
   onCreateFolder,
   onCreateTag,
+  onRenameFolder,
+  onDeleteFolder,
+  onFolderError,
 }: SidebarProps) {
   const header = useMemo(
     () => headerFor(selection, notes ?? EMPTY_NOTES, folderNames),
     [selection, notes, folderNames],
   );
+
+  /* Whether the root-level folder create input is open. It lives here because the
+     `+` that opens it is in the section header above the tree, and the input
+     itself is rendered by `FolderTree` — the two halves of one control, each owned
+     by the component that actually draws it. */
+  const [creatingRoot, setCreatingRoot] = useState(false);
 
   const scoped = selection.kind === 'folder' || selection.kind === 'tag';
 
@@ -86,7 +103,12 @@ export function Sidebar({
           icon={<Folder className="icon i-16" aria-hidden="true" />}
           label="Folders"
           singular="folder"
-          onAdd={onCreateFolder}
+          /* §6.3: creating a folder is an inline input, not a dialog. `+` opens
+             it and `Enter` commits, which is why this is a request rather than a
+             write — the input has to exist before there is anything to write. */
+          onAdd={() => {
+            setCreatingRoot((open) => !open);
+          }}
         />
         <FolderTree
           nodes={folders}
@@ -95,6 +117,12 @@ export function Sidebar({
           collapsed={collapsedFolders}
           onSelect={onSelect}
           onToggle={onToggleFolder}
+          onCreate={onCreateFolder}
+          onRename={onRenameFolder}
+          onDelete={onDeleteFolder}
+          onError={onFolderError}
+          creatingRoot={creatingRoot}
+          onCreatingRootChange={setCreatingRoot}
         />
       </section>
 

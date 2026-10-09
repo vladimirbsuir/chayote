@@ -343,6 +343,142 @@ test.describe('folder tree keyboard pattern', () => {
   });
 });
 
+/* `05-ui-ux.md` §6.3: folder create and rename are inline inputs, and a folder with
+   children cannot be deleted without a confirmation that names the count. These run
+   against the mock backend end to end, because the parts jsdom cannot judge are the
+   parts that matter — that the input takes focus, that `Enter` reaches the command
+   rather than the editor behind it, and that the dialog traps focus. */
+test.describe('folder organisation', () => {
+  test('creates a folder from an inline input with Enter', async ({ page }) => {
+    await open(page);
+    const before = await page.getByTestId('folder-row').count();
+
+    await page.getByRole('button', { name: 'New folder' }).click();
+    const input = page.getByTestId('folder-name-input');
+    await expect(input).toBeFocused();
+    await input.fill('Research');
+    await input.press('Enter');
+
+    await expect(page.getByTestId('folder-row')).toHaveCount(before + 1);
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Research' })).toBeVisible();
+    expect(await page.getByRole('dialog').count()).toBe(0);
+  });
+
+  test('cancels the create input on Escape without writing', async ({ page }) => {
+    await open(page);
+    const before = await page.getByTestId('folder-row').count();
+
+    await page.getByRole('button', { name: 'New folder' }).click();
+    await page.getByTestId('folder-name-input').fill('Discarded');
+    await page.getByTestId('folder-name-input').press('Escape');
+
+    await expect(page.getByTestId('folder-name-input')).toHaveCount(0);
+    await expect(page.getByTestId('folder-row')).toHaveCount(before);
+  });
+
+  test('renames a folder with F2 and keeps its notes', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).focus();
+    await page.keyboard.press('F2');
+
+    const input = page.getByTestId('folder-name-input');
+    await expect(input).toHaveValue('Work');
+    await input.fill('Day job');
+    await input.press('Enter');
+
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Day job' })).toBeVisible();
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toHaveCount(0);
+  });
+
+  test('confirms before deleting a folder with children, naming the count', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).click({ button: 'right' });
+    await page.getByTestId('folder-menu-delete').click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    /* §6.3: the count is why the dialog exists. */
+    await expect(dialog).toContainText('2 folders');
+    await expect(dialog).toContainText('become unfiled');
+
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toBeVisible();
+  });
+
+  test('takes the whole subtree with a confirmed delete', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).click({ button: 'right' });
+    await page.getByTestId('folder-menu-delete').click();
+    await page.getByTestId('confirm-dialog-confirm').click();
+
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toHaveCount(0);
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toHaveCount(0);
+    /* The notes survived as unfiled rather than going with the folder. */
+    await expect(page.getByTestId('note-card').first()).toBeVisible();
+  });
+
+  test('keeps focus inside the delete confirmation', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).click({ button: 'right' });
+    await page.getByTestId('folder-menu-delete').click();
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+
+    /* §10: Tab must not walk behind the dialog into the editor, or the next
+       keystroke types into a note the user thinks is not being edited. */
+    await page.keyboard.press('Tab');
+    await expect(page.getByTestId('confirm-dialog-confirm')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  });
+
+  test('restores focus to the row when the confirmation closes', async ({ page }) => {
+    await open(page);
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.click({ button: 'right' });
+    await page.getByTestId('folder-menu-delete').click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(work).toBeFocused();
+  });
+
+  test('opens the folder menu from the row button and from right-click alike', async ({ page }) => {
+    await open(page);
+
+    await page.getByRole('button', { name: 'Work actions' }).click({ force: true });
+    await expect(page.getByTestId('folder-menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Personal' }).click({ button: 'right' });
+    await expect(page.getByTestId('folder-menu')).toHaveAttribute('aria-label', 'Personal actions');
+  });
+
+  test('nests a new folder inside the row that asked for it', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).click({ button: 'right' });
+    await page.getByTestId('folder-menu-create').click();
+
+    const input = page.getByTestId('folder-name-input');
+    await expect(input).toHaveAttribute('aria-label', 'New folder inside Work');
+    await input.fill('Clients');
+    await input.press('Enter');
+
+    const nested = page.getByTestId('folder-row').filter({ hasText: 'Clients' });
+    await expect(nested).toBeVisible();
+    /* Nested means indented one level deeper, which is what makes it a child. */
+    await expect(nested).toHaveAttribute('aria-level', '2');
+  });
+});
+
 test.describe('note list', () => {
   test('sorts pinned notes above everything else', async ({ page }) => {
     await open(page);

@@ -290,6 +290,14 @@ Creating a folder is inline: a single text input in place, `Enter` commits, `Esc
 
 **Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. On touch, long-press initiates a folder drag; otherwise the gesture scrolls.
 
+**A childless folder deletes without a dialog.** The confirmation exists to warn about a subtree; warning about nothing is the interrupt `01-product.md` principle 1 warns against. The dialog names the count of folders that go with it, and says that notes inside are kept and become unfiled — `notes.folder_id` is `ON DELETE SET NULL` (`03-data-model.md` §3.3), so "and its notes" would describe data the app does not delete.
+
+**Folder actions live in a per-row overflow menu**, not in three always-visible controls: a 26 px row has room for the twisty, the folder glyph, the name, and a count, and three more controls would leave the name about forty pixels wide. The menu is `more-horizontal` from the §3.3 inventory, reachable three ways — the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch. Its items are **text, not icons**: the §3.3 inventory is closed and has no edit glyph, and ADR-015 requires adding an icon there before using it. Three distinct English verbs are also §1's "no icons where a word is clearer" applied to a list of rows where a bare verb would be ambiguous about its target.
+
+**`F2` renames and `Delete` removes** the focused folder (§7), and both route through the same handler as the menu items. A second implementation of "delete a folder" is how the confirmation ends up counting descendants in one path only.
+
+**A rejected write keeps the input open** with its text and the reason beneath it (§8, "Keep editing"), and the message clears as soon as the user types again. Losing what was typed on a validation failure is the failure mode `05-ui-ux.md` §8 is written against.
+
 ### 6.3a Pinning
 
 `Ctrl/Cmd+D`, or the pin control on a note card and in the editor. Toggling is optimistic in the UI and reconciled by the command response. Pinned notes sort above every other note in every selection, and a pinned indicator appears on the card. The `Pinned` filter shows only pinned notes, combined with the active folder or tag when one is set.
@@ -352,6 +360,7 @@ Settings live in the Tauri store, never in the notes database, so resetting or s
 | Toggle theme | `Ctrl/Cmd+Shift+L` |
 | Delete note | `Ctrl/Cmd+Backspace` |
 | Rename folder / note | `F2` |
+| Delete folder | `Delete` (confirms when it has children) |
 | Toggle pin | `Ctrl/Cmd+D` |
 | Toggle task complete | `Ctrl/Cmd+Enter` |
 | Undo / redo | `Ctrl/Cmd+Z` · `Ctrl/Cmd+Shift+Z` |
@@ -433,7 +442,7 @@ carries its own bar with a `menu` button, the app name, and a new-note button
 
 | Concern | Requirement |
 |---------|-------------|
-| Keyboard operation | Every action reachable by keyboard. `FolderTree` implements the tree pattern; see the table below. |
+| Keyboard operation | Every action reachable by keyboard. `FolderTree` implements the tree pattern (§10.1) and folder actions are context-menu-driven, with `F2` and `Delete` as the shortcuts that reach the same actions (§7). |
 | Focus visibility | 2 px accent ring, 2 px offset, never removed without a replacement |
 | Focus management | Opening a dialog moves focus in and traps it; `Esc` closes and restores focus to the trigger |
 | Labels | Icon-only buttons carry `aria-label`. Inputs have associated labels. |
@@ -458,7 +467,9 @@ The WAI-ARIA tree pattern, in full. `FolderTree` is **one tab stop**, not one pe
 | `ArrowLeft` | Expanded branch: collapse it. Leaf or collapsed branch: move to the parent. A root has nothing above it, so nothing happens. |
 | `Home` / `End` | First / last visible row |
 | `Enter` / `Space` | Select the folder — the note list narrows to it |
-| `F2` | Rename, in place (§6.3) |
+| `ContextMenu` | Open the focused row's overflow menu. The "application key" on a Windows keyboard, and the standard way to ask for a menu |
+| `F2` | Rename the focused folder, in place (§6.3) |
+| `Delete` | Delete the focused folder, confirming first when it has children (§6.3) |
 
 Two details that are not obvious:
 

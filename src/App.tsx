@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { notesApi, windowApi } from './lib/ipc';
+import { foldersApi, notesApi, windowApi } from './lib/ipc';
 import { useNow, useNotes } from './hooks/useNotes';
 import { countByFolder, folderNamesById, useFolders } from './hooks/useFolders';
 import { useTags } from './hooks/useTags';
@@ -51,8 +51,8 @@ function useSystemDark(): boolean {
 }
 
 /** M3 wires the shell to the selection model, the note list, and the three
-    layouts of `05-ui-ux.md` §2. Every control below routes through `lib/ipc.ts`,
-    so nothing here touches storage (rule R6). */
+    layouts of `05-ui-ux.md` §2. M4 adds the folder writes. Every control below
+    routes through `lib/ipc.ts`, so nothing here touches storage (rule R6). */
 function Shell() {
   const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -166,6 +166,47 @@ function Shell() {
     if (mobile) setStack(PUSH_EDITOR);
   }, [defaultFolderId, mobile, queryClient, refetch]);
 
+  /* Folder writes invalidate the folder query and the note list together
+     (`10-conventions.md` §7): a new or deleted folder changes the tree, and a
+     deleted folder unfiles the notes inside it, which moves them out of the
+     current folder selection. One invalidation rather than two, because they land
+     in the same user action and a user cannot see a half-applied one. */
+  const foldersChanged = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey: ['folders'] });
+    void queryClient.invalidateQueries({ queryKey: ['notes'] });
+    refetch();
+  }, [queryClient, refetch]);
+
+  const createFolder = useCallback(
+    async (name: string, parentId: Uuid | null): Promise<void> => {
+      await foldersApi.create(name, parentId);
+      foldersChanged();
+    },
+    [foldersChanged],
+  );
+
+  const renameFolder = useCallback(
+    async (id: Uuid, name: string): Promise<void> => {
+      await foldersApi.rename(id, name);
+      foldersChanged();
+    },
+    [foldersChanged],
+  );
+
+  /* Deleting the folder that is selected leaves nothing to show, so the
+     selection moves to All rather than to a row that no longer exists
+     (`NOT_FOUND` handling in `10-conventions.md` §6). */
+  const deleteFolder = useCallback(
+    async (id: Uuid): Promise<void> => {
+      await foldersApi.remove(id);
+      if (useSelectionStore.getState().selection.kind === 'folder') {
+        setSelection({ kind: 'all' });
+      }
+      foldersChanged();
+    },
+    [foldersChanged],
+  );
+
   const openFromList = useCallback(
     (id: Uuid) => {
       setOpenNote(id);
@@ -239,8 +280,10 @@ function Shell() {
         void createNote();
       }}
       onToggleFolder={useSettingsStore.getState().toggleFolderCollapsed}
-      onCreateFolder={NOOP}
+      onCreateFolder={createFolder}
       onCreateTag={NOOP}
+      onRenameFolder={renameFolder}
+      onDeleteFolder={deleteFolder}
     />
   );
 
@@ -329,10 +372,11 @@ function Shell() {
   );
 }
 
-/* Folder and tag creation, rename, drag-reordering, and pinning are M4. The
-   section headers keep their add affordances so the structure is discoverable,
-   but they do nothing until then — a dead control is worse than a missing one,
-   so the two section headers are the only affordances M3 renders. */
+/* Tag creation, drag-reordering, and pinning are later parts of M4. The `+` in the
+    Tags header and the top-bar overflow menu stay wired to this until they are: the
+    controls are already in the prototype and in `05-ui-ux.md`, and removing them
+    would be a change to the specified appearance rather than to the implementation.
+    Each is annotated at its call site with the milestone that lands it. */
 const NOOP = (): void => {};
 
 /* `setStack` passes the current value to a reducer, so the second argument is

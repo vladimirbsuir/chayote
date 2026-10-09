@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { treeKeyAction, visibleFolderRows } from './folderRows';
+import { descendantCount, treeKeyAction, visibleFolderRows } from './folderRows';
 import type { FolderNode } from '../types/folder';
 
 /* `05-ui-ux.md` §10: the tree pattern — arrows move, `Right` expands, `Left`
@@ -76,6 +76,30 @@ describe('visibleFolderRows', () => {
 
     expect(rows[5]?.parentId).toBe('d/4');
     expect(rows[0]?.parentId).toBeNull();
+  });
+
+  it('counts only descendants, not the folder itself and not its notes', () => {
+    /* §6.3: the confirmation names how many folders go with it. */
+    expect(descendantCount([node('a', [node('a1'), node('a2')]), node('b')], 'a')).toBe(2);
+    expect(descendantCount([node('a', [node('a1')]), node('b')], 'b')).toBe(0);
+  });
+
+  it('counts the whole subtree, not only direct children', () => {
+    const tree = [node('a', [node('a1', [node('a1x'), node('a1y')]), node('a2')])];
+
+    expect(descendantCount(tree, 'a')).toBe(4);
+    expect(descendantCount(tree, 'a1')).toBe(2);
+  });
+
+  it('reports zero for a folder that is not in the tree', () => {
+    expect(descendantCount([node('a')], 'missing')).toBe(0);
+  });
+
+  it('finds a folder nested anywhere in the tree', () => {
+    const tree = [node('a', [node('a1', [node('deep')])])];
+
+    expect(descendantCount(tree, 'deep')).toBe(0);
+    expect(descendantCount(tree, 'a1')).toBe(1);
   });
 
   it('reports sibling set size and position for aria-setsize and aria-posinset', () => {

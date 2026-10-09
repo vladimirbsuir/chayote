@@ -36,6 +36,10 @@ function note(overrides: Partial<NoteSummary> = {}): NoteSummary {
   };
 }
 
+/* Resolved rather than rejected: the tests here assert on layout and copy, and an
+   unhandled rejection in a test that never triggers a write would be noise. */
+const noWrite = (): Promise<void> => Promise.resolve();
+
 function renderSidebar(overrides: Partial<React.ComponentProps<typeof Sidebar>> = {}): void {
   const props: React.ComponentProps<typeof Sidebar> = {
     selection: { kind: 'all' },
@@ -54,8 +58,10 @@ function renderSidebar(overrides: Partial<React.ComponentProps<typeof Sidebar>> 
     onOpenNote: () => {},
     onNewNote: () => {},
     onToggleFolder: () => {},
-    onCreateFolder: () => {},
+    onCreateFolder: noWrite,
     onCreateTag: () => {},
+    onRenameFolder: noWrite,
+    onDeleteFolder: noWrite,
     ...overrides,
   };
   render(<Sidebar {...props} />);
@@ -122,8 +128,10 @@ describe('Sidebar', () => {
         onOpenNote={() => {}}
         onNewNote={() => {}}
         onToggleFolder={() => {}}
-        onCreateFolder={() => {}}
+        onCreateFolder={noWrite}
         onCreateTag={() => {}}
+        onRenameFolder={noWrite}
+        onDeleteFolder={noWrite}
       />,
     );
 
@@ -151,8 +159,10 @@ describe('Sidebar', () => {
         onOpenNote={() => {}}
         onNewNote={() => {}}
         onToggleFolder={() => {}}
-        onCreateFolder={() => {}}
+        onCreateFolder={noWrite}
         onCreateTag={() => {}}
+        onRenameFolder={noWrite}
+        onDeleteFolder={noWrite}
       />,
     );
 
@@ -185,8 +195,10 @@ describe('Sidebar', () => {
         onOpenNote={() => {}}
         onNewNote={() => {}}
         onToggleFolder={() => {}}
-        onCreateFolder={() => {}}
+        onCreateFolder={noWrite}
         onCreateTag={() => {}}
+        onRenameFolder={noWrite}
+        onDeleteFolder={noWrite}
       />,
     );
 

@@ -8,19 +8,35 @@ import type { FolderNode } from '../types/folder';
    `aria-level`, `aria-expanded`, and the keys acting on the right row — because
    the traversal itself is covered in `folderRows.test.ts` as pure data. */
 
-const TREE: FolderNode[] = [
-  {
-    id: 'a',
-    name: 'Work',
-    parentId: null,
-    position: 0,
-    children: [
-      { id: 'a1', name: 'Projects', parentId: 'a', position: 0, children: [] },
-      { id: 'a2', name: 'Meetings', parentId: 'a', position: 1, children: [] },
-    ],
-  },
-  { id: 'b', name: 'Personal', parentId: null, position: 1, children: [] },
-];
+const PROJECTS: FolderNode = {
+  id: 'a1',
+  name: 'Projects',
+  parentId: 'a',
+  position: 0,
+  children: [],
+};
+const MEETINGS: FolderNode = {
+  id: 'a2',
+  name: 'Meetings',
+  parentId: 'a',
+  position: 1,
+  children: [],
+};
+const WORK: FolderNode = {
+  id: 'a',
+  name: 'Work',
+  parentId: null,
+  position: 0,
+  children: [PROJECTS, MEETINGS],
+};
+const PERSONAL: FolderNode = {
+  id: 'b',
+  name: 'Personal',
+  parentId: null,
+  position: 1,
+  children: [],
+};
+const TREE: FolderNode[] = [WORK, PERSONAL];
 
 /* Rows are addressed by their data attribute rather than by text, because a name
    is not unique in general and the id is what every assertion is about. */
@@ -39,6 +55,8 @@ function allRows(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid="folder-row"]'));
 }
 
+const noWrite = (): Promise<void> => Promise.resolve();
+
 function renderTree(overrides: Partial<React.ComponentProps<typeof FolderTree>> = {}): void {
   const props: React.ComponentProps<typeof FolderTree> = {
     nodes: TREE,
@@ -47,6 +65,11 @@ function renderTree(overrides: Partial<React.ComponentProps<typeof FolderTree>> 
     collapsed: [],
     onSelect: () => {},
     onToggle: () => {},
+    onCreate: noWrite,
+    onRename: noWrite,
+    onDelete: noWrite,
+    creatingRoot: false,
+    onCreatingRootChange: () => {},
     ...overrides,
   };
   render(<FolderTree {...props} />);
@@ -144,16 +167,20 @@ describe('FolderTree', () => {
   });
 
   it('moves the tab stop off the row when it is deleted', () => {
-    const { rerender } = render(
-      <FolderTree
-        nodes={TREE}
-        counts={new Map()}
-        selection={{ kind: 'all' }}
-        collapsed={[]}
-        onSelect={() => {}}
-        onToggle={() => {}}
-      />,
-    );
+    const props = {
+      nodes: TREE,
+      counts: new Map<string, number>(),
+      selection: { kind: 'all' } as const,
+      collapsed: [] as string[],
+      onSelect: () => {},
+      onToggle: () => {},
+      onCreate: noWrite,
+      onRename: noWrite,
+      onDelete: noWrite,
+      creatingRoot: false,
+      onCreatingRootChange: () => {},
+    };
+    const { rerender } = render(<FolderTree {...props} />);
 
     /* Focus arriving from outside the tree — a click, or a screen reader moving
        the caret — has to move the tab stop too, and there is no handler of ours
@@ -164,16 +191,7 @@ describe('FolderTree', () => {
     });
     expect(row('a1').getAttribute('tabindex')).toBe('0');
 
-    rerender(
-      <FolderTree
-        nodes={TREE}
-        counts={new Map()}
-        selection={{ kind: 'all' }}
-        collapsed={['a']}
-        onSelect={() => {}}
-        onToggle={() => {}}
-      />,
-    );
+    rerender(<FolderTree {...props} collapsed={['a']} />);
 
     /* `a1` is no longer rendered, so it cannot hold the tab stop; `a` is the only
        visible candidate. */
