@@ -245,6 +245,104 @@ test.describe('selection model', () => {
   });
 });
 
+/* `05-ui-ux.md` §10 requires the tree pattern, and M4's acceptance bar is a
+   keyboard-navigable tree. These drive it in a real browser because the parts
+   jsdom cannot judge are the parts that matter: that a click lands on the row and
+   not the twisty, that Tab reaches the tree as a single stop, and that the focus
+   ring is actually painted. */
+test.describe('folder tree keyboard pattern', () => {
+  test('reaches a nested folder with the arrow keys and selects it with Enter', async ({
+    page,
+  }) => {
+    await open(page);
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.focus();
+    await expect(work).toBeFocused();
+
+    /* Right enters the already-expanded branch, landing on its first child. */
+    await page.keyboard.press('ArrowRight');
+    const projects = page.getByTestId('folder-row').filter({ hasText: 'Projects' });
+    await expect(projects).toBeFocused();
+
+    /* Down reaches the sibling below it, then Enter selects it. */
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Meetings' })).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(projects).toBeFocused();
+
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('list-header')).toHaveText('Projects');
+  });
+
+  test('climbs back out to the parent with ArrowLeft', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toBeFocused();
+
+    /* Projects is a leaf, so Left moves out to Work rather than collapsing it. */
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toBeFocused();
+  });
+
+  test('collapses a branch with ArrowLeft and expands it with ArrowRight', async ({ page }) => {
+    await open(page);
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.focus();
+    await expect(work).toHaveAttribute('aria-expanded', 'true');
+
+    await page.keyboard.press('ArrowLeft');
+    await expect(work).toHaveAttribute('aria-expanded', 'false');
+    /* The whole point of collapsing: the child is gone from the tree, not just
+       hidden behind an attribute. */
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toHaveCount(0);
+
+    await page.keyboard.press('ArrowRight');
+    await expect(work).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toBeVisible();
+  });
+
+  test('is one tab stop rather than one per folder', async ({ page }) => {
+    await open(page);
+
+    const focusable = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid="folder-row"]')).filter(
+        (el) => el.getAttribute('tabindex') === '0',
+      ).length,
+    );
+
+    expect(focusable).toBe(1);
+  });
+
+  test('paints a visible focus ring on the focused row', async ({ page }) => {
+    await open(page);
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.focus();
+
+    /* §10: a 2 px accent ring, never removed. Asserting the property rather than
+       a screenshot, because the value is what the requirement states. */
+    const outline = await work.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { width: style.outlineWidth, style: style.outlineStyle };
+    });
+    expect(outline.style).not.toBe('none');
+    expect(Number.parseFloat(outline.width)).toBeGreaterThanOrEqual(2);
+  });
+
+  test('keeps the twisty out of the tab order, since the arrows do its job', async ({ page }) => {
+    await open(page);
+
+    await expect(page.getByRole('button', { name: 'Collapse Work' })).toHaveAttribute(
+      'tabindex',
+      '-1',
+    );
+  });
+});
+
 test.describe('note list', () => {
   test('sorts pinned notes above everything else', async ({ page }) => {
     await open(page);

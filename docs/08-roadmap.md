@@ -128,7 +128,7 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 
 ### M4 — Organisation
 
-- `FolderTree`: recursive, collapsible, keyboard per the tree pattern in `05-ui-ux.md` §10.
+- `FolderTree`: recursive, collapsible, keyboard per the tree pattern in `05-ui-ux.md` §10.1. **Shipped first** — the pattern is a `05-ui-ux.md` §10 requirement with a depth-10 acceptance bar, and nothing else in this milestone touches the tree, so landing it on its own kept its diff reviewable. The tree is one tab stop with a roving tabindex, which is what makes a depth-10 tree navigable; the recursive render stays nested for `role="tree"`, and the arrows read a flattened row list (`src/components/folderRows.ts`).
 - Drag to re-parent and reorder; `position` densified in one transaction.
 - Inline create, rename, delete; delete confirmation naming the descendant count.
 - `TagList` with counts from the query in `03-data-model.md` §5; counts exclude trashed notes.
@@ -243,7 +243,7 @@ Each of these was resolved conservatively. Revisit the moment implementation pro
 | Q2 | Default folder on first launch, or everything unfiled? | **Answered** — everything unfiled, by ADR-014 | — | Resolved |
 | Q3 | `is_pinned` versus `is_favorite` | **Answered** — `is_pinned` only. `is_favorite` removed from the schema | — | Resolved |
 | Q4 | Timestamp style in the note list | **Answered** — relative only, no tooltip, per `05-ui-ux.md` §6.5a. The default in this table had contradicted itself; §6.5a now settles it | — | Resolved |
-| Q5 | Remember collapsed folder-tree state per folder | **Open** | Yes, persist per folder in settings. Cheap, and losing it on every launch is annoying | M4 |
+| Q5 | Remember collapsed folder-tree state per folder | **Answered** — persisted per folder in settings, shipped at M4 | — | Resolved |
 | Q6 | Accent palette: one configurable colour, or presets plus custom | **Open** | Six presets plus a custom colour picker | M6 |
 | Q7 | Should pinning be visible as a dedicated filter, or only as an ordering? | **Answered** — both, per `05-ui-ux.md` §5 and §6.3a. The filter ships in M4 with the rest of the pinning work; the ordering already does | — | Resolved |
 | Q8 | Repository directory rename from `notes` to `chayote` | **Answered** — done, the directory is `D:\Projects\chayote` | — | Resolved |
@@ -262,7 +262,7 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | M1 | **Done** | 2026-10-07. `rusqlite`, migrations 0001–0003, repository traits, `AppError`, settings store, 33 Rust tests + 29 TS tests |
 | M2 | **Done** | 2026-10-08. TipTap 3.31, paste sanitisation, `clipboardTextSerializer`, autosave controller, status bar, task-checkbox node view. 65 TS tests + 22 Playwright tests. Four deviations from the plan recorded in §2. Hard-kill check still outstanding |
 | M3 | **Done** | 2026-10-09. `Sidebar`, `NoteCard`, a measured virtualised `NoteList`, `stores/selection.ts` + `stores/settings.ts`, `relativeTime`, three layouts, resizable sidebar, `Ctrl+N`/`Ctrl+F`/`Ctrl+\`. 98 TS tests + 49 Playwright tests. Four deviations recorded in §2 |
-| M4 | **Next** | Q5 has a default. The sidebar already renders the folder tree and tag rows; this milestone makes them interactive. Folder and tag slots land in the status bar here |
+| M4 | **In progress** | Branch `m4-organisation`. Done: the folder tree keyboard pattern of `05-ui-ux.md` §10.1 — a `FolderTree` component with a roving tabindex, so the tree is one tab stop rather than one per folder. Q5 closed: collapsed-branch state was already persisted at M3 and is now recorded as answered. Remaining: inline create/rename/delete, drag to re-parent, pin toggle, and the trash actions with `TagEditor`, `FolderPicker`, and the status-bar slots |
 | M5 | Not started | |
 | M6 | Not started | Q6 has a default. Screenshot review of the full UI starts here |
 | M7 | Not started | **Blocked** — needs Android SDK, `docs/11-verification.md` §3.5 |

@@ -1,20 +1,12 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
-import {
-  ChevronDown,
-  ChevronRight,
-  FilePlus,
-  Folder,
-  Hash,
-  Pin,
-  Plus,
-  Trash,
-} from 'lucide-react';
+import { FilePlus, Folder, Hash, Pin, Plus, Trash } from 'lucide-react';
 import type { NoteSummary, Selection } from '../types/ipc';
 import type { FolderNode } from '../types/folder';
 import type { TagWithCount } from '../types/tag';
 import type { Uuid } from '../types/note';
 import { NoteList } from './NoteList';
+import { FolderTree } from './FolderTree';
 
 /* The sidebar: three stacked regions, not three columns (`05-ui-ux.md` §2.1).
    Filters, then structure, then the list, separated by hairlines, with exactly
@@ -96,21 +88,14 @@ export function Sidebar({
           singular="folder"
           onAdd={onCreateFolder}
         />
-        <div role="tree" aria-label="Folders" className="max-h-[40vh] overflow-y-auto px-2 pb-[10px]">
-          {folders === undefined || folders.length === 0 ? (
-            <p className="px-[6px] py-1 text-[13px] text-[var(--text-subtle)]">No folders yet</p>
-          ) : (
-            <FolderRows
-              nodes={folders}
-              depth={0}
-              counts={folderCounts}
-              selection={selection}
-              collapsed={collapsedFolders}
-              onSelect={onSelect}
-              onToggle={onToggleFolder}
-            />
-          )}
-        </div>
+        <FolderTree
+          nodes={folders}
+          counts={folderCounts}
+          selection={selection}
+          collapsed={collapsedFolders}
+          onSelect={onSelect}
+          onToggle={onToggleFolder}
+        />
       </section>
 
       <section aria-label="Tags" className="min-h-0 overflow-hidden">
@@ -257,99 +242,6 @@ function FilterTab({
       {icon}
       {label}
     </button>
-  );
-}
-
-function FolderRows({
-  nodes,
-  depth,
-  counts,
-  selection,
-  collapsed,
-  onSelect,
-  onToggle,
-}: {
-  nodes: FolderNode[];
-  depth: number;
-  counts: Map<string, number>;
-  selection: Selection;
-  collapsed: Uuid[];
-  onSelect: (next: Selection) => void;
-  onToggle: (id: Uuid) => void;
-}) {
-  return (
-    <>
-      {nodes.map((node) => {
-        const isCollapsed = collapsed.includes(node.id);
-        const hasChildren = node.children.length > 0;
-        const active = selection.kind === 'folder' && selection.id === node.id;
-        const count = counts.get(node.id) ?? 0;
-
-        return (
-          <div key={node.id} role="none">
-            <div
-              role="treeitem"
-              aria-selected={active}
-              aria-expanded={hasChildren ? !isCollapsed : undefined}
-              tabIndex={0}
-              data-testid="folder-row"
-              data-folder-id={node.id}
-              style={{ paddingLeft: 6 + depth * 16 }}
-              onClick={() => {
-                onSelect({ kind: 'folder', id: node.id });
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onSelect({ kind: 'folder', id: node.id });
-                }
-              }}
-              className={`flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] px-[6px] text-[13px] transition-colors ${
-                active
-                  ? 'bg-[var(--accent-soft)] font-medium text-[var(--accent)]'
-                  : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
-              }`}
-            >
-              <span className="flex w-[14px] flex-none">
-                {hasChildren ? (
-                  <button
-                    type="button"
-                    aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggle(node.id);
-                    }}
-                    className="flex text-[var(--text-subtle)] hover:text-[var(--text)]"
-                  >
-                    {isCollapsed ? (
-                      <ChevronRight className="icon i-16" aria-hidden="true" />
-                    ) : (
-                      <ChevronDown className="icon i-16" aria-hidden="true" />
-                    )}
-                  </button>
-                ) : null}
-              </span>
-              <Folder className="icon i-16 flex-none opacity-70" aria-hidden="true" />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{node.name}</span>
-              {count > 0 ? (
-                <span className="ml-auto pl-1 text-[11px] text-[var(--text-subtle)]">{count}</span>
-              ) : null}
-            </div>
-            {hasChildren && !isCollapsed ? (
-              <FolderRows
-                nodes={node.children}
-                depth={depth + 1}
-                counts={counts}
-                selection={selection}
-                collapsed={collapsed}
-                onSelect={onSelect}
-                onToggle={onToggle}
-              />
-            ) : null}
-          </div>
-        );
-      })}
-    </>
   );
 }
 

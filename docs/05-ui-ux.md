@@ -433,7 +433,7 @@ carries its own bar with a `menu` button, the app name, and a new-note button
 
 | Concern | Requirement |
 |---------|-------------|
-| Keyboard operation | Every action reachable by keyboard. `FolderTree` implements the tree pattern: arrows move, `Right` expands, `Left` collapses, `Enter` selects. |
+| Keyboard operation | Every action reachable by keyboard. `FolderTree` implements the tree pattern; see the table below. |
 | Focus visibility | 2 px accent ring, 2 px offset, never removed without a replacement |
 | Focus management | Opening a dialog moves focus in and traps it; `Esc` closes and restores focus to the trigger |
 | Labels | Icon-only buttons carry `aria-label`. Inputs have associated labels. |
@@ -446,3 +446,23 @@ carries its own bar with a `menu` button, the app name, and a new-note button
 | Editor | `role="textbox"`, `aria-multiline="true"`, `aria-label="Note content"` |
 
 ProseMirror's editable region is not fully accessible by default. `role="textbox"` plus `aria-multiline` is the minimum for v1, and this is a known limitation to revisit if the app grows.
+
+### 10.1 The folder tree keyboard pattern
+
+The WAI-ARIA tree pattern, in full. `FolderTree` is **one tab stop**, not one per row: a depth-10 tree would otherwise put ten-plus stops between the sidebar and the note list, and the acceptance bar in `08-roadmap.md` §2 M4 is a depth-10 tree navigated by keyboard alone. Exactly one row carries `tabIndex={0}` and it follows focus.
+
+| Key | Behaviour |
+|-----|-----------|
+| `ArrowDown` / `ArrowUp` | Next / previous **visible** row. A collapsed branch's descendants are not visible, so they are not reachable — the same fact that hides them on screen. |
+| `ArrowRight` | Collapsed branch: expand it. Expanded branch: move to its first child. Leaf: nothing. |
+| `ArrowLeft` | Expanded branch: collapse it. Leaf or collapsed branch: move to the parent. A root has nothing above it, so nothing happens. |
+| `Home` / `End` | First / last visible row |
+| `Enter` / `Space` | Select the folder — the note list narrows to it |
+| `F2` | Rename, in place (§6.3) |
+
+Two details that are not obvious:
+
+- **Climbing out of a deep chain takes two presses per level.** `ArrowLeft` on an expanded branch collapses it; only the *next* press climbs to the parent. This is the standard behaviour, not a bug, and the second press is resolved against the row list as it stands *after* the collapse.
+- **The collapse twisty is out of the tab order** (`tabIndex={-1}`). The arrows do its job, and a mouse click still reaches it.
+
+`aria-level`, `aria-setsize`, `aria-posinset`, and `aria-expanded` carry the structure to assistive technology, because a nested `role="group"` tree and a flat list of `treeitem`s are indistinguishable to a screen reader otherwise.
