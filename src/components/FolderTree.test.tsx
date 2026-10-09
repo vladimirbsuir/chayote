@@ -56,6 +56,7 @@ function allRows(): HTMLElement[] {
 }
 
 const noWrite = (): Promise<void> => Promise.resolve();
+const noMove = (): Promise<void> => Promise.resolve();
 
 function renderTree(overrides: Partial<React.ComponentProps<typeof FolderTree>> = {}): void {
   const props: React.ComponentProps<typeof FolderTree> = {
@@ -68,6 +69,7 @@ function renderTree(overrides: Partial<React.ComponentProps<typeof FolderTree>> 
     onCreate: noWrite,
     onRename: noWrite,
     onDelete: noWrite,
+    onMove: noMove,
     creatingRoot: false,
     onCreatingRootChange: () => {},
     ...overrides,
@@ -177,6 +179,7 @@ describe('FolderTree', () => {
       onCreate: noWrite,
       onRename: noWrite,
       onDelete: noWrite,
+      onMove: noMove,
       creatingRoot: false,
       onCreatingRootChange: () => {},
     };

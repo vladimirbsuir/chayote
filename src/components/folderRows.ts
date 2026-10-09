@@ -104,6 +104,151 @@ export type TreeKeyAction =
   | { kind: 'collapse'; id: Uuid }
   | null;
 
+/* ------------------------------------------------------------------ *
+ *  Drag to re-parent and reorder — `05-ui-ux.md` §6.3
+ * ------------------------------------------------------------------ */
+
+/** Where in a row a drop landed. Three bands, because a 26 px row cannot also carry
+    two separate hit targets and a user aiming for "into" must not get "above"
+    instead.
+
+    `before` and `after` reorder among siblings; `inside` makes the row the new
+    parent. */
+export type DropZone = 'before' | 'inside' | 'after';
+
+/** The fraction of the row at each end that means "beside" rather than "inside".
+    A quarter each, leaving half the row for "into" — re-parenting is the rarer
+    intent but needs a target big enough to hit, and thirds would have left it under
+    nine pixels on a 26 px row. */
+const EDGE_BAND = 1 / 4;
+
+export function dropZoneAt(offsetY: number, rowHeight: number): DropZone {
+  if (rowHeight <= 0) return 'inside';
+  const ratio = offsetY / rowHeight;
+  if (ratio < EDGE_BAND) return 'before';
+  if (ratio > 1 - EDGE_BAND) return 'after';
+  return 'inside';
+}
+
+/** What a drop resolves to, in the terms `folders_move` takes. `null` when the drop
+    is not a move at all — the folder is already there, so writing it would burn a
+    database transaction and an outbox row to change nothing. */
+export type DropMove = { newParentId: Uuid | null; position: number };
+
+/** Translate a drop into the parent and sibling index `folders_move` expects.
+    `position` is sibling-local and the backend densifies it (`03-data-model.md`
+    §3.2), so the only thing to get right here is *which* slot, counted among the
+    destination's current children.
+
+    The dragged folder is removed from its old slot before the new index is counted.
+    That is the whole reason reordering is fiddly: moving a folder down among its
+    own siblings shifts every sibling below it up one, so counting without removing
+    first lands one row too far. */
+export function resolveDrop(
+  rows: FolderRow[],
+  draggedId: Uuid,
+  targetId: Uuid,
+  zone: DropZone,
+): DropMove | null {
+  const target = rows.find((row) => row.node.id === targetId);
+  const dragged = rows.find((row) => row.node.id === draggedId);
+  if (target === undefined || dragged === undefined) return null;
+
+  if (zone === 'inside') {
+    if (targetId === draggedId) return null;
+    /* Dropping onto one's own descendant would detach the subtree from the tree
+       entirely, so it is refused here rather than sent and refused in Rust: the
+       user gets the explanation while the pointer is still down, and no write is
+       attempted for something that cannot succeed. */
+    if (isDescendant(rows, draggedId, targetId)) return null;
+    /* A child goes to the end of the destination's children. `append` is expressed
+       as the current count, which is also what "after the last one" means. */
+    return { newParentId: targetId, position: rows.filter((row) => row.parentId === targetId).length };
+  }
+
+  const parentId = target.parentId;
+  const siblings = rows
+    .filter((row) => row.parentId === parentId)
+    .map((row) => row.node.id);
+
+  /* The index this folder would occupy if it were dropped exactly on the target
+     row's own position: either just before it or just after. */
+  const targetIndex = siblings.indexOf(targetId);
+  if (targetIndex === -1) return null;
+  const insertAt = zone === 'before' ? targetIndex : targetIndex + 1;
+
+  /* Dropped on its own row: the folder is already exactly there, in either
+     direction. Counting the `after` case would insert it after itself and shift it
+     down one sibling, which is a move the user did not ask for. */
+  if (draggedId === targetId) return null;
+
+  /* The dragged folder leaves its old slot before the new index is counted, so
+     dropping it lower among its own siblings does not land one row too far. */
+  const withoutDragged = siblings.filter((id) => id !== draggedId);
+  const position = Math.min(insertAt, withoutDragged.length);
+
+  /* Already in that slot: nothing to write. Reordering a folder onto itself, or
+     onto the row it already occupies, must not burn a transaction and an outbox
+     row to change nothing. */
+  const currentIndex = siblings.indexOf(draggedId);
+  if (currentIndex !== -1 && currentIndex === position) return null;
+
+  return { newParentId: parentId, position };
+}
+
+/** Is `candidate` the folder `rootId` or somewhere below it, in the whole tree
+    rather than the visible rows?
+
+    The shell needs this after a move, where the question is about the selected
+    folder's *contents* and the collapsed state is irrelevant — a selection naming a
+    folder inside the moved subtree still resolves, it just resolves to something
+    different than it did a moment ago. */
+export function isInsideSubtree(
+  nodes: FolderNode[],
+  rootId: Uuid,
+  candidate: Uuid,
+): boolean {
+  const root = findSubtree(nodes, rootId);
+  if (root === null) return false;
+  if (root.id === candidate) return true;
+
+  const walk = (list: FolderNode[]): boolean => {
+    for (const node of list) {
+      if (node.id === candidate) return true;
+      if (walk(node.children)) return true;
+    }
+    return false;
+  };
+  /* The search starts at `root`, not at the top of the tree. Searching the whole
+     tree would answer "does this folder exist anywhere", which is a different
+     question and true for every folder in the database. */
+  return walk(root.children);
+}
+
+function findSubtree(nodes: FolderNode[], rootId: Uuid): FolderNode | null {
+  for (const node of nodes) {
+    if (node.id === rootId) return node;
+    const hit = findSubtree(node.children, rootId);
+    if (hit !== null) return hit;
+  }
+  return null;
+}
+
+/** Is `candidate` below `ancestor` in the visible row list? True for a strict
+    descendant only — a folder is not its own descendant, though
+    `folders_move` treats dropping onto itself as a cycle too, and the row code
+    refuses `zone === 'inside'` on the dragged row for that reason. */
+export function isDescendant(rows: FolderRow[], ancestorId: Uuid, candidateId: Uuid): boolean {
+  const byId = new Map(rows.map((row) => [row.node.id, row]));
+  let current = byId.get(candidateId);
+  while (current !== undefined) {
+    if (current.parentId === ancestorId) return true;
+    if (current.parentId === null) return false;
+    current = byId.get(current.parentId);
+  }
+  return false;
+}
+
 /** Resolve one key press against the flat row list. Returns the action rather
     than performing it, so the caller owns focus and the selection store and this
     stays a pure decision.

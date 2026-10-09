@@ -290,6 +290,16 @@ Creating a folder is inline: a single text input in place, `Enter` commits, `Esc
 
 **Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. On touch, long-press initiates a folder drag; otherwise the gesture scrolls.
 
+**A drop target has three bands.** The outer quarter at each end reorders among siblings, drawn as a 2 px accent rule pinned to that edge; the middle half makes the row the new parent, drawn as a soft accent fill. A quarter rather than a third, because re-parenting is the rarer intent but needs a target big enough to hit, and thirds would have left it under nine pixels on a 26 px row. A rule on the wrong edge would read as re-ordering when the intent was re-parenting, which is the whole distinction.
+
+**A refused drop draws nothing and writes nothing.** Dropping a folder onto itself, into its own descendant, or into the slot it already occupies is resolved before the write — `folders_move` refuses a cycle anyway, but refusing here means the user learns why while the pointer is still down, and no transaction or outbox row is spent on something that cannot succeed. An indicator that promises a reorder which changes nothing is worse than no indicator.
+
+**The dragged row dims to 40 % opacity**, and a row the pointer passes over during a drag does **not** select: a re-parent would otherwise also change which notes the list shows, which is a second unrequested change (§5's single-selection model is about deliberate choices).
+
+**Dragging is unavailable while an editor is open or a menu is showing.** Otherwise a drag begun inside a text input would drag the selected text rather than the folder.
+
+**Keyboard re-parenting has no shortcut, and that is a known gap.** `F2` and `Delete` cover rename and delete, but there is no "move folder under…" command: HTML drag-and-drop has no DOM-level keyboard equivalent, and `aria-dropeffect` is deprecated in ARIA 1.1. Re-parenting from the keyboard is therefore not reachable in v1. It is recorded rather than papered over with a fake ARIA attribute; §6.3's row menu is the partial answer, and a real "move to…" item is the v1.1 candidate.
+
 **A childless folder deletes without a dialog.** The confirmation exists to warn about a subtree; warning about nothing is the interrupt `01-product.md` principle 1 warns against. The dialog names the count of folders that go with it, and says that notes inside are kept and become unfiled — `notes.folder_id` is `ON DELETE SET NULL` (`03-data-model.md` §3.3), so "and its notes" would describe data the app does not delete.
 
 **Folder actions live in a per-row overflow menu**, not in three always-visible controls: a 26 px row has room for the twisty, the folder glyph, the name, and a count, and three more controls would leave the name about forty pixels wide. The menu is `more-horizontal` from the §3.3 inventory, reachable three ways — the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch. Its items are **text, not icons**: the §3.3 inventory is closed and has no edit glyph, and ADR-015 requires adding an icon there before using it. Three distinct English verbs are also §1's "no icons where a word is clearer" applied to a list of rows where a bare verb would be ambiguous about its target.

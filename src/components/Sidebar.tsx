@@ -43,6 +43,9 @@ type SidebarProps = {
   onCreateTag: () => void;
   onRenameFolder: (id: Uuid, name: string) => Promise<void>;
   onDeleteFolder: (id: Uuid) => Promise<void>;
+  /** §6.3: drag to re-parent and reorder. `position` is sibling-local and the
+      backend densifies it (`03-data-model.md` §3.2). */
+  onMoveFolder: (id: Uuid, newParentId: Uuid | null, position: number) => Promise<void>;
   /** Shown where a folder write failed. `AppError.message` is user-facing copy
       by contract (`10-conventions.md` §6). */
   onFolderError?: (message: string) => void;
@@ -69,6 +72,7 @@ export function Sidebar({
   onCreateTag,
   onRenameFolder,
   onDeleteFolder,
+  onMoveFolder,
   onFolderError,
 }: SidebarProps) {
   const header = useMemo(
@@ -120,6 +124,7 @@ export function Sidebar({
           onCreate={onCreateFolder}
           onRename={onRenameFolder}
           onDelete={onDeleteFolder}
+          onMove={onMoveFolder}
           onError={onFolderError}
           creatingRoot={creatingRoot}
           onCreatingRootChange={setCreatingRoot}

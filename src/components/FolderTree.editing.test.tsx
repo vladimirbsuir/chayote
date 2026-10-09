@@ -51,6 +51,7 @@ const PERSONAL: FolderNode = {
 const TREE: FolderNode[] = [WORK, PERSONAL];
 
 const noWrite = (): Promise<void> => Promise.resolve();
+const noMove = (): Promise<void> => Promise.resolve();
 
 function row(id: string): HTMLElement {
   const found = document.querySelector(`[data-testid="folder-row"][data-folder-id="${id}"]`);
@@ -73,10 +74,12 @@ function StatefulTree({
   onCreate = noWrite,
   onRename = noWrite,
   onDelete = noWrite,
+  onMove = noMove,
 }: {
   onCreate?: (name: string, parentId: string | null) => Promise<void>;
   onRename?: (id: string, name: string) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  onMove?: (id: string, newParentId: string | null, position: number) => Promise<void>;
 }): React.ReactElement {
   const [creatingRoot, setCreatingRoot] = useState(false);
   const [selection, setSelection] = useState<Selection>({ kind: 'all' });
@@ -105,9 +108,10 @@ function StatefulTree({
              This file is about editing, and a toggle would only move rows out from
              under the input the assertion is about. */
         }}
-        onCreate={onCreate}
+onCreate={onCreate}
         onRename={onRename}
         onDelete={onDelete}
+        onMove={onMove}
         creatingRoot={creatingRoot}
         onCreatingRootChange={setCreatingRoot}
       />

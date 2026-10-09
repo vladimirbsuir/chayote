@@ -129,13 +129,14 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 ### M4 — Organisation
 
 - `FolderTree`: recursive, collapsible, keyboard per the tree pattern in `05-ui-ux.md` §10.1. **Shipped first** — the pattern is a `05-ui-ux.md` §10 requirement with a depth-10 acceptance bar, and nothing else in this milestone touches the tree, so landing it on its own kept its diff reviewable. The tree is one tab stop with a roving tabindex, which is what makes a depth-10 tree navigable; the recursive render stays nested for `role="tree"`, and the arrows read a flattened row list (`src/components/folderRows.ts`).
-- Drag to re-parent and reorder; `position` densified in one transaction.
+- Drag to re-parent and reorder; `position` densified in one transaction. **Shipped third** — the row has three drop bands (outer quarter reorders, middle half re-parents), and the slot arithmetic is a pure function in `folderRows.ts`. Two things that are easy to get wrong and are tested as such: **the dragged folder's old slot is removed before the new index is counted**, or reordering downward lands one row too far; and **a refused drop resolves before the write**, so a cycle draws no indicator and spends no transaction. `position` densification itself was already done in M1 and is asserted by the Rust tests.
+- Circular-parent guard in the frontend, matching the backend: the drop is refused with no indicator rather than by an error after the fact.
 - Inline create, rename, delete; delete confirmation naming the descendant count. **Shipped second** — `InlineNameInput`, a per-row overflow menu, and `ConfirmDialog`. Two decisions worth recording: a **childless folder deletes without a dialog**, since the confirmation exists to warn about a subtree; and the menu items are **text, not icons**, because the `05-ui-ux.md` §3.3 inventory is closed and has no edit glyph, so using one would mean growing it for three verbs that are already words. `F2` and `Delete` route through the same handler as the menu items, so the confirmation cannot be present for one path and absent for the other.
 - `TagList` with counts from the query in `03-data-model.md` §5; counts exclude trashed notes.
 - `TagEditor` and `FolderPicker` popovers.
 - Pin toggle and Pinned filter. Pinned notes sort first in every selection.
 - Trash: soft delete, undo toast, restore, permanent delete, empty trash.
-- Circular-parent guard in folder move: a folder cannot be moved into itself or its own descendant.
+- Circular-parent guard in folder move: a folder cannot be moved into itself or its own descendant. **Shipped third** — the backend guard dates from M1; the frontend half is the drag bullet above.
 - **Done when:** a folder tree of depth 10 can be navigated by keyboard alone, and dragging a folder onto its own descendant is refused with an explanation.
 
 ### M5 — Search
@@ -262,7 +263,7 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | M1 | **Done** | 2026-10-07. `rusqlite`, migrations 0001–0003, repository traits, `AppError`, settings store, 33 Rust tests + 29 TS tests |
 | M2 | **Done** | 2026-10-08. TipTap 3.31, paste sanitisation, `clipboardTextSerializer`, autosave controller, status bar, task-checkbox node view. 65 TS tests + 22 Playwright tests. Four deviations from the plan recorded in §2. Hard-kill check still outstanding |
 | M3 | **Done** | 2026-10-09. `Sidebar`, `NoteCard`, a measured virtualised `NoteList`, `stores/selection.ts` + `stores/settings.ts`, `relativeTime`, three layouts, resizable sidebar, `Ctrl+N`/`Ctrl+F`/`Ctrl+\`. 98 TS tests + 49 Playwright tests. Four deviations recorded in §2 |
-| M4 | **In progress** | Branch `m4-organisation`. Done: the folder tree keyboard pattern of `05-ui-ux.md` §10.1 — a `FolderTree` component with a roving tabindex, so the tree is one tab stop rather than one per folder. Also done: inline folder create/rename/delete with the descendant-count confirmation, and the per-row overflow menu. Q5 closed: collapsed-branch state was already persisted at M3 and is now recorded as answered. Remaining: drag to re-parent, pin toggle, and the trash actions with `TagEditor`, `FolderPicker`, and the status-bar slots |
+| M4 | **In progress** | Branch `m4-organisation`. Done: the folder tree keyboard pattern of `05-ui-ux.md` §10.1 — a `FolderTree` component with a roving tabindex, so the tree is one tab stop rather than one per folder. Also done: inline folder create/rename/delete with the descendant-count confirmation, the per-row overflow menu, and drag to re-parent and reorder with the three-band drop target and the pre-write cycle refusal. Q5 closed: collapsed-branch state was already persisted at M3 and is now recorded as answered. Remaining: pin toggle, and the trash actions with `TagEditor`, `FolderPicker`, and the status-bar slots |
 | M5 | Not started | |
 | M6 | Not started | Q6 has a default. Screenshot review of the full UI starts here |
 | M7 | Not started | **Blocked** — needs Android SDK, `docs/11-verification.md` §3.5 |

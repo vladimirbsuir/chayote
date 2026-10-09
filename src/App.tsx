@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { foldersApi, notesApi, windowApi } from './lib/ipc';
+import { isInsideSubtree } from './components/folderRows';
 import { useNow, useNotes } from './hooks/useNotes';
 import { countByFolder, folderNamesById, useFolders } from './hooks/useFolders';
 import { useTags } from './hooks/useTags';
@@ -207,6 +208,21 @@ function Shell() {
     [foldersChanged],
   );
 
+  /* A re-parent can move a folder out from under the active selection — dragging a
+     selected folder elsewhere leaves the selection naming a folder that no longer
+     contains what it did — so it falls back to All, the same as a delete. */
+  const moveFolder = useCallback(
+    async (id: Uuid, newParentId: Uuid | null, position: number): Promise<void> => {
+      await foldersApi.move(id, newParentId, position);
+      const current = useSelectionStore.getState().selection;
+      if (current.kind === 'folder' && isInsideSubtree(folders ?? [], id, current.id)) {
+        setSelection({ kind: 'all' });
+      }
+      foldersChanged();
+    },
+    [folders, foldersChanged],
+  );
+
   const openFromList = useCallback(
     (id: Uuid) => {
       setOpenNote(id);
@@ -284,6 +300,7 @@ function Shell() {
       onCreateTag={NOOP}
       onRenameFolder={renameFolder}
       onDeleteFolder={deleteFolder}
+      onMoveFolder={moveFolder}
     />
   );
 

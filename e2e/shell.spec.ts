@@ -453,12 +453,131 @@ test.describe('folder organisation', () => {
   test('opens the folder menu from the row button and from right-click alike', async ({ page }) => {
     await open(page);
 
-    await page.getByRole('button', { name: 'Work actions' }).click({ force: true });
+    /* The row button is `pointer-fine:group-hover:flex` — §9 says hover styling
+       exists only at `pointer: fine` — so the row has to be hovered before the
+       button is anything to click. `force: true` would skip that and click an
+       element the browser still lays out as `display: none`. */
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.hover();
+    await page.getByRole('button', { name: 'Work actions' }).click();
     await expect(page.getByTestId('folder-menu')).toBeVisible();
     await page.keyboard.press('Escape');
 
     await page.getByTestId('folder-row').filter({ hasText: 'Personal' }).click({ button: 'right' });
     await expect(page.getByTestId('folder-menu')).toHaveAttribute('aria-label', 'Personal actions');
+  });
+
+  test('offers no menu button at a coarse pointer, where long-press is the gesture', async ({
+    browser,
+  }) => {
+    /* A real touch-capable context rather than a media emulation: §9 says hover
+       affordances exist at `pointer: fine` and nowhere else, and on touch the menu
+       opens by long-press instead. Asserting the absence here is what stops a
+       hover-only control from becoming an unreachable one on Android.
+
+       `hasTouch` alone does not change `pointer: fine` — Chromium reports a
+       fine pointer for a mouse-driven context regardless — so the pointer type is
+       overridden explicitly. */
+    const context = await browser.newContext({
+      hasTouch: true,
+      isMobile: false,
+      viewport: { width: 1280, height: 820 },
+    });
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      /* Replace the media query the `pointer-fine:` variant compiles to, before the
+         stylesheet is parsed. */
+      const fine = window.matchMedia.bind(window);
+      window.matchMedia = ((query: string) =>
+        query.includes('pointer: fine')
+          ? ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} })
+          : fine(query)) as typeof window.matchMedia;
+    });
+    await seed(page);
+    await page.goto('/');
+    await expect(page.getByTestId('app-shell')).toBeVisible();
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.hover();
+    await expect(page.getByRole('button', { name: 'Work actions' })).toHaveCount(0);
+
+    await context.close();
+  });
+
+  /* §6.3: "Reordering and re-parenting by drag." `page.dragAndDrop` produces real
+     HTML5 drag events in Chromium, which jsdom cannot — so this is the only place
+     the interaction is proved against a browser that actually performs a drag. */
+  test('re-parents a folder by dropping it onto another', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Personal' }).dragTo(
+      page.getByTestId('folder-row').filter({ hasText: 'Work' }),
+      { targetPosition: { x: 60, y: 13 } },
+    );
+
+    const nested = page.getByTestId('folder-row').filter({ hasText: 'Personal' });
+    await expect(nested).toBeVisible();
+    /* The level is the evidence: a re-parent indents, a reorder does not. */
+    await expect(nested).toHaveAttribute('aria-level', '2');
+    await expect(nested).toHaveAttribute('aria-posinset', '3');
+  });
+
+  test('reorders a folder without changing its level', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Personal' }).dragTo(
+      page.getByTestId('folder-row').filter({ hasText: 'Work' }),
+      { targetPosition: { x: 60, y: 1 } },
+    );
+
+    const moved = page.getByTestId('folder-row').filter({ hasText: 'Personal' });
+    await expect(moved).toHaveAttribute('aria-level', '1');
+    /* Above `Work`, so first among the roots. */
+    await expect(moved).toHaveAttribute('aria-posinset', '1');
+  });
+
+  test('refuses to drop a folder into its own descendant', async ({ page }) => {
+    await open(page);
+
+    /* M4's acceptance bar, in the browser that performs the drag. The backend
+       refuses it too; what is checked here is that nothing moved and the row is
+       still there, rather than that an error appeared. */
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).dragTo(
+      page.getByTestId('folder-row').filter({ hasText: 'Projects' }),
+      { targetPosition: { x: 60, y: 13 } },
+    );
+
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toBeVisible();
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toBeVisible();
+    /* `Projects` was not adopted as a child of its own ancestor. */
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toHaveAttribute(
+      'aria-level',
+      '2',
+    );
+  });
+
+  test('marks the dragged row while the pointer is over another', async ({ page }) => {
+    await open(page);
+
+    const source = page.getByTestId('folder-row').filter({ hasText: 'Personal' });
+    const target = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+
+    /* Started by hand so the intermediate state can be observed: `dragTo` performs
+       the whole gesture and there is nothing left to assert in between.
+
+       The `dragover` coordinate is the target row's own top plus half its height.
+       A fixed `clientY` would be above the sidebar entirely, and the handler reads
+       the offset relative to the row — which is the whole point of the three bands. */
+    await source.dispatchEvent('dragstart');
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    await target.dispatchEvent('dragover', {
+      clientX: (box?.x ?? 0) + 60,
+      clientY: (box?.y ?? 0) + (box?.height ?? 26) / 2,
+    });
+
+    await expect(source).toHaveAttribute('data-dragging', 'true');
+    await expect(target.locator('[data-testid="drop-inside"]')).toBeVisible();
   });
 
   test('nests a new folder inside the row that asked for it', async ({ page }) => {

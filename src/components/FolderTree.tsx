@@ -1,9 +1,10 @@
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
-import { descendantCount, treeKeyAction, visibleFolderRows } from './folderRows';
+import { descendantCount, dropZoneAt, resolveDrop, treeKeyAction, visibleFolderRows } from './folderRows';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FolderMenuButton, FolderRowMenu } from './FolderRowMenu';
 import { InlineNameInput } from './InlineNameInput';
+import type { DropZone } from './folderRows';
 import type { FolderMenuAction } from './FolderRowMenu';
 import type { Selection } from '../types/ipc';
 import type { FolderNode } from '../types/folder';
@@ -36,6 +37,10 @@ type FolderTreeProps = {
   onCreate: (name: string, parentId: Uuid | null) => Promise<void>;
   onRename: (id: Uuid, name: string) => Promise<void>;
   onDelete: (id: Uuid) => Promise<void>;
+  /** §6.3: drag to re-parent and reorder. `position` is sibling-local and the
+      backend densifies it (`03-data-model.md` §3.2), so this only supplies the
+      parent and the slot index. */
+  onMove: (id: Uuid, newParentId: Uuid | null, position: number) => Promise<void>;
   /** Rejected names come back as `VALIDATION` and stay in the input with the
       message beside it (§8, "Keep editing"), rather than closing the editor. */
   onError?: (message: string) => void;
@@ -70,6 +75,12 @@ type CommitTarget =
   | { kind: 'create'; parentId: Uuid; name: string }
   | { kind: 'createRoot'; name: string };
 
+/** Where a drag currently is. `zone` is which band of the target row the pointer is
+    over — `before`/`after` reorder among siblings, `inside` makes the row the new
+    parent. A `null` zone means the pointer is over a row that cannot accept this
+    folder, which is what draws the "not allowed" cursor instead of a drop line. */
+type DragState = { draggedId: Uuid; targetId: Uuid | null; zone: DropZone | null };
+
 export function FolderTree({
   nodes,
   counts,
@@ -80,6 +91,7 @@ export function FolderTree({
   onCreate,
   onRename,
   onDelete,
+  onMove,
   onError,
   creatingRoot,
   onCreatingRootChange,
@@ -87,6 +99,10 @@ export function FolderTree({
   const rows = useMemo(() => visibleFolderRows(nodes ?? [], collapsed), [nodes, collapsed]);
   const [editing, setEditing] = useState<Editing>(null);
   const [menuFor, setMenuFor] = useState<Uuid | null>(null);
+  /* Which row is being dragged, which row is under the pointer, and which of the
+     three bands of it. Held here rather than read from the event on drop, because
+     `dragover` fires many times and the drop event carries only the dragged id. */
+  const [drag, setDrag] = useState<DragState | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   /* The root create input's text, held here even though its open state lives in
      `Sidebar`, because the input itself is rendered here and a value that lived
@@ -200,6 +216,59 @@ export function FolderTree({
     setPendingDelete({ id, name: node.name, descendants });
   };
 
+  /* §6.3 drag. Three handlers rather than one, because the browser's drag model
+     gives each event different information: `dragstart` names the folder,
+     `dragover` fires continuously with a pointer position and must preventDefault
+     on every one of them for the drop to be allowed at all, and `drop` carries only
+     the dragged id. Holding the intermediate state here is what lets `drop` know
+     which row and which band it is over.
+
+     A refused drop — onto itself, into its own descendant, or a no-op reorder —
+     resolves to `null` in `folderRows.ts` and simply does nothing. Refusing before
+     the write is the point: the user learns why while the pointer is still down,
+     rather than after a round trip answers `CYCLE_DETECTED`. */
+  const onDragStart = (id: Uuid): void => {
+    setDrag({ draggedId: id, targetId: id, zone: null });
+  };
+
+  const onDragOver = (id: Uuid, offsetY: number, rowHeight: number): void => {
+    setDrag((current) => {
+      if (current === null) return current;
+      const zone = dropZoneAt(offsetY, rowHeight);
+      if (current.targetId === id && current.zone === zone) return current;
+      /* A target that cannot accept the folder shows the "no" cursor, which is the
+         only feedback available before the drop. */
+      const accepted = resolveDrop(rows, current.draggedId, id, zone) !== null;
+      return { ...current, targetId: id, zone: accepted ? zone : null };
+    });
+  };
+
+  const onDrop = (): void => {
+    const current = drag;
+    setDrag(null);
+    if (current === null || current.targetId === null || current.zone === null) return;
+
+    const move = resolveDrop(rows, current.draggedId, current.targetId, current.zone);
+    if (move === null) return;
+
+    void onMove(current.draggedId, move.newParentId, move.position).catch((error: unknown) => {
+      onError?.(messageOf(error));
+    });
+  };
+
+  const onDragEnd = (): void => {
+    setDrag(null);
+  };
+
+  /* A drag in progress owns the pointer, so a row under it must not also select.
+     §5 says selecting a folder is exclusive with everything else, and a re-parent
+     that also changed the selection would be a second, unrequested change. */
+  const clickRow = (id: Uuid): void => {
+    if (drag !== null) return;
+    focusRow(id);
+    onSelect({ kind: 'folder', id });
+  };
+
   const runMenuAction = (action: FolderMenuAction, id: Uuid): void => {
     setMenuFor(null);
     switch (action) {
@@ -237,7 +306,10 @@ export function FolderTree({
           editing={editing}
           editError={editError}
           menuFor={menuFor}
+          drag={drag}
+          creatingRoot={creatingRoot}
           onSelect={onSelect}
+          onClickRow={clickRow}
           onToggle={onToggle}
           onFocusRow={focusRow}
           onEdit={setEditing}
@@ -249,6 +321,10 @@ export function FolderTree({
           onMenu={setMenuFor}
           onMenuAction={runMenuAction}
           onShortcut={runMenuAction}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          onDragEnd={onDragEnd}
         />
       )}
 
@@ -319,7 +395,10 @@ function FolderRows({
   editing,
   editError,
   menuFor,
+  drag,
+  creatingRoot,
   onSelect,
+  onClickRow,
   onToggle,
   onFocusRow,
   onEdit,
@@ -329,6 +408,10 @@ function FolderRows({
   onMenu,
   onMenuAction,
   onShortcut,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: {
   nodes: FolderNode[];
   depth: number;
@@ -341,7 +424,13 @@ function FolderRows({
   editing: Editing;
   editError: string | null;
   menuFor: Uuid | null;
+  drag: DragState | null;
+  /** The root create input is open, which suspends dragging for the whole tree. */
+  creatingRoot: boolean;
   onSelect: (next: Selection) => void;
+  /** Click, which is a selection *and* a focus move — and which a drag in progress
+      must suppress, so it is separate from `onSelect` used by `Enter`. */
+  onClickRow: (id: Uuid) => void;
   onToggle: (id: Uuid) => void;
   onFocusRow: (id: Uuid) => void;
   onEdit: (editing: Editing) => void;
@@ -351,6 +440,10 @@ function FolderRows({
   onMenu: (id: Uuid | null) => void;
   onMenuAction: (action: FolderMenuAction, id: Uuid) => void;
   onShortcut: (action: FolderMenuAction, id: Uuid) => void;
+  onDragStart: (id: Uuid) => void;
+  onDragOver: (id: Uuid, offsetY: number, rowHeight: number) => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
 }) {
   return (
     <>
@@ -362,6 +455,9 @@ function FolderRows({
         const count = counts.get(node.id) ?? 0;
         const renaming = editing?.kind === 'rename' && editing.id === node.id;
         const creatingInside = editing?.kind === 'create' && editing.parentId === node.id;
+        const isDragged = drag?.draggedId === node.id;
+        const isTarget = drag !== null && drag.targetId === node.id;
+        const dropHere = isTarget ? drag.zone : null;
 
         /* A row being renamed is not a row any more: it is an input. Rendering
            both would leave the old name in the tree and a second control in the
@@ -406,13 +502,44 @@ function FolderRows({
               tabIndex={node.id === focusedId ? 0 : -1}
               data-testid="folder-row"
               data-folder-id={node.id}
+              data-dragging={isDragged ? 'true' : undefined}
+              /* No `aria-dropeffect`: it is deprecated in ARIA 1.1 and, more to the
+                 point, drag-and-drop has no keyboard equivalent in the DOM at all.
+                 `05-ui-ux.md` §6.3's answer to that is that re-parenting is also
+                 reachable from the row menu, and the keyboard route to a specific
+                 position is a documented gap rather than a fake ARIA attribute. */
               style={{ paddingLeft: 6 + depth * 16 }}
+              /* `draggable` only while nothing else is going on. A row being renamed
+                 is an input, and dragging a menu open over the tree would otherwise
+                 start a drag from whatever is underneath it. */
+              draggable={
+                editing === null && menuFor === null && drag === null && !creatingRoot
+              }
+              onDragStart={() => {
+                onDragStart(node.id);
+              }}
+              onDragEnd={onDragEnd}
+              onDragOver={(event) => {
+                /* preventDefault on every `dragover` is what marks the row as a
+                   valid drop target; without it the browser refuses the drop and
+                   `drop` never fires at all. */
+                event.preventDefault();
+                event.stopPropagation();
+                onDragOver(node.id, event.clientY - rowRect(event).top, rowRect(event).height);
+              }}
+              /* `dragleave` fires when the pointer crosses a child too, so the
+                 count below is what makes leaving the row distinguishable from
+                 moving within it. */
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onDrop();
+              }}
               onFocus={() => {
                 setFocusedQuietly(focusedId, node.id, onFocusRow);
               }}
               onClick={() => {
-                onFocusRow(node.id);
-                onSelect({ kind: 'folder', id: node.id });
+                onClickRow(node.id);
               }}
               /* §2.2 and §9: right-click on desktop, long-press on touch, and the
                  row's own button, all reach the same menu. */
@@ -462,12 +589,39 @@ function FolderRows({
                     break;
                 }
               }}
-              className={`group flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] px-[6px] text-[13px] transition-colors ${
-                active
-                  ? 'bg-[var(--accent-soft)] font-medium text-[var(--accent)]'
-                  : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
+              className={`group relative flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] px-[6px] text-[13px] transition-colors ${
+                isDragged
+                  ? 'opacity-40'
+                  : active
+                    ? 'bg-[var(--accent-soft)] font-medium text-[var(--accent)]'
+                    : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
               }`}
             >
+              {/* The drop indicator: a 2 px accent rule pinned to the top or bottom
+                  edge, or a soft accent fill for "into". A rule on the wrong edge
+                  would read as re-ordering when the intent was re-parenting, which is
+                  the whole distinction the three bands exist to make. */}
+              {dropHere === 'before' ? (
+                <span
+                  data-testid="drop-line-before"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-[6px] -top-px h-[2px] rounded-full bg-[var(--accent)]"
+                />
+              ) : null}
+              {dropHere === 'after' ? (
+                <span
+                  data-testid="drop-line-after"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-[6px] -bottom-px h-[2px] rounded-full bg-[var(--accent)]"
+                />
+              ) : null}
+              {dropHere === 'inside' ? (
+                <span
+                  data-testid="drop-inside"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 rounded-[var(--r-input)] bg-[var(--accent-soft)]"
+                />
+              ) : null}
               <span className="flex w-[14px] flex-none">
                 {hasChildren ? (
                   <button
@@ -549,10 +703,17 @@ function FolderRows({
                 editing={editing}
                 editError={editError}
                 menuFor={menuFor}
+                drag={drag}
+                creatingRoot={creatingRoot}
                 onSelect={onSelect}
+                onClickRow={onClickRow}
                 onToggle={onToggle}
                 onFocusRow={onFocusRow}
                 onEdit={onEdit}
+                onDragStart={onDragStart}
+                onDragOver={onDragOver}
+                onDrop={onDrop}
+                onDragEnd={onDragEnd}
                 onClearError={onClearError}
                 onCommitEditing={onCommitEditing}
                 onEditEditing={onEditEditing}
@@ -575,6 +736,14 @@ function FolderRows({
    `.focus()` inside a focus handler is a re-entrant call for no benefit. */
 function setFocusedQuietly(current: Uuid | null, next: Uuid, onFocusRow: (id: Uuid) => void): void {
   if (current !== next) onFocusRow(next);
+}
+
+/** The row's own box, read once per `dragover`.
+    `getBoundingClientRect` on a row during a drag is the one layout read the handler
+    cannot avoid — the zone is a fraction of the row's height — and it is cheap
+    because it is one element, not a reflow of the tree. */
+function rowRect(event: React.DragEvent<HTMLDivElement>): DOMRect {
+  return event.currentTarget.getBoundingClientRect();
 }
 
 /** `AppError` reaches the frontend as `{ code, message }` over IPC and as a
