@@ -336,6 +336,20 @@ There is no cap on pinned notes. If a user pins 50 notes, the ordering stops bei
 
 A tag is created by typing a new name into the tag editor; existing names complete. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; a tag disappears from the sidebar only when its note count reaches zero (`03-data-model.md` §5).
 
+**The editor and the picker are one visual language.** Both are portalled popovers anchored to their status-bar slot, and both are listboxes. They are the same component with different options, because a tag editor that looked different from the folder picker would be two visual languages for "choose a value" in a 28 px row. The picker is portalled rather than rendered in place because the status bar sits at the bottom of a `flex` column with its own stacking contexts: in place, the popover would be clipped by the editor pane and could not be raised above it. Its position is measured in the click handler rather than in an effect — the geometry is in hand at the click, and an effect that reads the DOM and then sets state is a second render for a value already known.
+
+**A `listbox`, not a menu.** Both are choose-one-or-more from a list, and the ARIA pattern for that is a listbox: arrow keys, `Home`/`End` and type-ahead come with it, and the tags listbox is `aria-multiselectable`. The folder picker is a listbox over the tree flattened depth-first, indented by depth — a picker is not a tree, and reusing the folder tree's nested `role="treeitem"` rendering would be neither correct nor reusable.
+
+**Enter toggles rather than duplicating.** A typed name that matches an existing tag exactly (case-insensitively) adds that tag, because `tags_create` normalises to the first-created spelling and asking it to create `Work` again would be asking for a second `work`. A name that matches nothing creates it, and the hint says so rather than leaving an empty list. When nothing matches and the field is empty, nothing happens.
+
+**The status bar shows one tag and a count of the rest.** A note with four tags does not fit in a 28 px row, and truncating the name of the one shown would be worse than saying how many there are. Each slot's `aria-label` names the action ("Change folder", "Choose tags") rather than its value, so a screen reader announcing "Work, button" does not say what pressing it would do.
+
+**A folder or tag change goes through the autosave debounce, not its own command.** `notes_save` is the one write that carries `folderId` and `tagIds` together with the document, and the tag set is a whole-set replacement (`07-sync-plan.md` §5.3) rather than an increment — two commands appending rows would get that wrong. What does not go through the debounce is `isPinned`, which has a command of its own for the reason above.
+
+**The slots show the pending value, not the saved one.** The folder and tags shown are what the next autosave will write. A click that appeared to do nothing for 800 ms would be the same lie the pin had.
+
+**Creating a tag flushes before it refetches.** A new tag's count is zero until the note carrying it is saved, and `tags_list` hides a tag whose notes are all in the trash and any tag with a zero count (`03-data-model.md` §5) — so the tag is genuinely not in the library until the write lands. Flushing the autosave and then invalidating the tag query is what makes the new name appear in the slot at all; without it the note would carry a tag the bar cannot name.
+
 ### 6.5 Search
 
 Focus with `Ctrl/Cmd+F`, or click the field. Results replace the note list; the sidebar structure stays visible so the search can be scoped. A search with an active folder or tag filter narrows within it. Query length ≥ 2, or the last query is restored. `Esc` clears and restores the previous list.

@@ -351,24 +351,44 @@ If `notes_get` returns `DOC_INVALID`, the UI shows a recovery screen offering: t
 A single 28 px row at the bottom of the editor pane:
 
 ```
-[left]                          [right]
-Untitled · 342 words            Saved
+[left]                                     [right]
+Untitled · Work · #work +2 · 📌   342 words    Saved
 ```
 
 | Element | Source |
 |---------|--------|
 | Title | Derived, `03-data-model.md` §4.1 |
-| Word count | Derived at save |
-| Save state | Frontend save state machine, §5.2 |
 | Folder | Note's folder name, click to change |
 | Tags | Note's tags, click to add or remove |
+| Pin | `notes_set_pinned`, click to toggle, `Ctrl/Cmd+D` |
+| Word count | Derived at save |
+| Save state | Frontend save state machine, §5.2 |
 
-M2 ships title, word count, and save state. The folder and tag elements need M4's
-data and arrive with it, rather than as controls that do nothing.
+M2 ships title, word count, and save state. The folder, tag and pin elements need
+M4's data and arrive with it, rather than as controls that do nothing.
 
 The save state carries the note it belongs to. A failure on a note the user has
 already left must not paint the status bar of the note now open, so the store
 holds both the state and its subject.
+
+The folder and tags slots show the **pending** value — what the next autosave will
+write — not what the database holds. A click that appeared to do nothing until the
+debounce commits would be a status bar lying about the note, which is the one thing
+§5.2 exists to prevent.
+
+**§5.1's unchanged-document skip has an exception here, and it needs one.** A
+folder or tag change arrives carrying an *unchanged* document, so the serialisation
+comparison calls it unchanged and the write never happens — the same failure a
+pin-only write has. Metadata changes queue through the autosave with that comparison
+bypassed, rather than through commands of their own: `notes_save` is the only write
+that carries `folderId` and `tagIds` with the document together, and the tag set is a
+whole-set replacement (`07-sync-plan.md` §5.3) rather than an increment.
+
+The exception has to survive three paths that re-enter a save, and each of them
+loses it if the flag rides on the caller's argument instead of on the queue: the
+800 ms debounce, an explicit `flush` on note switch, and the retry timer after a
+failed write. The retry is the one that cannot be reached from the UI — which is why
+it has a unit test rather than a manual check.
 
 Nothing else. No cursor position, no selection statistics, no formatting hints. Those are editor-chrome features this app does not have.
 

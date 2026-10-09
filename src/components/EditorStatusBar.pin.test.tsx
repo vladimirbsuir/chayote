@@ -15,6 +15,10 @@ function bar(overrides: Partial<React.ComponentProps<typeof EditorStatusBar>> = 
     saveState: 'saved',
     isPinned: false,
     onTogglePin: () => {},
+    folderName: null,
+    tagNames: [],
+    onPickFolder: () => {},
+    onEditTags: () => {},
     ...overrides,
   };
   return <EditorStatusBar {...props} />;

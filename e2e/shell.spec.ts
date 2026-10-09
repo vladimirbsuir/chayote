@@ -1096,6 +1096,175 @@ test.describe('trash', () => {
   });
 });
 
+/* `04-editor.md` §9: "Folder | Note's folder name, click to change" and "Tags |
+   Note's tags, click to add or remove". These land with the last part of M4. */
+test.describe('editor status bar', () => {
+  test('shows the note\'s folder and tags', async ({ page }) => {
+    await open(page);
+
+    /* The first fixture note, rather than the first card: it is the one the editor opens
+       on, so it is the one whose folder and tags the bar shows. Other notes have
+       different ones. */
+    await page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }).click();
+
+    await expect(page.getByTestId('status-folder')).toContainText('Work');
+    /* The row shows the first tag plus a count of the rest; §9 gives the row 28 px,
+       and four tag names do not fit in it. */
+    await expect(page.getByTestId('status-tags')).toContainText('#');
+  });
+
+  test('changes the folder from the status bar, and the note list follows', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }).click();
+
+    await page.getByTestId('status-folder').click();
+    await expect(page.getByTestId('folder-picker-list')).toBeVisible();
+    await expect(page.getByTestId('status-popover')).toBeVisible();
+
+    /* Picked by name rather than by a fixture id: the ids are generated, and the
+       name is what the user sees. */
+    await page
+      .locator('[data-testid="folder-picker-option"]')
+      .filter({ hasText: 'Reading' })
+      .click();
+
+    /* The save is debounced, so "Saved" is the signal that it reached the database —
+         the same signal the editor gives for typing. */
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
+    await page.waitForTimeout(900);
+    await expect(page.getByTestId('status-folder')).toContainText('Reading');
+
+    /* The note moved folders, so selecting that folder now includes it. */
+    await page.getByTestId('folder-row').filter({ hasText: 'Reading' }).click();
+    await expect(page.getByTestId('list-header')).toHaveText('Reading');
+    await expect(
+      page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }),
+    ).toBeVisible();
+  });
+
+  test('clears the folder back to unfiled', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+
+    await page.getByTestId('status-folder').click();
+    await page.locator('[data-testid="folder-picker-option"][data-folder-id="none"]').click();
+    await page.waitForTimeout(900);
+
+    /* ADR-014: everything starts unfiled, so a note can always go back there. */
+    await expect(page.getByTestId('status-folder')).toHaveText('No folder');
+  });
+
+  test('creates a tag by typing a name that does not exist yet', async ({ page }) => {
+    await open(page);
+    /* A note with no tags, so the assertion is about the tag appearing rather than
+       about where it lands in a row that already had some. */
+    await page.getByTestId('note-card').filter({ hasText: 'Untitled' }).first().click();
+    await expect(page.getByTestId('status-tags')).toHaveText('Add tags');
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await page.getByTestId('tag-editor-input').fill('draft');
+    await page.getByTestId('tag-editor-input').press('Enter');
+    await page.waitForTimeout(900);
+
+    await expect(page.getByTestId('status-tags')).toContainText('#draft');
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
+  });
+
+  test('typing an existing tag name adds it rather than duplicating it', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').filter({ hasText: 'Untitled' }).first().click();
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    /* §6.4 normalises to the first-created spelling, so `Ideas` and `ideas` are one
+       tag. The status bar shows the library's spelling, not what was typed. */
+    await page.getByTestId('tag-editor-input').fill('Ideas');
+    await page.getByTestId('tag-editor-input').press('Enter');
+    await page.waitForTimeout(900);
+
+    await expect(page.getByTestId('status-tags')).toContainText('#ideas');
+    /* One tag, not two. */
+    await expect(page.getByTestId('status-tags')).not.toContainText('+');
+  });
+
+  test('adds an existing tag by picking it, and shows the tag in the sidebar', async ({ page }) => {
+    await open(page);
+    /* A note with no tags, so the assertion is about the tag being added and not about
+       what it already had. */
+    await page.getByTestId('note-card').filter({ hasText: 'Untitled' }).first().click();
+    const before = await page.getByTestId('status-tags').textContent();
+    expect(before).toBe('Add tags');
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await page.locator('[data-testid="tag-editor-option"][data-tag-id]').first().click();
+    await page.waitForTimeout(900);
+
+    await expect(page.getByTestId('status-tags')).not.toHaveText('Add tags');
+
+    /* §6.4: the tag disappears from the sidebar only when its count reaches zero, so
+       it must still be there — with one more note in it. */
+    await expect(page.getByTestId('tag-row').first()).toBeVisible();
+  });
+
+  test('removes a tag from the note without removing it from the library', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+    const libraryBefore = await page.getByTestId('tag-row').count();
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await page.locator('[data-testid="tag-editor-option"][data-tag-id]').first().click();
+    await page.waitForTimeout(900);
+
+    /* §6.4: "Removing a tag from a note never deletes the tag itself." The library is
+       unchanged; only this note's membership goes. */
+    await expect(page.getByTestId('tag-row')).toHaveCount(libraryBefore);
+  });
+
+  test('a tag change survives the next keystroke, rather than being reverted by it', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').filter({ hasText: 'Untitled' }).first().click();
+
+    const editor = page.getByRole('textbox', { name: 'Note content' });
+    await editor.click();
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await page.locator('[data-testid="tag-editor-option"][data-tag-id]').first().click();
+    await page.waitForTimeout(900);
+
+    const shown = await page.getByTestId('status-tags').textContent();
+    expect(shown).not.toBe('Add tags');
+
+    /* The autosave target carries `tagIds`. If the in-memory set were not updated with
+       it, this keystroke would save the old set and quietly drop the tag — the same
+       failure the pin had, and the reason `autosave.schedule` exists. */
+    await editor.press('End');
+    await page.keyboard.type(' more');
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
+    await page.waitForTimeout(900);
+
+    await expect(page.getByTestId('status-tags')).toHaveText(shown ?? '');
+  });
+
+  test('closes the folder picker on Escape without changing the folder', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+    const before = await page.getByTestId('status-folder').textContent();
+
+    await page.getByTestId('status-folder').click();
+    /* The popover attaches its Escape handler when it mounts, so pressing the key
+       before it exists presses it into the void. Waiting for it is the difference
+       between asserting the behaviour and racing the render. */
+    await expect(page.getByTestId('status-popover')).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    await expect(page.getByTestId('status-popover')).toHaveCount(0);
+    await expect(page.getByTestId('status-folder')).toHaveText(before ?? '');
+  });
+});
+
 test.describe('keyboard shortcuts', () => {
   test('focuses the search field with Ctrl+F', async ({ page }) => {
     await open(page);
