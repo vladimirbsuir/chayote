@@ -1,18 +1,25 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Editor } from '@tiptap/core';
 import { AlertCircle, ArrowLeft, MoreHorizontal, RotateCw } from 'lucide-react';
-import { notesApi } from '../lib/ipc';
+import { notesApi, tagsApi } from '../lib/ipc';
 import { useAutosave } from '../hooks/useAutosave';
+import { useFolders, folderNamesById } from '../hooks/useFolders';
+import { useTags } from '../hooks/useTags';
 import { openNote, selectSaveState, useEditorStore } from '../stores/editor';
 import { qk } from '../queries/keys';
 import { IconButton } from './IconButton';
 import type { JsonDoc, Uuid } from '../types/note';
-import type { Note, SaveNoteInput } from '../types/ipc';
+import type { Note, NoteSummary, SaveNoteInput } from '../types/ipc';
 import { NoteEditor } from '../editor/NoteEditor';
 import { EditorStatusBar } from './EditorStatusBar';
 import { EmptyState } from './EmptyState';
+import { summaryOf } from './summaryOf';
+import { FolderPicker, TagEditor } from './StatusPopovers';
+import { popoverPlacement } from './popoverPlacement';
+import type { FolderNode } from '../types/folder';
+import type { TagWithCount } from '../types/tag';
 
 type EditorPaneProps = {
   noteId: Uuid | null;
@@ -24,6 +31,13 @@ type EditorPaneProps = {
 };
 
 const UNTITLED = 'Untitled';
+
+/* The status bar renders on the no-note and recovery screens too, where there is no
+   note to point a picker at. */
+const NOOP = (): void => {};
+
+const EMPTY_FOLDERS: FolderNode[] = [];
+const EMPTY_TAGS: TagWithCount[] = [];
 
 /* The folder, tags, and pin state of the note the mounted editor holds. Held in
    a ref because they change only on a save, and read only from an event handler
@@ -46,8 +60,52 @@ type Active = {
 export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
   const queryClient = useQueryClient();
   const activeRef = useRef<Active>({ folderId: null, tagIds: [], isPinned: false });
+  /* Mirrors `activeRef.isPinned` as state. The status-bar control has to re-render
+     when the pin changes, and a ref write renders nothing — the button would keep
+     showing the state the note had when it opened. */
+  const [pinned, setPinned] = useState(false);
+  /* Mirrors `activeRef.folderId` and `.tagIds` as state, for the same reason
+     `pinned` exists: the status-bar controls must re-render when these change, and a
+     ref write renders nothing.
+
+     They are also the pending values — what the next autosave will write — not what
+     the database holds. Showing the saved state here would mean a click appears to do
+     nothing until the debounce commits, which is the same lie the pin had. */
+  const [folderId, setFolderId] = useState<Uuid | null>(null);
+  const [tagIds, setTagIds] = useState<Uuid[]>([]);
+
+  /* The mounted TipTap instance. Held so a status-bar change can be turned into a
+     save target without the editor having to be a piece of component state: the
+     document belongs to TipTap (`10-conventions.md` §7) and nothing else reads it
+     during render. */
+  const editorRef = useRef<Editor | null>(null);
+
+  /* `04-editor.md` §9: folder and tags are "click to change". Which of the two
+     popovers is open, and the element each was opened from — the menu needs the
+     anchor to place itself, and holding the element rather than the coordinates means
+     a re-render between the click and the measurement still measures the right thing.
+     One slot rather than two, because a 28 px row cannot sensibly have both open and
+     two flags would only be a way to end up with both. */
+  const [popover, setPopover] = useState<{
+    kind: 'folder' | 'tags';
+    anchor: HTMLElement;
+    placement: { top: number; left: number };
+  } | null>(null);
   const autosave = useAutosave((saved) => {
+    /* `10-conventions.md` §7: a save does not invalidate the list, because the
+       response already carries the fresh summary — so the entry is patched in
+       place. `updatedAt` and `isPinned` both move with a save (the pin through
+       `notes_set_pinned`, the timestamp through every write), and the list orders
+       by exactly those two, so patching only the open note's own cache entry would
+       leave a card showing a pin the note no longer has until the next refetch. */
     queryClient.setQueryData(qk.note(saved.id), saved);
+    queryClient.setQueriesData(
+      { queryKey: ['notes'] },
+      (existing: NoteSummary[] | undefined) =>
+        Array.isArray(existing)
+          ? existing.map((summary) => (summary.id === saved.id ? { ...summary, ...summaryOf(saved) } : summary))
+          : existing,
+    );
   });
   const saveState = useEditorStore((state) => selectSaveState(state, noteId));
 
@@ -57,6 +115,20 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
     enabled: noteId !== null,
     retry: false,
   });
+
+  /* Folders and tags are already loaded by the sidebar, so these two queries hit the
+     cache rather than the backend — `10-conventions.md` §8, "folders and tags load
+     once and are cached; they change rarely". Read here because the status bar is
+     this pane's concern and threading them down as props would put data the shell
+     owns into a prop it passes to two children. */
+  const { folders } = useFolders();
+  const { tags } = useTags();
+
+  const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
+  const tagNames = useMemo(
+    () => (tags ?? []).filter((tag) => tagIds.includes(tag.id)).map((tag) => tag.name),
+    [tags, tagIds],
+  );
 
   const targetOf = useCallback((editor: Editor): SaveNoteInput | null => {
     if (noteId === null) return null;
@@ -87,15 +159,31 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
     (editor: Editor): void => {
       const data = queryClient.getQueryData<Note>(qk.note(noteId ?? ''));
       if (data === undefined) return;
+      const ids = data.tags.map((tag) => tag.id);
       activeRef.current = {
         folderId: data.folderId,
-        tagIds: data.tags.map((tag) => tag.id),
+        tagIds: ids,
         isPinned: data.isPinned,
       };
+      /* The mirrors have to follow the load too, or a note opened after a change made
+         elsewhere would show the previous note's state. */
+      setPinned(data.isPinned);
+      setFolderId(data.folderId);
+      setTagIds(ids);
+      editorRef.current = editor;
       autosave.setBaseline(targetOf(editor) as SaveNoteInput);
     },
     [autosave, noteId, queryClient, targetOf],
   );
+
+  /* The save target for whatever is on screen now, or `null` before the editor has
+     mounted. Shared by the document path and the folder/tag path so both read the
+     document at the moment of the write rather than a captured copy — a captured
+     document is what makes a serialisation comparison skip a real change. */
+  const saveTarget = useCallback((): SaveNoteInput | null => {
+    const editor = editorRef.current;
+    return editor === null ? null : targetOf(editor);
+  }, [targetOf]);
 
   const onChange = useCallback(
     (editor: Editor): void => {
@@ -108,6 +196,91 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
   const onDispose = useCallback((): void => {
     void autosave.flush();
   }, [autosave]);
+
+  /* Folder and tag changes go through the autosave rather than through their own
+     commands. `notes_save` is the one write that carries `folderId`, `tagIds` and
+     the document together, and `04-editor.md` §5.1 makes the debounce the reason a
+     200 ms debounce on the status bar would be wrong: the user may be mid-sentence,
+     and a folder change must not force the document out of TipTap or reset undo
+     history. Flushing immediately would do exactly that.
+
+     What does not go through it is `isPinned`, which has a command of its own — see
+     `togglePin`. */
+  const changeFolder = useCallback(
+    (next: Uuid | null): void => {
+      setFolderId(next);
+      activeRef.current = { ...activeRef.current, folderId: next };
+      const target = saveTarget();
+      if (target !== null) autosave.schedule(target);
+    },
+    [autosave, saveTarget],
+  );
+
+  const toggleTag = useCallback(
+    (tagId: Uuid): void => {
+      const current = activeRef.current.tagIds;
+      const next = current.includes(tagId)
+        ? current.filter((id) => id !== tagId)
+        : [...current, tagId];
+      setTagIds(next);
+      activeRef.current = { ...activeRef.current, tagIds: next };
+      const target = saveTarget();
+      if (target !== null) autosave.schedule(target);
+    },
+    [autosave, saveTarget],
+  );
+
+  /* `05-ui-ux.md` §6.3a: `Ctrl/Cmd+D` toggles the pin of the open note.
+
+     Deliberately *not* routed through the autosave debounce. `04-editor.md` §5.1
+     makes the serialised document the comparison, so a write that changes only
+     `isPinned` would be judged unchanged and skipped — and the pin would move in
+     the UI and never reach the database. It is a metadata write, so it goes
+     straight to `notes_set_pinned`.
+
+     The important half is `activeRef`: the autosave target carries `isPinned`, so
+     without updating it the next keystroke would save the *old* flag and silently
+     undo the pin the user just pressed. One ref write, and the next save carries
+     the new value. */
+  const closePopover = (): void => {
+    setPopover(null);
+  };
+
+  /* §6.4: "A tag is created by typing a new name into the tag editor; existing names
+     complete. Case-insensitive match, normalised to the first-created spelling."
+     The backend returns the existing row when the name matches, so a case-insensitive
+     duplicate lands on the original tag rather than a second copy. */
+const createTag = useCallback(
+    async (name: string): Promise<void> => {
+      const created = await tagsApi.create(name);
+      toggleTag(created.id);
+      /* Two writes, in this order, and the order is the point.
+
+         `tags_list` hides a tag whose count is zero — an empty filter in the sidebar
+         is noise (`03-data-model.md` §5) — so the new tag is not in the library until
+         the note carrying it is saved. Attaching it is the debounced write, so the
+         save is flushed here rather than leaving the bar to say "Add tags" for 800 ms
+         over a tag that already exists. Then the refetch: the status bar resolves tag
+         names out of the cached list, and without the new tag in it the note would
+         carry a tag it cannot name. */
+      await autosave.flush();
+      await queryClient.invalidateQueries({ queryKey: qk.tags() });
+    },
+    [autosave, queryClient, toggleTag],
+  );
+
+  const togglePin = useCallback((): void => {
+    if (noteId === null) return;
+    const next = !pinned;
+    setPinned(next);
+    activeRef.current = { ...activeRef.current, isPinned: next };
+    void notesApi.setPinned(noteId, next).catch(() => {
+      /* Put both back, so a failed write cannot leave the editor showing a pin the
+         database does not have. The next autosave then writes the truth. */
+      setPinned(!next);
+      activeRef.current = { ...activeRef.current, isPinned: !next };
+    });
+  }, [noteId, pinned]);
 
   useEffect(() => {
     openNote(noteId);
@@ -146,25 +319,48 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
      save dialog would otherwise fire under Playwright. */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
-      event.preventDefault();
-      void autosave.flush();
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+
+      if (key === 's') {
+        event.preventDefault();
+        void autosave.flush();
+        return;
+      }
+      /* `Ctrl/Cmd+D` is the pin, not the bookmark dialog: it is §7's shortcut and the
+         empty state promises it by name. Browser default suppressed either way. */
+      if (key === 'd') {
+        event.preventDefault();
+        togglePin();
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [autosave]);
+  }, [autosave, togglePin]);
 
   if (noteId === null) {
     return (
       <Shell
-        status={<EditorStatusBar title="" wordCount={0} saveState="saved" />}
-        editor={
-          <Centred>
-            <EmptyState
-              title="No note open"
+status={
+          <EditorStatusBar
+            title=""
+            wordCount={0}
+            saveState="saved"
+            isPinned={false}
+            onTogglePin={NOOP}
+            folderName={null}
+            tagNames={[]}
+            onPickFolder={NOOP}
+            onEditTags={NOOP}
+          />
+        }
+      editor={
+        <Centred>
+          <EmptyState
+            title="No note open"
               body="Pick a note from the list, or create one with Ctrl+N."
               icon={<AlertCircle className="icon i-20" aria-hidden="true" />}
             />
@@ -187,7 +383,42 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
           title={data === undefined ? '' : displayTitle(data.title)}
           wordCount={data?.wordCount ?? 0}
           saveState={saveState}
+          isPinned={pinned}
+          onTogglePin={togglePin}
+          folderName={folderId === null ? null : (folderNames.get(folderId) ?? null)}
+          tagNames={tagNames}
+          onPickFolder={(anchor) => {
+            setPopover({ kind: 'folder', anchor, placement: popoverPlacement(anchor) });
+          }}
+          onEditTags={(anchor) => {
+            setPopover({ kind: 'tags', anchor, placement: popoverPlacement(anchor) });
+          }}
         />
+      }
+      popover={
+        popover?.kind === 'folder' ? (
+          <FolderPicker
+            anchor={popover.anchor}
+            placement={popover.placement}
+            folders={folders ?? EMPTY_FOLDERS}
+            current={folderId}
+            onPick={(next) => {
+              changeFolder(next);
+              setPopover(null);
+            }}
+            onClose={closePopover}
+          />
+        ) : popover?.kind === 'tags' ? (
+          <TagEditor
+            anchor={popover.anchor}
+            placement={popover.placement}
+            tags={tags ?? EMPTY_TAGS}
+            selected={tagIds}
+            onToggle={toggleTag}
+            onCreate={createTag}
+            onClose={closePopover}
+          />
+        ) : null
       }
       editor={
         data === undefined ? (
@@ -218,11 +449,23 @@ export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
   );
 }
 
-function Shell({ editor, status }: { editor: ReactNode; status: ReactNode }) {
+function Shell({
+  editor,
+  status,
+  popover = null,
+}: {
+  editor: ReactNode;
+  status: ReactNode;
+  /** The folder picker or tag editor, rendered beside the pane rather than inside
+      the status bar: the bar is a flex row in the pane's own stacking context, and a
+      popover inside it would be clipped by the editor's `overflow`. */
+  popover?: ReactNode;
+}): React.ReactElement {
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-[var(--surface)]" aria-label="Editor">
+    <section className="relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]" aria-label="Editor">
       {editor}
       {status}
+      {popover}
     </section>
   );
 }
@@ -261,7 +504,19 @@ function MobileEditorBar({ title, onBack }: { title: string; onBack?: () => void
 function RecoveryScreen({ code, onRetry }: { code: string; onRetry: () => void }) {
   return (
     <Shell
-      status={<EditorStatusBar title="" wordCount={0} saveState="saved" />}
+status={
+        <EditorStatusBar
+          title=""
+          wordCount={0}
+          saveState="saved"
+          isPinned={false}
+          onTogglePin={NOOP}
+          folderName={null}
+          tagNames={[]}
+          onPickFolder={NOOP}
+          onEditTags={NOOP}
+        />
+      }
       editor={
         <Centred>
           <EmptyState

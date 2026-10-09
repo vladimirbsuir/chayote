@@ -1,9 +1,15 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { notesApi, windowApi } from './lib/ipc';
+import { foldersApi, notesApi, windowApi } from './lib/ipc';
+import { isInsideSubtree } from './components/folderRows';
 import { useNow, useNotes } from './hooks/useNotes';
 import { countByFolder, folderNamesById, useFolders } from './hooks/useFolders';
 import { useTags } from './hooks/useTags';
+import { useTogglePin } from './hooks/useTogglePin';
+import { useTrashActions } from './hooks/useTrashActions';
+import { UndoToast } from './components/UndoToast';
+import { useUndoToast } from './components/useUndoToast';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import {
   openNote as setOpenNote,
   select as setSelection,
@@ -51,8 +57,8 @@ function useSystemDark(): boolean {
 }
 
 /** M3 wires the shell to the selection model, the note list, and the three
-    layouts of `05-ui-ux.md` §2. Every control below routes through `lib/ipc.ts`,
-    so nothing here touches storage (rule R6). */
+    layouts of `05-ui-ux.md` §2. M4 adds the folder writes. Every control below
+    routes through `lib/ipc.ts`, so nothing here touches storage (rule R6). */
 function Shell() {
   const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -79,6 +85,51 @@ function Shell() {
   const { notes, isPending, refetch } = useNotes(selection);
   const { folders } = useFolders();
   const { tags } = useTags();
+  const { togglePin, pendingId: pinPendingId } = useTogglePin();
+  const { toast: undoToast, show: showUndoToast } = useUndoToast();
+
+  /* `05-ui-ux.md` §6.2: a note that leaves the trash closes the editor, and one that
+     comes back re-opens it — closing after a restore would make undo look like it
+     acted on the wrong note. */
+  const trash = useTrashActions({
+    onOpenNoteGone: (goneId) => {
+      if (goneId === null || goneId === useSelectionStore.getState().openNoteId) {
+        setOpenNote(null);
+        if (useSelectionStore.getState().selection.kind === 'folder') {
+          setSelection({ kind: 'all' });
+        }
+      }
+    },
+    onRestored: (id) => {
+      setOpenNote(id);
+    },
+  });
+
+  /* One entry point for a soft delete, wherever it was triggered from, so the toast's
+     text always names the note the user actually deleted and the restore always
+     targets the same id. A second copy of this in the key handler is how a toast ends
+     up offering to undo the wrong note. */
+  const softDeleteWithToast = useCallback(
+    (id: Uuid): void => {
+      const note = notes?.find((candidate) => candidate.id === id);
+      const title = note === undefined || note.title.length === 0 ? 'Untitled' : note.title;
+      trash.softDelete(id);
+      showUndoToast(id, title, () => {
+        void trash.restore(id);
+      });
+    },
+    [notes, showUndoToast, trash],
+  );
+
+  /* `05-ui-ux.md` §6.2: permanent delete and empty trash confirm; nothing else here
+     does. One piece of state rather than two, because a user cannot have two
+     destructive confirmations open at once and two flags would only be a way to get
+     that wrong. */
+  const [confirm, setConfirm] = useState<
+    | { kind: 'destroy'; id: Uuid; title: string }
+    | { kind: 'empty' }
+    | null
+  >(null);
   const now = useNow();
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
@@ -166,6 +217,72 @@ function Shell() {
     if (mobile) setStack(PUSH_EDITOR);
   }, [defaultFolderId, mobile, queryClient, refetch]);
 
+  /* Folder writes invalidate the folder query and the note list together
+     (`10-conventions.md` §7): a new or deleted folder changes the tree, and a
+     deleted folder unfiles the notes inside it, which moves them out of the
+     current folder selection. One invalidation rather than two, because they land
+     in the same user action and a user cannot see a half-applied one. */
+  const foldersChanged = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey: ['folders'] });
+    void queryClient.invalidateQueries({ queryKey: ['notes'] });
+    refetch();
+  }, [queryClient, refetch]);
+
+  const createFolder = useCallback(
+    async (name: string, parentId: Uuid | null): Promise<void> => {
+      await foldersApi.create(name, parentId);
+      foldersChanged();
+    },
+    [foldersChanged],
+  );
+
+  const renameFolder = useCallback(
+    async (id: Uuid, name: string): Promise<void> => {
+      await foldersApi.rename(id, name);
+      foldersChanged();
+    },
+    [foldersChanged],
+  );
+
+  /* Deleting the folder that is selected leaves nothing to show, so the
+     selection moves to All rather than to a row that no longer exists
+     (`NOT_FOUND` handling in `10-conventions.md` §6). */
+  const deleteFolder = useCallback(
+    async (id: Uuid): Promise<void> => {
+      await foldersApi.remove(id);
+      if (useSelectionStore.getState().selection.kind === 'folder') {
+        setSelection({ kind: 'all' });
+      }
+      foldersChanged();
+    },
+    [foldersChanged],
+  );
+
+  /* A re-parent can move a folder out from under the active selection — dragging a
+     selected folder elsewhere leaves the selection naming a folder that no longer
+     contains what it did — so it falls back to All, the same as a delete. */
+  const moveFolder = useCallback(
+    async (id: Uuid, newParentId: Uuid | null, position: number): Promise<void> => {
+      await foldersApi.move(id, newParentId, position);
+      const current = useSelectionStore.getState().selection;
+      if (current.kind === 'folder' && isInsideSubtree(folders ?? [], id, current.id)) {
+        setSelection({ kind: 'all' });
+      }
+      foldersChanged();
+    },
+    [folders, foldersChanged],
+  );
+
+  /* §6.2 and §7: `Ctrl/Cmd+Backspace` deletes the open note. Bound on the window so
+     it works with focus in the editor or in the list, and `preventDefault` because
+     Backspace in a WebView navigates back otherwise — which on Android would pop the
+     view stack out from under a note the user is deleting. */
+  const deleteOpenNote = useCallback((): void => {
+    const id = useSelectionStore.getState().openNoteId;
+    if (id === null) return;
+    softDeleteWithToast(id);
+  }, [softDeleteWithToast]);
+
   const openFromList = useCallback(
     (id: Uuid) => {
       setOpenNote(id);
@@ -201,6 +318,13 @@ function Shell() {
         } else {
           useSettingsStore.getState().toggleSidebarCollapsed();
         }
+        return;
+      }
+      /* §7: `Delete note` is `Ctrl/Cmd+Backspace`. Not plain Backspace — in a WebView
+         that navigates back, and in the editor that deletes a character. */
+      if (key === 'backspace') {
+        event.preventDefault();
+        deleteOpenNote();
       }
     };
 
@@ -208,7 +332,7 @@ function Shell() {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [createNote, tablet]);
+  }, [createNote, deleteOpenNote, tablet]);
 
   /* Leaving the editor on a small screen pops the view stack (§2.4), which is
      what the Android back button does natively in M7. */
@@ -238,9 +362,43 @@ function Shell() {
       onNewNote={() => {
         void createNote();
       }}
+      onTogglePin={(id) => {
+        const current = notes?.find((note) => note.id === id);
+        if (current === undefined) return;
+        togglePin(id, !current.isPinned);
+      }}
+      pinPendingId={pinPendingId}
+      /* Which actions the list offers is the selection's business, not the caller's:
+     a live list offers delete and nothing else, the trash offers restore and
+     permanent delete and not delete. Passing all three unconditionally would put a
+     "Delete permanently" control on every note the user has not deleted yet — the
+     one mistake §6.2 is written to prevent. */
+onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
+      onRestoreNote={
+        selection.kind === 'trash'
+          ? (id) => {
+              void trash.restore(id);
+            }
+          : undefined
+      }
+      onDestroyNote={
+        selection.kind === 'trash'
+          ? (id) => {
+              const note = notes?.find((candidate) => candidate.id === id);
+              const title = note === undefined || note.title.length === 0 ? 'Untitled' : note.title;
+              setConfirm({ kind: 'destroy', id, title });
+            }
+          : undefined
+      }
+      onEmptyTrash={() => {
+        setConfirm({ kind: 'empty' });
+      }}
       onToggleFolder={useSettingsStore.getState().toggleFolderCollapsed}
-      onCreateFolder={NOOP}
+      onCreateFolder={createFolder}
       onCreateTag={NOOP}
+      onRenameFolder={renameFolder}
+      onDeleteFolder={deleteFolder}
+      onMoveFolder={moveFolder}
     />
   );
 
@@ -325,14 +483,58 @@ function Shell() {
           onResize={useSettingsStore.getState().setSidebarWidth}
         />
       )}
+
+      {/* The undo toast floats above the whole app rather than living in the
+          sidebar: a delete can be triggered from the editor's keyboard shortcut, and
+          a toast pinned to the sidebar would then be off-screen from where the user
+          is looking. Bottom-centred, out of the way of both panes. */}
+      {undoToast === null ? null : (
+        <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
+          <UndoToast toast={undoToast} />
+        </div>
+      )}
+
+      {confirm?.kind === 'destroy' ? (
+        <ConfirmDialog
+          title={`Delete “${confirm.title}” permanently?`}
+          /* §6.2 gives soft delete an undo toast and permanent delete a
+             confirmation. This one cannot be undone and there is no count to name,
+             so it is a different shape from the folder's — which exists to say how
+             many folders go with it. */
+          body="This cannot be undone. The note and its text are removed from this device."
+          confirmLabel="Delete permanently"
+          onCancel={() => {
+            setConfirm(null);
+          }}
+          onConfirm={() => {
+            const target = confirm.id;
+            setConfirm(null);
+            void trash.destroy(target);
+          }}
+        />
+      ) : confirm?.kind === 'empty' ? (
+        <ConfirmDialog
+          title="Empty the trash?"
+          body="Every note in the trash is removed from this device. This cannot be undone."
+          confirmLabel="Empty trash"
+          onCancel={() => {
+            setConfirm(null);
+          }}
+          onConfirm={() => {
+            setConfirm(null);
+            void trash.emptyTrash();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
-/* Folder and tag creation, rename, drag-reordering, and pinning are M4. The
-   section headers keep their add affordances so the structure is discoverable,
-   but they do nothing until then — a dead control is worse than a missing one,
-   so the two section headers are the only affordances M3 renders. */
+/* Tag creation, drag-reordering, and pinning are later parts of M4. The `+` in the
+    Tags header and the top-bar overflow menu stay wired to this until they are: the
+    controls are already in the prototype and in `05-ui-ux.md`, and removing them
+    would be a change to the specified appearance rather than to the implementation.
+    Each is annotated at its call site with the milestone that lands it. */
 const NOOP = (): void => {};
 
 /* `setStack` passes the current value to a reducer, so the second argument is

@@ -63,6 +63,7 @@ export type CommandName =
   | 'notes_create'
   | 'notes_save'
   | 'notes_move'
+  | 'notes_set_pinned'
   | 'notes_soft_delete'
   | 'notes_restore'
   | 'notes_destroy'
@@ -85,6 +86,7 @@ export type CommandArgs = {
   notes_create: { folderId: Uuid | null };
   notes_save: { input: SaveNoteInput };
   notes_move: { id: Uuid; folderId: Uuid | null };
+  notes_set_pinned: { id: Uuid; isPinned: boolean };
   notes_soft_delete: { id: Uuid };
   notes_restore: { id: Uuid };
   notes_destroy: { id: Uuid };
@@ -108,6 +110,7 @@ export type CommandOutput = {
   notes_create: Note;
   notes_save: Note;
   notes_move: Note;
+  notes_set_pinned: Note;
   notes_soft_delete: undefined;
   notes_restore: undefined;
   notes_destroy: undefined;

@@ -140,6 +140,9 @@ body {
   background: var(--surface-sunken);
   border-bottom: 1px solid var(--border);
 }
+/* Two states of the same component side by side, rather than one and a note. */
+.frames { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+.frames .frame { flex: 1 1 320px; min-width: 320px; }
 
 /* ==========================================================================
    Desktop: two-pane — docs/05-ui-ux.md §2.1
@@ -360,6 +363,34 @@ body {
 .statusbar .right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
 .statusbar .saved { display: flex; align-items: center; gap: 5px; }
 .statusbar .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+/* §6.4: the folder and tag slots are click to change, and the pin sits with them.
+   A slot that looked interactive and was not would be the worse of the two, so the
+   row only ever shows these with M4's data behind them. */
+.statusbar .slot { display: flex; align-items: center; gap: 5px; padding: 0 4px; border-radius: 4px; color: var(--text-muted); }
+.statusbar .slot.muted { color: var(--text-subtle); }
+.statusbar .pin-slot { color: var(--accent); }
+
+/* The two editors are one component with different options — a tag editor that looked
+   different from the folder picker would be two visual languages for "choose a value"
+   in a 28 px row. Portalled: the status bar sits at the bottom of the editor pane's own
+   stacking context, so an in-place popover would be clipped by it. */
+.popover {
+  position: absolute; z-index: 40;
+  width: 260px; max-height: 280px;
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgba(0,0,0,.16);
+  font-size: 12px; color: var(--text);
+}
+.popover .pop-input { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-subtle); }
+.popover .pop-list { overflow: auto; padding: 4px; }
+.popover .opt { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; }
+.popover .opt[aria-selected="true"] { background: var(--surface-sunken); }
+.popover .opt .tick { margin-left: auto; color: var(--accent); display: flex; }
+.popover .opt .count { margin-left: auto; color: var(--text-subtle); font-size: 11px; }
+.popover .hint { padding: 6px 10px; border-top: 1px solid var(--border); color: var(--text-subtle); font-size: 11px; }
+.popover .empty { padding: 14px 10px; color: var(--text-subtle); text-align: center; }
 
 /* ==========================================================================
    Android: single pane — docs/05-ui-ux.md §2.4
@@ -757,10 +788,10 @@ body {
               </div>
             </div>
             <div class="statusbar">
-              <span>Work</span>
-              <span style="display:flex;align-items:center;gap:3px">
-                <svg class="icon i-16" style="width:12px;height:12px;opacity:.7" aria-hidden="true"><use href="#i-hash"/></svg>work
-              </span>
+              <span>Meeting notes</span>
+              <span class="slot"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg>Work</span>
+              <span class="slot"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-hash"/></svg>#work +2</span>
+              <span class="slot pin-slot" title="Pin (Ctrl+D)"><svg class="icon i-16" aria-hidden="true"><use href="#i-pin"/></svg></span>
               <span class="right">
                 <span>342 words</span>
                 <span class="saved"><span class="dot"></span>Saved</span>
@@ -774,7 +805,44 @@ body {
 
   <!-- ==================================================================== -->
   <div class="section">
-    <h2>2 · Android — single pane, list and editor</h2>
+    <h2>2 · Status bar editors — folder picker and tag editor</h2>
+    <div class="note">Both open upward from the status bar at the bottom of the editor pane, portalled so the pane's own stacking context cannot clip them. Both are listboxes: the folder picker over the tree flattened and indented by depth, the tag editor multi-select with a filter field that is also the input.</div>
+    <div class="frames">
+      <div class="frame">
+        <div class="frame-label">folder picker · a note in Work</div>
+        <div style="position:relative;height:360px">
+          <div class="popover" style="left:24px;bottom:0">
+            <div class="pop-list">
+              <div class="opt" role="option" aria-selected="false"><span style="width:24px"></span>None</div>
+              <div class="opt" role="option" aria-selected="true"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg>Work<span class="tick"><svg class="icon i-16" aria-hidden="true"><use href="#i-check"/></svg></span></div>
+              <div class="opt" role="option" aria-selected="false" style="padding-left:26px"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg>Projects</div>
+              <div class="opt" role="option" aria-selected="false" style="padding-left:26px"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg>Reading</div>
+              <div class="opt" role="option" aria-selected="false"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg>Personal</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="frame">
+        <div class="frame-label">tag editor · typing a name that does not exist</div>
+        <div style="position:relative;height:360px">
+          <div class="popover" style="left:24px;bottom:0">
+            <div class="pop-input"><svg class="icon i-16" aria-hidden="true"><use href="#i-search"/></svg>draft</div>
+            <div class="pop-list">
+              <div class="opt" role="option" aria-selected="false"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-hash"/></svg>work<span class="count">14</span></div>
+              <div class="opt" role="option" aria-selected="true"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-hash"/></svg>ideas<span class="tick"><svg class="icon i-16" aria-hidden="true"><use href="#i-check"/></svg></span></div>
+              <div class="opt" role="option" aria-selected="false"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-hash"/></svg>reading<span class="count">7</span></div>
+            </div>
+            <div class="hint">Press Enter to create “draft”</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================================== -->
+  <div class="section">
+    <h2>3 · Android — single pane, list and editor</h2>
     <div class="note">One view at a time, 360 × 640. Back button pops the stack. 44 px touch targets on every icon control. No hover states.</div>
     <div class="phones">
       <div class="phone-col">
@@ -863,7 +931,8 @@ body {
             </div>
           </div>
           <div class="statusbar">
-            <span>Work · #work</span>
+            <span class="slot"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg>Work</span>
+            <span class="slot"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-hash"/></svg>#work</span>
             <span class="right">
               <span>342 w</span>
               <span class="saved"><span class="dot"></span>Saved</span>
@@ -876,7 +945,7 @@ body {
 
   <!-- ==================================================================== -->
   <div class="section">
-    <h2>3 · Empty and error states</h2>
+    <h2>4 · Empty and error states</h2>
     <div class="note">Every state explains the cause, not just the fact. No illustrations, no emoji. The dashed panel is the first-launch experience — no folders, no tags, no seeding.</div>
     <div class="states">
       <div class="state">
@@ -913,7 +982,7 @@ body {
 
   <!-- ==================================================================== -->
   <div class="section">
-    <h2>4 · Settings dialog</h2>
+    <h2>5 · Settings dialog</h2>
     <div class="note">Six accent presets plus a custom colour. Settings live in the Tauri store, never in the notes database. The swatch ring is the only selected state — it is never colour alone.</div>
     <div class="dialog-wrap">
       <div class="dialog">
@@ -963,7 +1032,7 @@ body {
 
   <!-- ==================================================================== -->
   <div class="section">
-    <h2>5 · Icon inventory — Lucide, 24 × 24 grid</h2>
+    <h2>6 · Icon inventory — Lucide, 24 × 24 grid</h2>
     <div class="note">
       Every icon in v1 comes from this list. No exceptions, no one-off SVGs, no icon fonts, no emoji.
       Stroke width steps down as size goes up so optical weight stays constant across the UI.

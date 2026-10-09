@@ -284,11 +284,39 @@ The new note's folder is resolved in this order:
 
 Delete moves the note to trash with an **undo toast** for 6 seconds offering "Undo". The soft delete is already persisted; undo simply restores. Permanent delete and empty trash require `ConfirmDialog`.
 
+**The actions a note row offers are the selection's, not the shell's.** A live list offers exactly one item — *Move to trash*. The trash offers *Restore* and *Delete permanently*, and never *Move to trash* again. Emptiness drives the whole thing: a live note cannot have a "delete permanently" control on it, and a trashed note cannot be moved to the trash a second time. This is the one mistake in this section worth being pedantic about.
+
+**A deleted note's row is menu-keyed, not a boolean.** Opening a menu remembers which note it is for and where; when the note's id, timestamp or available actions change, the key stops matching and the menu is simply not rendered. A boolean would need an effect to close it, and an effect repairs state one render late — showing the wrong note's actions for a frame, in a menu whose whole purpose is destructive actions.
+
+**The note row menu is portalled and positioned against the viewport.** The note list is virtualised, and every row is a transformed, absolutely positioned element — which creates a stacking context, so a menu rendered inside a row cannot be lifted above the rows after it by `z-index`, and the scroll container's `overflow` clips it as well. Measured in the click handler rather than in an effect, because the geometry is available at the click. It opens upward when there is no room below, which is the common case for the last card and not only for the last card.
+
+**The undo toast names the note it deleted**, sits at the bottom of the window rather than inside the sidebar, and moves no focus. A delete can come from `Ctrl/Cmd+Backspace` while the caret is in the editor, so a toast pinned to the sidebar would be off-screen from where the user is looking — and a focus move would break the keystroke in progress. It announces politely rather than assertively, for the same reason: an assertive announcement interrupts whatever a screen reader is reading. A second delete replaces the toast and its timer rather than stacking a second one; two timers racing would restore whichever note each was pointed at.
+
+**`Ctrl/Cmd+Backspace` deletes the open note**, not plain `Backspace` — in a WebView that navigates back, and in the editor that deletes a character.
+
 ### 6.3 Folders
 
 Creating a folder is inline: a single text input in place, `Enter` commits, `Esc` cancels, empty input cancels. Renaming is the same. Deleting a folder with children requires confirmation naming the count. Reordering and re-parenting by drag; `position` values are densified in one transaction (`03-data-model.md` §3.2).
 
 **Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. On touch, long-press initiates a folder drag; otherwise the gesture scrolls.
+
+**A drop target has three bands.** The outer quarter at each end reorders among siblings, drawn as a 2 px accent rule pinned to that edge; the middle half makes the row the new parent, drawn as a soft accent fill. A quarter rather than a third, because re-parenting is the rarer intent but needs a target big enough to hit, and thirds would have left it under nine pixels on a 26 px row. A rule on the wrong edge would read as re-ordering when the intent was re-parenting, which is the whole distinction.
+
+**A refused drop draws nothing and writes nothing.** Dropping a folder onto itself, into its own descendant, or into the slot it already occupies is resolved before the write — `folders_move` refuses a cycle anyway, but refusing here means the user learns why while the pointer is still down, and no transaction or outbox row is spent on something that cannot succeed. An indicator that promises a reorder which changes nothing is worse than no indicator.
+
+**The dragged row dims to 40 % opacity**, and a row the pointer passes over during a drag does **not** select: a re-parent would otherwise also change which notes the list shows, which is a second unrequested change (§5's single-selection model is about deliberate choices).
+
+**Dragging is unavailable while an editor is open or a menu is showing.** Otherwise a drag begun inside a text input would drag the selected text rather than the folder.
+
+**Keyboard re-parenting has no shortcut, and that is a known gap.** `F2` and `Delete` cover rename and delete, but there is no "move folder under…" command: HTML drag-and-drop has no DOM-level keyboard equivalent, and `aria-dropeffect` is deprecated in ARIA 1.1. Re-parenting from the keyboard is therefore not reachable in v1. It is recorded rather than papered over with a fake ARIA attribute; §6.3's row menu is the partial answer, and a real "move to…" item is the v1.1 candidate.
+
+**A childless folder deletes without a dialog.** The confirmation exists to warn about a subtree; warning about nothing is the interrupt `01-product.md` principle 1 warns against. The dialog names the count of folders that go with it, and says that notes inside are kept and become unfiled — `notes.folder_id` is `ON DELETE SET NULL` (`03-data-model.md` §3.3), so "and its notes" would describe data the app does not delete.
+
+**Folder actions live in a per-row overflow menu**, not in three always-visible controls: a 26 px row has room for the twisty, the folder glyph, the name, and a count, and three more controls would leave the name about forty pixels wide. The menu is `more-horizontal` from the §3.3 inventory, reachable three ways — the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch. Its items are **text, not icons**: the §3.3 inventory is closed and has no edit glyph, and ADR-015 requires adding an icon there before using it. Three distinct English verbs are also §1's "no icons where a word is clearer" applied to a list of rows where a bare verb would be ambiguous about its target.
+
+**`F2` renames and `Delete` removes** the focused folder (§7), and both route through the same handler as the menu items. A second implementation of "delete a folder" is how the confirmation ends up counting descendants in one path only.
+
+**A rejected write keeps the input open** with its text and the reason beneath it (§8, "Keep editing"), and the message clears as soon as the user types again. Losing what was typed on a validation failure is the failure mode `05-ui-ux.md` §8 is written against.
 
 ### 6.3a Pinning
 
@@ -296,9 +324,31 @@ Creating a folder is inline: a single text input in place, `Enter` commits, `Esc
 
 There is no cap on pinned notes. If a user pins 50 notes, the ordering stops being useful, and the right fix is for them to unpin some — not for the app to impose a limit.
 
+**On a card, the pin is the button.** A pinned note shows a visible pin control that unpins; an unpinned one has the same control revealed on hover at `pointer: fine`. A permanently visible pin on every card would make the pinned one stop meaning anything, and a control that appears only on pinned rows is undiscoverable — the user would have to know a note is pinned before they can unpin it. The card is also a click target, so the control stops propagation: a pin that also opened the note would be useless on a row the user was trying to read.
+
+**In the trash the pin is a plain icon, not a disabled button.** The pin of a deleted note is not something the user can act on, and a disabled control reads as one that is broken rather than as one that does not belong here.
+
+**In the editor, `Ctrl/Cmd+D` does not go through the autosave debounce.** `04-editor.md` §5.1 makes the serialised document the comparison, so a write that changes only `isPinned` would be judged unchanged and skipped — the pin would move in the UI and never reach the database. It is a metadata write and goes to `notes_set_pinned` directly. The editor's own autosave target carries `isPinned`, so the value in memory has to change at the same moment or the next keystroke saves the old flag and silently undoes the pin.
+
+**The card toggle is optimistic and the response reconciles.** A pin reorders every list in the app at once, and a row that jumps a moment after the press reads as a dropped interaction. The optimistic patch applies to every cached list, not only the visible one, so switching selection does not briefly show a stale pin; the response then replaces the open note's entry, because it carries the authoritative `updated_at` the ordering depends on.
+
 ### 6.4 Tags
 
 A tag is created by typing a new name into the tag editor; existing names complete. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; a tag disappears from the sidebar only when its note count reaches zero (`03-data-model.md` §5).
+
+**The editor and the picker are one visual language.** Both are portalled popovers anchored to their status-bar slot, and both are listboxes. They are the same component with different options, because a tag editor that looked different from the folder picker would be two visual languages for "choose a value" in a 28 px row. The picker is portalled rather than rendered in place because the status bar sits at the bottom of a `flex` column with its own stacking contexts: in place, the popover would be clipped by the editor pane and could not be raised above it. Its position is measured in the click handler rather than in an effect — the geometry is in hand at the click, and an effect that reads the DOM and then sets state is a second render for a value already known.
+
+**A `listbox`, not a menu.** Both are choose-one-or-more from a list, and the ARIA pattern for that is a listbox: arrow keys, `Home`/`End` and type-ahead come with it, and the tags listbox is `aria-multiselectable`. The folder picker is a listbox over the tree flattened depth-first, indented by depth — a picker is not a tree, and reusing the folder tree's nested `role="treeitem"` rendering would be neither correct nor reusable.
+
+**Enter toggles rather than duplicating.** A typed name that matches an existing tag exactly (case-insensitively) adds that tag, because `tags_create` normalises to the first-created spelling and asking it to create `Work` again would be asking for a second `work`. A name that matches nothing creates it, and the hint says so rather than leaving an empty list. When nothing matches and the field is empty, nothing happens.
+
+**The status bar shows one tag and a count of the rest.** A note with four tags does not fit in a 28 px row, and truncating the name of the one shown would be worse than saying how many there are. Each slot's `aria-label` names the action ("Change folder", "Choose tags") rather than its value, so a screen reader announcing "Work, button" does not say what pressing it would do.
+
+**A folder or tag change goes through the autosave debounce, not its own command.** `notes_save` is the one write that carries `folderId` and `tagIds` together with the document, and the tag set is a whole-set replacement (`07-sync-plan.md` §5.3) rather than an increment — two commands appending rows would get that wrong. What does not go through the debounce is `isPinned`, which has a command of its own for the reason above.
+
+**The slots show the pending value, not the saved one.** The folder and tags shown are what the next autosave will write. A click that appeared to do nothing for 800 ms would be the same lie the pin had.
+
+**Creating a tag flushes before it refetches.** A new tag's count is zero until the note carrying it is saved, and `tags_list` hides a tag whose notes are all in the trash and any tag with a zero count (`03-data-model.md` §5) — so the tag is genuinely not in the library until the write lands. Flushing the autosave and then invalidating the tag query is what makes the new name appear in the slot at all; without it the note would carry a tag the bar cannot name.
 
 ### 6.5 Search
 
@@ -352,6 +402,7 @@ Settings live in the Tauri store, never in the notes database, so resetting or s
 | Toggle theme | `Ctrl/Cmd+Shift+L` |
 | Delete note | `Ctrl/Cmd+Backspace` |
 | Rename folder / note | `F2` |
+| Delete folder | `Delete` (confirms when it has children) |
 | Toggle pin | `Ctrl/Cmd+D` |
 | Toggle task complete | `Ctrl/Cmd+Enter` |
 | Undo / redo | `Ctrl/Cmd+Z` · `Ctrl/Cmd+Shift+Z` |
@@ -433,7 +484,7 @@ carries its own bar with a `menu` button, the app name, and a new-note button
 
 | Concern | Requirement |
 |---------|-------------|
-| Keyboard operation | Every action reachable by keyboard. `FolderTree` implements the tree pattern: arrows move, `Right` expands, `Left` collapses, `Enter` selects. |
+| Keyboard operation | Every action reachable by keyboard. `FolderTree` implements the tree pattern (§10.1) and folder actions are context-menu-driven, with `F2` and `Delete` as the shortcuts that reach the same actions (§7). |
 | Focus visibility | 2 px accent ring, 2 px offset, never removed without a replacement |
 | Focus management | Opening a dialog moves focus in and traps it; `Esc` closes and restores focus to the trigger |
 | Labels | Icon-only buttons carry `aria-label`. Inputs have associated labels. |
@@ -446,3 +497,25 @@ carries its own bar with a `menu` button, the app name, and a new-note button
 | Editor | `role="textbox"`, `aria-multiline="true"`, `aria-label="Note content"` |
 
 ProseMirror's editable region is not fully accessible by default. `role="textbox"` plus `aria-multiline` is the minimum for v1, and this is a known limitation to revisit if the app grows.
+
+### 10.1 The folder tree keyboard pattern
+
+The WAI-ARIA tree pattern, in full. `FolderTree` is **one tab stop**, not one per row: a depth-10 tree would otherwise put ten-plus stops between the sidebar and the note list, and the acceptance bar in `08-roadmap.md` §2 M4 is a depth-10 tree navigated by keyboard alone. Exactly one row carries `tabIndex={0}` and it follows focus.
+
+| Key | Behaviour |
+|-----|-----------|
+| `ArrowDown` / `ArrowUp` | Next / previous **visible** row. A collapsed branch's descendants are not visible, so they are not reachable — the same fact that hides them on screen. |
+| `ArrowRight` | Collapsed branch: expand it. Expanded branch: move to its first child. Leaf: nothing. |
+| `ArrowLeft` | Expanded branch: collapse it. Leaf or collapsed branch: move to the parent. A root has nothing above it, so nothing happens. |
+| `Home` / `End` | First / last visible row |
+| `Enter` / `Space` | Select the folder — the note list narrows to it |
+| `ContextMenu` | Open the focused row's overflow menu. The "application key" on a Windows keyboard, and the standard way to ask for a menu |
+| `F2` | Rename the focused folder, in place (§6.3) |
+| `Delete` | Delete the focused folder, confirming first when it has children (§6.3) |
+
+Two details that are not obvious:
+
+- **Climbing out of a deep chain takes two presses per level.** `ArrowLeft` on an expanded branch collapses it; only the *next* press climbs to the parent. This is the standard behaviour, not a bug, and the second press is resolved against the row list as it stands *after* the collapse.
+- **The collapse twisty is out of the tab order** (`tabIndex={-1}`). The arrows do its job, and a mouse click still reaches it.
+
+`aria-level`, `aria-setsize`, `aria-posinset`, and `aria-expanded` carry the structure to assistive technology, because a nested `role="group"` tree and a flat list of `treeitem`s are indistinguishable to a screen reader otherwise.

@@ -1,12 +1,13 @@
 # 08 — Roadmap
 
-**Status:** Frozen. Last updated 2026-10-09.
+**Status:** Frozen. Last updated 2026-10-10.
 
-**Current position: M4, not started.** M0, M1, M2, and M3 shipped between
-2026-10-07 and 2026-10-09: the frontend scaffold, the data layer behind repository
-traits, the editor with autosave and paste sanitisation, and the UI shell with the
-sidebar, the virtualised note list, and the three responsive layouts. Work
-proceeds in order; a milestone is not "mostly done".
+**Current position: M5, not started.** M0 through M4 shipped between 2026-10-07 and
+2026-10-10: the frontend scaffold, the data layer behind repository traits, the
+editor with autosave and paste sanitisation, the UI shell with the sidebar, the
+virtualised note list and the three responsive layouts, and the whole of
+organisation — folders, tags, pinning and trash. Work proceeds in order; a milestone
+is not "mostly done".
 
 ---
 
@@ -128,15 +129,17 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 
 ### M4 — Organisation
 
-- `FolderTree`: recursive, collapsible, keyboard per the tree pattern in `05-ui-ux.md` §10.
-- Drag to re-parent and reorder; `position` densified in one transaction.
-- Inline create, rename, delete; delete confirmation naming the descendant count.
+- `FolderTree`: recursive, collapsible, keyboard per the tree pattern in `05-ui-ux.md` §10.1. **Shipped first** — the pattern is a `05-ui-ux.md` §10 requirement with a depth-10 acceptance bar, and nothing else in this milestone touches the tree, so landing it on its own kept its diff reviewable. The tree is one tab stop with a roving tabindex, which is what makes a depth-10 tree navigable; the recursive render stays nested for `role="tree"`, and the arrows read a flattened row list (`src/components/folderRows.ts`).
+- Drag to re-parent and reorder; `position` densified in one transaction. **Shipped third** — the row has three drop bands (outer quarter reorders, middle half re-parents), and the slot arithmetic is a pure function in `folderRows.ts`. Two things that are easy to get wrong and are tested as such: **the dragged folder's old slot is removed before the new index is counted**, or reordering downward lands one row too far; and **a refused drop resolves before the write**, so a cycle draws no indicator and spends no transaction. `position` densification itself was already done in M1 and is asserted by the Rust tests.
+- Circular-parent guard in the frontend, matching the backend: the drop is refused with no indicator rather than by an error after the fact.
+- Inline create, rename, delete; delete confirmation naming the descendant count. **Shipped second** — `InlineNameInput`, a per-row overflow menu, and `ConfirmDialog`. Two decisions worth recording: a **childless folder deletes without a dialog**, since the confirmation exists to warn about a subtree; and the menu items are **text, not icons**, because the `05-ui-ux.md` §3.3 inventory is closed and has no edit glyph, so using one would mean growing it for three verbs that are already words. `F2` and `Delete` route through the same handler as the menu items, so the confirmation cannot be present for one path and absent for the other.
 - `TagList` with counts from the query in `03-data-model.md` §5; counts exclude trashed notes.
-- `TagEditor` and `FolderPicker` popovers.
-- Pin toggle and Pinned filter. Pinned notes sort first in every selection.
-- Trash: soft delete, undo toast, restore, permanent delete, empty trash.
-- Circular-parent guard in folder move: a folder cannot be moved into itself or its own descendant.
-- **Done when:** a folder tree of depth 10 can be navigated by keyboard alone, and dragging a folder onto its own descendant is refused with an explanation.
+- `TagEditor` and `FolderPicker` popovers. **Shipped sixth, and last** — both are the same component over different options, because a tag editor that looked different from the folder picker would be two visual languages for "choose a value" in a 28 px row, and both are listboxes rather than menus so the arrow keys and `Home`/`End` come from the ARIA pattern rather than from hand-written handlers. Three things that were not obvious in advance: the popovers are **portalled** because the status bar sits at the bottom of the editor pane's own stacking context and an in-place popover is clipped by it; the geometry is **measured in the click handler**, not in an effect, because at the click it is already in hand; and `Enter` on a name that already exists **toggles rather than creating a duplicate**, because `tags_create` normalises to the first-created spelling and a case-insensitive match is the backend's job, not the frontend's.
+- Folder and tag slots in the editor status bar. **Shipped sixth** — the row now carries all five elements of `04-editor.md` §9 plus the pin. Two decisions recorded in `04-editor.md` §9 and `05-ui-ux.md` §6.4: the slots show the **pending** value, not the saved one, so a click never appears to do nothing for 800 ms; and folder and tag changes go **through the autosave debounce** rather than through commands of their own, because `notes_save` is the only write that carries `folderId` and `tagIds` with the document together and the tag set is a whole-set replacement. That forced an exception to §5.1's unchanged-document skip, and the exception has to survive the debounce, a note-switch flush and the retry timer — the retry is unreachable from the UI, which is why it is unit-tested rather than checked by hand.
+- Pin toggle and Pinned filter. Pinned notes sort first in every selection. **Shipped fourth** — the Pinned filter and the ordering were already there from M1 and M3; this adds the control on the card, `Ctrl+D` and the status-bar control in the editor, and the optimistic update with reconciliation. It required **one new IPC command, `notes_set_pinned`**, recorded in `02-architecture.md` §7 with the reasoning: a card holds no document, so reusing `notes_save` would either load a body to change a boolean or overwrite whatever the editor has typed since. `doc_json` and every derived column are untouched by it, and `updated_at` moves with the flag the same way `notes_move` does.
+- Trash: soft delete, undo toast, restore, permanent delete, empty trash. **Shipped fifth** — a per-row overflow menu whose items are chosen by the *selection* rather than by the shell, so a live note has no "delete permanently" control on it and a trashed note cannot be moved to the trash again. `Ctrl/Cmd+Backspace` deletes the open note. Two things that only showed up in a browser and are recorded in `05-ui-ux.md` §6.2: the menu had to be **portalled and viewport-positioned**, because a transformed virtualised row creates a stacking context that `z-index` cannot escape — the next card painted over it and swallowed the click; and the row's menu is **keyed rather than a boolean**, so a re-sorting list cannot leave one open over the wrong note.
+- Circular-parent guard in folder move: a folder cannot be moved into itself or its own descendant. **Shipped third** — the backend guard dates from M1; the frontend half is the drag bullet above.
+- **Done when:** a folder tree of depth 10 can be navigated by keyboard alone, and dragging a folder onto its own descendant is refused with an explanation. A note's folder and tags are changed from the editor's status bar and survive the next keystroke.
 
 ### M5 — Search
 
@@ -243,7 +246,7 @@ Each of these was resolved conservatively. Revisit the moment implementation pro
 | Q2 | Default folder on first launch, or everything unfiled? | **Answered** — everything unfiled, by ADR-014 | — | Resolved |
 | Q3 | `is_pinned` versus `is_favorite` | **Answered** — `is_pinned` only. `is_favorite` removed from the schema | — | Resolved |
 | Q4 | Timestamp style in the note list | **Answered** — relative only, no tooltip, per `05-ui-ux.md` §6.5a. The default in this table had contradicted itself; §6.5a now settles it | — | Resolved |
-| Q5 | Remember collapsed folder-tree state per folder | **Open** | Yes, persist per folder in settings. Cheap, and losing it on every launch is annoying | M4 |
+| Q5 | Remember collapsed folder-tree state per folder | **Answered** — persisted per folder in settings, shipped at M4 | — | Resolved |
 | Q6 | Accent palette: one configurable colour, or presets plus custom | **Open** | Six presets plus a custom colour picker | M6 |
 | Q7 | Should pinning be visible as a dedicated filter, or only as an ordering? | **Answered** — both, per `05-ui-ux.md` §5 and §6.3a. The filter ships in M4 with the rest of the pinning work; the ordering already does | — | Resolved |
 | Q8 | Repository directory rename from `notes` to `chayote` | **Answered** — done, the directory is `D:\Projects\chayote` | — | Resolved |
@@ -259,10 +262,10 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | Milestone | Status | Notes |
 |-----------|--------|-------|
 | M0 | **Done** | 2026-10-07. Scaffold, tokens, icon layer, `ipc.ts` + mock, Playwright, CI. Gates clean. `docs/02-architecture.md` §1.1 version floors updated to TS 6 / Vite 8 / Vitest 5 / uuid 14 |
-| M1 | **Done** | 2026-10-07. `rusqlite`, migrations 0001–0003, repository traits, `AppError`, settings store, 33 Rust tests + 29 TS tests |
+| M1 | **Done** | 2026-10-07. `rusqlite`, migrations 0001–0003, repository traits, `AppError`, settings store, 33 Rust tests + 29 TS tests. Still 33 — M4's three Rust tests were offset by no new ones here, so the count moved to 36 in the M4 row |
 | M2 | **Done** | 2026-10-08. TipTap 3.31, paste sanitisation, `clipboardTextSerializer`, autosave controller, status bar, task-checkbox node view. 65 TS tests + 22 Playwright tests. Four deviations from the plan recorded in §2. Hard-kill check still outstanding |
 | M3 | **Done** | 2026-10-09. `Sidebar`, `NoteCard`, a measured virtualised `NoteList`, `stores/selection.ts` + `stores/settings.ts`, `relativeTime`, three layouts, resizable sidebar, `Ctrl+N`/`Ctrl+F`/`Ctrl+\`. 98 TS tests + 49 Playwright tests. Four deviations recorded in §2 |
-| M4 | **Next** | Q5 has a default. The sidebar already renders the folder tree and tag rows; this milestone makes them interactive. Folder and tag slots land in the status bar here |
+| M4 | **Done** | 2026-10-10. Branch `m4-organisation`, six commits. The folder tree keyboard pattern of `05-ui-ux.md` §10.1 (one tab stop, roving tabindex); inline create/rename/delete with the descendant-count confirmation and the per-row overflow menu; drag to re-parent and reorder with the three-band drop target and the pre-write cycle refusal; the pin toggle with `Ctrl+D`, which added one IPC command, `notes_set_pinned`; the trash actions with their undo toast; and the status bar's folder and tag slots with their two popovers. Q5 closed. 36 Rust tests, 303 TS, 95 Playwright. Two things worth carrying forward: the autosave needed an exception to §5.1's unchanged-document skip that has to survive the debounce, a note-switch flush *and* the retry timer — the retry is unreachable from the UI, so it is unit-tested; and creating a tag flushes before refetching, because `tags_list` hides a tag whose count is zero and the new tag is genuinely not in the library until the note carrying it is saved |
 | M5 | Not started | |
 | M6 | Not started | Q6 has a default. Screenshot review of the full UI starts here |
 | M7 | Not started | **Blocked** — needs Android SDK, `docs/11-verification.md` §3.5 |

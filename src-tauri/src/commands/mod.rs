@@ -44,6 +44,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         crate::commands::notes::notes_create,
         crate::commands::notes::notes_save,
         crate::commands::notes::notes_move,
+        crate::commands::notes::notes_set_pinned,
         crate::commands::notes::notes_soft_delete,
         crate::commands::notes::notes_restore,
         crate::commands::notes::notes_destroy,

@@ -128,6 +128,18 @@ notes_move: ({ id, folderId }) => {
       return toNote(note, state);
     },
 
+    /* No document in the input, and none loaded: the note list carries only a
+       summary, so pinning from a card must not put a body on the write path.
+       `updatedAt` moves with the flag, matching the Rust `set_pinned` — a pinned
+       note sorts above everything, so pinning one changes where it appears in
+       every list. */
+    notes_set_pinned: ({ id, isPinned }) => {
+      const note = requireNote(id);
+      note.isPinned = isPinned;
+      note.updatedAt = nowMs();
+      return toNote(note, state);
+    },
+
     notes_soft_delete: ({ id }) => {
       const note = requireNote(id);
       note.deletedAt = nowMs();

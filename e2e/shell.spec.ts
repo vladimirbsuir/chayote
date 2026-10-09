@@ -245,6 +245,526 @@ test.describe('selection model', () => {
   });
 });
 
+/* `05-ui-ux.md` §10 requires the tree pattern, and M4's acceptance bar is a
+   keyboard-navigable tree. These drive it in a real browser because the parts
+   jsdom cannot judge are the parts that matter: that a click lands on the row and
+   not the twisty, that Tab reaches the tree as a single stop, and that the focus
+   ring is actually painted. */
+test.describe('folder tree keyboard pattern', () => {
+  test('reaches a nested folder with the arrow keys and selects it with Enter', async ({
+    page,
+  }) => {
+    await open(page);
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.focus();
+    await expect(work).toBeFocused();
+
+    /* Right enters the already-expanded branch, landing on its first child. */
+    await page.keyboard.press('ArrowRight');
+    const projects = page.getByTestId('folder-row').filter({ hasText: 'Projects' });
+    await expect(projects).toBeFocused();
+
+    /* Down reaches the sibling below it, then Enter selects it. */
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Meetings' })).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(projects).toBeFocused();
+
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('list-header')).toHaveText('Projects');
+  });
+
+  test('climbs back out to the parent with ArrowLeft', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toBeFocused();
+
+    /* Projects is a leaf, so Left moves out to Work rather than collapsing it. */
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toBeFocused();
+  });
+
+  test('collapses a branch with ArrowLeft and expands it with ArrowRight', async ({ page }) => {
+    await open(page);
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.focus();
+    await expect(work).toHaveAttribute('aria-expanded', 'true');
+
+    await page.keyboard.press('ArrowLeft');
+    await expect(work).toHaveAttribute('aria-expanded', 'false');
+    /* The whole point of collapsing: the child is gone from the tree, not just
+       hidden behind an attribute. */
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toHaveCount(0);
+
+    await page.keyboard.press('ArrowRight');
+    await expect(work).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toBeVisible();
+  });
+
+  test('is one tab stop rather than one per folder', async ({ page }) => {
+    await open(page);
+
+    const focusable = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid="folder-row"]')).filter(
+        (el) => el.getAttribute('tabindex') === '0',
+      ).length,
+    );
+
+    expect(focusable).toBe(1);
+  });
+
+  test('paints a visible focus ring on the focused row', async ({ page }) => {
+    await open(page);
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.focus();
+
+    /* §10: a 2 px accent ring, never removed. Asserting the property rather than
+       a screenshot, because the value is what the requirement states. */
+    const outline = await work.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { width: style.outlineWidth, style: style.outlineStyle };
+    });
+    expect(outline.style).not.toBe('none');
+    expect(Number.parseFloat(outline.width)).toBeGreaterThanOrEqual(2);
+  });
+
+  test('keeps the twisty out of the tab order, since the arrows do its job', async ({ page }) => {
+    await open(page);
+
+    await expect(page.getByRole('button', { name: 'Collapse Work' })).toHaveAttribute(
+      'tabindex',
+      '-1',
+    );
+  });
+});
+
+/* `05-ui-ux.md` §6.3: folder create and rename are inline inputs, and a folder with
+   children cannot be deleted without a confirmation that names the count. These run
+   against the mock backend end to end, because the parts jsdom cannot judge are the
+   parts that matter — that the input takes focus, that `Enter` reaches the command
+   rather than the editor behind it, and that the dialog traps focus. */
+test.describe('folder organisation', () => {
+  test('creates a folder from an inline input with Enter', async ({ page }) => {
+    await open(page);
+    const before = await page.getByTestId('folder-row').count();
+
+    await page.getByRole('button', { name: 'New folder' }).click();
+    const input = page.getByTestId('folder-name-input');
+    await expect(input).toBeFocused();
+    await input.fill('Research');
+    await input.press('Enter');
+
+    await expect(page.getByTestId('folder-row')).toHaveCount(before + 1);
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Research' })).toBeVisible();
+    expect(await page.getByRole('dialog').count()).toBe(0);
+  });
+
+  test('cancels the create input on Escape without writing', async ({ page }) => {
+    await open(page);
+    const before = await page.getByTestId('folder-row').count();
+
+    await page.getByRole('button', { name: 'New folder' }).click();
+    await page.getByTestId('folder-name-input').fill('Discarded');
+    await page.getByTestId('folder-name-input').press('Escape');
+
+    await expect(page.getByTestId('folder-name-input')).toHaveCount(0);
+    await expect(page.getByTestId('folder-row')).toHaveCount(before);
+  });
+
+  test('renames a folder with F2 and keeps its notes', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).focus();
+    await page.keyboard.press('F2');
+
+    const input = page.getByTestId('folder-name-input');
+    await expect(input).toHaveValue('Work');
+    await input.fill('Day job');
+    await input.press('Enter');
+
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Day job' })).toBeVisible();
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toHaveCount(0);
+  });
+
+  test('confirms before deleting a folder with children, naming the count', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).click({ button: 'right' });
+    await page.getByTestId('folder-menu-delete').click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    /* §6.3: the count is why the dialog exists. */
+    await expect(dialog).toContainText('2 folders');
+    await expect(dialog).toContainText('become unfiled');
+
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toBeVisible();
+  });
+
+  test('takes the whole subtree with a confirmed delete', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).click({ button: 'right' });
+    await page.getByTestId('folder-menu-delete').click();
+    await page.getByTestId('confirm-dialog-confirm').click();
+
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toHaveCount(0);
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toHaveCount(0);
+    /* The notes survived as unfiled rather than going with the folder. */
+    await expect(page.getByTestId('note-card').first()).toBeVisible();
+  });
+
+  test('keeps focus inside the delete confirmation', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).click({ button: 'right' });
+    await page.getByTestId('folder-menu-delete').click();
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+
+    /* §10: Tab must not walk behind the dialog into the editor, or the next
+       keystroke types into a note the user thinks is not being edited. */
+    await page.keyboard.press('Tab');
+    await expect(page.getByTestId('confirm-dialog-confirm')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  });
+
+  test('restores focus to the row when the confirmation closes', async ({ page }) => {
+    await open(page);
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.click({ button: 'right' });
+    await page.getByTestId('folder-menu-delete').click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(work).toBeFocused();
+  });
+
+  test('opens the folder menu from the row button and from right-click alike', async ({ page }) => {
+    await open(page);
+
+    /* The row button is `pointer-fine:group-hover:flex` — §9 says hover styling
+       exists only at `pointer: fine` — so the row has to be hovered before the
+       button is anything to click. `force: true` would skip that and click an
+       element the browser still lays out as `display: none`. */
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.hover();
+    await page.getByRole('button', { name: 'Work actions' }).click();
+    await expect(page.getByTestId('folder-menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Personal' }).click({ button: 'right' });
+    await expect(page.getByTestId('folder-menu')).toHaveAttribute('aria-label', 'Personal actions');
+  });
+
+  test('offers no menu button at a coarse pointer, where long-press is the gesture', async ({
+    browser,
+  }) => {
+    /* A real touch-capable context rather than a media emulation: §9 says hover
+       affordances exist at `pointer: fine` and nowhere else, and on touch the menu
+       opens by long-press instead. Asserting the absence here is what stops a
+       hover-only control from becoming an unreachable one on Android.
+
+       `hasTouch` alone does not change `pointer: fine` — Chromium reports a
+       fine pointer for a mouse-driven context regardless — so the pointer type is
+       overridden explicitly. */
+    const context = await browser.newContext({
+      hasTouch: true,
+      isMobile: false,
+      viewport: { width: 1280, height: 820 },
+    });
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      /* Replace the media query the `pointer-fine:` variant compiles to, before the
+         stylesheet is parsed. */
+      const fine = window.matchMedia.bind(window);
+      window.matchMedia = ((query: string) =>
+        query.includes('pointer: fine')
+          ? ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} })
+          : fine(query)) as typeof window.matchMedia;
+    });
+    await seed(page);
+    await page.goto('/');
+    await expect(page.getByTestId('app-shell')).toBeVisible();
+
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.hover();
+    await expect(page.getByRole('button', { name: 'Work actions' })).toHaveCount(0);
+
+    await context.close();
+  });
+
+  /* §6.3: "Reordering and re-parenting by drag." `page.dragAndDrop` produces real
+     HTML5 drag events in Chromium, which jsdom cannot — so this is the only place
+     the interaction is proved against a browser that actually performs a drag. */
+  test('re-parents a folder by dropping it onto another', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Personal' }).dragTo(
+      page.getByTestId('folder-row').filter({ hasText: 'Work' }),
+      { targetPosition: { x: 60, y: 13 } },
+    );
+
+    const nested = page.getByTestId('folder-row').filter({ hasText: 'Personal' });
+    await expect(nested).toBeVisible();
+    /* The level is the evidence: a re-parent indents, a reorder does not. */
+    await expect(nested).toHaveAttribute('aria-level', '2');
+    await expect(nested).toHaveAttribute('aria-posinset', '3');
+  });
+
+  test('reorders a folder without changing its level', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Personal' }).dragTo(
+      page.getByTestId('folder-row').filter({ hasText: 'Work' }),
+      { targetPosition: { x: 60, y: 1 } },
+    );
+
+    const moved = page.getByTestId('folder-row').filter({ hasText: 'Personal' });
+    await expect(moved).toHaveAttribute('aria-level', '1');
+    /* Above `Work`, so first among the roots. */
+    await expect(moved).toHaveAttribute('aria-posinset', '1');
+  });
+
+  test('refuses to drop a folder into its own descendant', async ({ page }) => {
+    await open(page);
+
+    /* M4's acceptance bar, in the browser that performs the drag. The backend
+       refuses it too; what is checked here is that nothing moved and the row is
+       still there, rather than that an error appeared. */
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).dragTo(
+      page.getByTestId('folder-row').filter({ hasText: 'Projects' }),
+      { targetPosition: { x: 60, y: 13 } },
+    );
+
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toBeVisible();
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toBeVisible();
+    /* `Projects` was not adopted as a child of its own ancestor. */
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Projects' })).toHaveAttribute(
+      'aria-level',
+      '2',
+    );
+  });
+
+  test('marks the dragged row while the pointer is over another', async ({ page }) => {
+    await open(page);
+
+    const source = page.getByTestId('folder-row').filter({ hasText: 'Personal' });
+    const target = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+
+    /* Started by hand so the intermediate state can be observed: `dragTo` performs
+       the whole gesture and there is nothing left to assert in between.
+
+       The `dragover` coordinate is the target row's own top plus half its height.
+       A fixed `clientY` would be above the sidebar entirely, and the handler reads
+       the offset relative to the row — which is the whole point of the three bands. */
+    await source.dispatchEvent('dragstart');
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    await target.dispatchEvent('dragover', {
+      clientX: (box?.x ?? 0) + 60,
+      clientY: (box?.y ?? 0) + (box?.height ?? 26) / 2,
+    });
+
+    await expect(source).toHaveAttribute('data-dragging', 'true');
+    await expect(target.locator('[data-testid="drop-inside"]')).toBeVisible();
+  });
+});
+
+/* `05-ui-ux.md` §6.3a. These drive the real command through the mock backend, so
+   the ordering claim is checked against storage rather than against a component
+   that would re-sort it for us. */
+test.describe('pinning', () => {
+  test('pins from a card and moves the note to the top of the list', async ({ page }) => {
+    await open(page);
+
+    const cards = page.getByTestId('note-card');
+    const lastTitle = await cards.last().locator('.text-\\[14px\\]').innerText();
+    expect(await cards.first().innerText()).toContain('Meeting notes');
+
+    await cards.last().hover();
+    await page.getByRole('button', { name: `Pin ${lastTitle}` }).click();
+
+    /* §6.3a: pinned notes sort above every other note in every selection. The first
+       card changing identity is the whole claim — a pin indicator alone would not
+       prove it. */
+    await expect(cards.first().locator('.text-\\[14px\\]')).toHaveText(lastTitle);
+  });
+
+  test('shows the pin control on unpinned cards, revealed on hover', async ({ page }) => {
+    await open(page);
+
+    /* Before hover the control exists but is not laid out — §9 keeps hover styling
+       at `pointer: fine`. Asserting the absence would be wrong: it is in the DOM. */
+    const card = page.getByTestId('note-card').first();
+    const pin = card.getByTestId('pin-toggle');
+    await expect(pin).toHaveCount(1);
+
+    await card.hover();
+    await expect(pin).toBeVisible();
+  });
+
+  test('does not open the note when the pin is pressed', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('note-card').first().click();
+    const openId = await page.getByTestId('note-card').first().getAttribute('data-note-id');
+
+    await page.getByTestId('note-card').first().hover();
+    await page.getByTestId('note-card').first().getByTestId('pin-toggle').click();
+
+    /* A pin that also opened the note would be useless on a row the user was
+       already reading. */
+    await expect(page.locator(`[data-testid="note-card"][data-note-id="${openId}"]`)).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  test('toggles the pin of the open note with Ctrl+D', async ({ page }) => {
+    await open(page);
+
+    const pin = page.getByTestId('editor-pin-toggle');
+    /* The seeded note is already pinned, so the test asserts a *toggle* rather than
+       a direction: read the state, press, require the opposite. A test that assumed
+       an initial value would pass for the wrong reason the day the fixture changed. */
+    const before = await pin.getAttribute('aria-pressed');
+
+    await page.getByRole('textbox', { name: 'Note content' }).click();
+    await page.keyboard.press('Control+d');
+
+    await expect(pin).toHaveAttribute('aria-pressed', before === 'true' ? 'false' : 'true');
+    await expect(pin).toHaveAttribute(
+      'aria-label',
+      before === 'true' ? 'Pin note' : 'Unpin note',
+    );
+
+    await page.keyboard.press('Control+d');
+    await expect(pin).toHaveAttribute('aria-pressed', before ?? 'false');
+  });
+
+  test('keeps a Ctrl+D pin through the next keystroke, rather than being overwritten by the autosave', async ({ page }) => {
+    await open(page);
+
+    const editor = page.getByRole('textbox', { name: 'Note content' });
+    const pin = page.getByTestId('editor-pin-toggle');
+    await editor.click();
+
+    /* Pressed twice, so the note ends up in the opposite state to the one it was
+       seeded in, and the check is a comparison rather than an assumption. */
+    const before = await pin.getAttribute('aria-pressed');
+    await page.keyboard.press('Control+d');
+    await expect(pin).not.toHaveAttribute('aria-pressed', before ?? 'false');
+    const pinned = await pin.getAttribute('aria-pressed');
+
+    /* The autosave target carries `isPinned`. If the in-memory value were not
+       updated with it, this keystroke would save the old flag and silently undo the
+       pin — the failure this test exists for. */
+    await editor.press('End');
+    await page.keyboard.type(' more');
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
+
+    await expect(pin).toHaveAttribute('aria-pressed', pinned ?? 'false');
+
+    /* The same flag on the card, addressed by id rather than by position: the save
+       just moved the note, so "the first card" is no longer necessarily this one. */
+    const noteId = await page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }).getAttribute('data-note-id');
+    await expect(
+      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`).getByTestId('pin-toggle'),
+    ).toHaveAttribute('aria-pressed', pinned ?? 'false');
+  });
+
+  test('offers no pin control in the trash', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('filter-trash').click();
+    await expect(page.getByTestId('note-card').first()).toBeVisible();
+    await expect(page.getByTestId('note-card').first().getByTestId('pin-toggle')).toHaveCount(0);
+
+    /* The pin of a deleted note is still shown — as an icon, since there is nothing
+       to toggle. */
+    const indicators = page.locator('[data-testid="pin-indicator"]');
+    if ((await indicators.count()) > 0) {
+      await expect(indicators.first()).toBeVisible();
+    }
+  });
+
+  test('unpinning the last note leaves the Pinned filter empty, as its copy claims', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('filter-pinned').click();
+    const cards = page.getByTestId('note-card');
+    await expect(cards).toHaveCount(2);
+
+    /* Unpin both, through the card control rather than a shortcut, so the empty
+       state is reached the way a user reaches it. Counted down as the presses go,
+       because the list shrinks under the control that is being pressed. */
+    await expect(cards).toHaveCount(2);
+    for (const remaining of [1, 0]) {
+      const card = page.getByTestId('note-card').first();
+      await card.hover();
+      await card.getByTestId('pin-toggle').click();
+      await expect(cards).toHaveCount(remaining);
+    }
+
+    /* §8: "Nothing pinned" · "Pin a note with Ctrl+D to keep it at the top." The copy
+       names the shortcut, so the copy and the binding are asserted together — this
+       was the promise the M3 UI made with nothing behind it. */
+    await expect(page.getByText('Nothing pinned')).toBeVisible();
+    await expect(page.getByText(/Ctrl\+D/)).toBeVisible();
+  });
+});
+
+test.describe('folder organisation', () => {
+  test('nests a new folder inside the row that asked for it', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('folder-row').filter({ hasText: 'Work' }).click({ button: 'right' });
+    await page.getByTestId('folder-menu-create').click();
+
+    const input = page.getByTestId('folder-name-input');
+    await expect(input).toHaveAttribute('aria-label', 'New folder inside Work');
+    await input.fill('Clients');
+    await input.press('Enter');
+
+    const nested = page.getByTestId('folder-row').filter({ hasText: 'Clients' });
+    await expect(nested).toBeVisible();
+    /* Nested means indented one level deeper, which is what makes it a child. */
+    await expect(nested).toHaveAttribute('aria-level', '2');
+  });
+
+  test('nests a new folder inside the row that asked for it, by keyboard too', async ({ page }) => {
+    await open(page);
+
+    /* The menu path is tested above; this one is the keyboard route to the same
+       editor, which §10 requires for every action. */
+    const work = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await work.focus();
+    await page.keyboard.press('ContextMenu');
+
+    await expect(page.getByTestId('folder-menu-create')).toBeVisible();
+    await page.getByTestId('folder-menu-create').click();
+
+    const input = page.getByTestId('folder-name-input');
+    await input.fill('Clients');
+    await input.press('Enter');
+
+    await expect(page.getByTestId('folder-row').filter({ hasText: 'Clients' })).toHaveAttribute(
+      'aria-level',
+      '2',
+    );
+  });
+});
+
 test.describe('note list', () => {
   test('sorts pinned notes above everything else', async ({ page }) => {
     await open(page);
@@ -407,6 +927,341 @@ test.describe('responsive layouts', () => {
         .map((el) => `${el.tagName}.${el.className}`),
     );
     expect(offenders).toEqual([]);
+  });
+});
+
+/* §6.2: soft delete with a six-second undo toast, restore, permanent delete, empty
+   trash. Driven end to end through the mock backend, because the parts that matter —
+     that the note actually leaves the list, that undo brings it back with its text,
+     and that the editor closes when the note it holds goes away — are all about
+     state the components do not own. */
+test.describe('trash', () => {
+  test('moves a note to the trash and offers an undo for six seconds', async ({ page }) => {
+    await open(page);
+
+    const before = await page.getByTestId('note-card').count();
+    const card = page.getByTestId('note-card').first();
+    const title = await card.locator('.text-\\[14px\\]').innerText();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+
+    /* The soft delete is immediate and the row is gone from the live list — §6.2 is
+       exact that the write has already happened and undo merely restores. */
+    await expect(page.getByTestId('note-card')).toHaveCount(before - 1);
+    const toast = page.getByTestId('undo-toast');
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText(title);
+  });
+
+  test('undo brings the note back where it was in the list', async ({ page }) => {
+    await open(page);
+
+    const before = await page.getByTestId('note-card').count();
+    const card = page.getByTestId('note-card').first();
+    const noteId = await card.getAttribute('data-note-id');
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+    await expect(page.getByTestId('note-card')).toHaveCount(before - 1);
+
+    await page.getByTestId('undo-toast-undo').click();
+
+    await expect(page.getByTestId('note-card')).toHaveCount(before);
+    await expect(
+      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`),
+    ).toBeVisible();
+    await expect(page.getByTestId('undo-toast')).toHaveCount(0);
+  });
+
+  test('the toast expires on its own', async ({ page }) => {
+    await open(page);
+
+    const card = page.getByTestId('note-card').first();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+    await expect(page.getByTestId('undo-toast')).toBeVisible();
+
+    /* Six seconds is §6.2's number, and it is the one user-visible duration in the
+       app. Asserted with a real wait rather than a fake clock, because this is the
+       test that would catch the constant being changed. */
+    await expect(page.getByTestId('undo-toast')).toBeHidden({ timeout: 8000 });
+  });
+
+  test('closing the editor when the open note is deleted', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+
+    const card = page.getByTestId('note-card').first();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+
+    /* `10-conventions.md` §6: a note that is not there means close the editor. A
+       deleted note still rendering in the editor would be a save into the void. */
+    await expect(page.getByText('No note open')).toBeVisible();
+  });
+
+  test('deletes with Ctrl+Backspace from the editor', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+    const before = await page.getByTestId('note-card').count();
+
+    await page.getByRole('textbox', { name: 'Note content' }).click();
+    await page.keyboard.press('Control+Backspace');
+
+    await expect(page.getByTestId('note-card')).toHaveCount(before - 1);
+    await expect(page.getByTestId('undo-toast')).toBeVisible();
+  });
+
+  test('restores a trashed note and re-opens it', async ({ page }) => {
+    await open(page);
+
+    const card = page.getByTestId('note-card').first();
+    const noteId = await card.getAttribute('data-note-id');
+    const title = await card.locator('.text-\\[14px\\]').innerText();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+    await page.getByTestId('undo-toast-dismiss').click();
+
+    await page.getByTestId('filter-trash').click();
+    const trashed = page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`);
+    await expect(trashed).toBeVisible();
+
+    await trashed.hover();
+    await trashed.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-restore').click();
+
+    /* Closing the editor after a restore would make undo look like it acted on the
+       wrong note, so a restored note comes back open. */
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await expect(page.locator('.ProseMirror')).toContainText(title);
+  });
+
+  test('permanent delete asks first, and then really goes', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('filter-trash').click();
+
+    const trashed = page.getByTestId('note-card').first();
+    const noteId = await trashed.getAttribute('data-note-id');
+    await trashed.hover();
+    await trashed.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-destroy').click();
+
+    /* §6.2: only permanent delete and empty trash confirm. */
+    await expect(page.getByRole('dialog')).toContainText('cannot be undone');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`)).toBeVisible();
+
+    await trashed.hover();
+    await trashed.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-destroy').click();
+    await page.getByTestId('confirm-dialog-confirm').click();
+
+    await expect(page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`)).toHaveCount(0);
+  });
+
+  test('empties the trash from the list header, confirming first', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('filter-trash').click();
+
+    /* The fixture trash holds one note, so emptying it empties it. */
+    await expect(page.getByTestId('empty-trash')).toBeVisible();
+    await page.getByTestId('empty-trash').click();
+    await expect(page.getByRole('dialog')).toContainText('cannot be undone');
+
+    await page.getByTestId('confirm-dialog-confirm').click();
+
+    await expect(page.getByText('Trash is empty')).toBeVisible();
+    /* §8's empty state, not a blank panel. */
+    await expect(page.getByTestId('empty-trash')).toHaveCount(0);
+  });
+
+  test('offers no trash actions in a live list', async ({ page }) => {
+    await open(page);
+
+    const card = page.getByTestId('note-card').first();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+
+    /* A permanent delete reachable from a live list is the failure this whole
+       milestone cares about. */
+    await expect(page.getByTestId('note-menu-delete')).toBeVisible();
+    await expect(page.getByTestId('note-menu-destroy')).toHaveCount(0);
+    await expect(page.getByTestId('note-menu-restore')).toHaveCount(0);
+    await expect(page.getByTestId('empty-trash')).toHaveCount(0);
+  });
+});
+
+/* `04-editor.md` §9: "Folder | Note's folder name, click to change" and "Tags |
+   Note's tags, click to add or remove". These land with the last part of M4. */
+test.describe('editor status bar', () => {
+  test('shows the note\'s folder and tags', async ({ page }) => {
+    await open(page);
+
+    /* The first fixture note, rather than the first card: it is the one the editor opens
+       on, so it is the one whose folder and tags the bar shows. Other notes have
+       different ones. */
+    await page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }).click();
+
+    await expect(page.getByTestId('status-folder')).toContainText('Work');
+    /* The row shows the first tag plus a count of the rest; §9 gives the row 28 px,
+       and four tag names do not fit in it. */
+    await expect(page.getByTestId('status-tags')).toContainText('#');
+  });
+
+  test('changes the folder from the status bar, and the note list follows', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }).click();
+
+    await page.getByTestId('status-folder').click();
+    await expect(page.getByTestId('folder-picker-list')).toBeVisible();
+    await expect(page.getByTestId('status-popover')).toBeVisible();
+
+    /* Picked by name rather than by a fixture id: the ids are generated, and the
+       name is what the user sees. */
+    await page
+      .locator('[data-testid="folder-picker-option"]')
+      .filter({ hasText: 'Reading' })
+      .click();
+
+    /* The save is debounced, so "Saved" is the signal that it reached the database —
+         the same signal the editor gives for typing. */
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
+    await page.waitForTimeout(900);
+    await expect(page.getByTestId('status-folder')).toContainText('Reading');
+
+    /* The note moved folders, so selecting that folder now includes it. */
+    await page.getByTestId('folder-row').filter({ hasText: 'Reading' }).click();
+    await expect(page.getByTestId('list-header')).toHaveText('Reading');
+    await expect(
+      page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }),
+    ).toBeVisible();
+  });
+
+  test('clears the folder back to unfiled', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+
+    await page.getByTestId('status-folder').click();
+    await page.locator('[data-testid="folder-picker-option"][data-folder-id="none"]').click();
+    await page.waitForTimeout(900);
+
+    /* ADR-014: everything starts unfiled, so a note can always go back there. */
+    await expect(page.getByTestId('status-folder')).toHaveText('No folder');
+  });
+
+  test('creates a tag by typing a name that does not exist yet', async ({ page }) => {
+    await open(page);
+    /* A note with no tags, so the assertion is about the tag appearing rather than
+       about where it lands in a row that already had some. */
+    await page.getByTestId('note-card').filter({ hasText: 'Untitled' }).first().click();
+    await expect(page.getByTestId('status-tags')).toHaveText('Add tags');
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await page.getByTestId('tag-editor-input').fill('draft');
+    await page.getByTestId('tag-editor-input').press('Enter');
+    await page.waitForTimeout(900);
+
+    await expect(page.getByTestId('status-tags')).toContainText('#draft');
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
+  });
+
+  test('typing an existing tag name adds it rather than duplicating it', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').filter({ hasText: 'Untitled' }).first().click();
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    /* §6.4 normalises to the first-created spelling, so `Ideas` and `ideas` are one
+       tag. The status bar shows the library's spelling, not what was typed. */
+    await page.getByTestId('tag-editor-input').fill('Ideas');
+    await page.getByTestId('tag-editor-input').press('Enter');
+    await page.waitForTimeout(900);
+
+    await expect(page.getByTestId('status-tags')).toContainText('#ideas');
+    /* One tag, not two. */
+    await expect(page.getByTestId('status-tags')).not.toContainText('+');
+  });
+
+  test('adds an existing tag by picking it, and shows the tag in the sidebar', async ({ page }) => {
+    await open(page);
+    /* A note with no tags, so the assertion is about the tag being added and not about
+       what it already had. */
+    await page.getByTestId('note-card').filter({ hasText: 'Untitled' }).first().click();
+    const before = await page.getByTestId('status-tags').textContent();
+    expect(before).toBe('Add tags');
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await page.locator('[data-testid="tag-editor-option"][data-tag-id]').first().click();
+    await page.waitForTimeout(900);
+
+    await expect(page.getByTestId('status-tags')).not.toHaveText('Add tags');
+
+    /* §6.4: the tag disappears from the sidebar only when its count reaches zero, so
+       it must still be there — with one more note in it. */
+    await expect(page.getByTestId('tag-row').first()).toBeVisible();
+  });
+
+  test('removes a tag from the note without removing it from the library', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+    const libraryBefore = await page.getByTestId('tag-row').count();
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await page.locator('[data-testid="tag-editor-option"][data-tag-id]').first().click();
+    await page.waitForTimeout(900);
+
+    /* §6.4: "Removing a tag from a note never deletes the tag itself." The library is
+       unchanged; only this note's membership goes. */
+    await expect(page.getByTestId('tag-row')).toHaveCount(libraryBefore);
+  });
+
+  test('a tag change survives the next keystroke, rather than being reverted by it', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').filter({ hasText: 'Untitled' }).first().click();
+
+    const editor = page.getByRole('textbox', { name: 'Note content' });
+    await editor.click();
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await page.locator('[data-testid="tag-editor-option"][data-tag-id]').first().click();
+    await page.waitForTimeout(900);
+
+    const shown = await page.getByTestId('status-tags').textContent();
+    expect(shown).not.toBe('Add tags');
+
+    /* The autosave target carries `tagIds`. If the in-memory set were not updated with
+       it, this keystroke would save the old set and quietly drop the tag — the same
+       failure the pin had, and the reason `autosave.schedule` exists. */
+    await editor.press('End');
+    await page.keyboard.type(' more');
+    await expect(page.getByTestId('save-state')).toHaveText('Saved');
+    await page.waitForTimeout(900);
+
+    await expect(page.getByTestId('status-tags')).toHaveText(shown ?? '');
+  });
+
+  test('closes the folder picker on Escape without changing the folder', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').first().click();
+    const before = await page.getByTestId('status-folder').textContent();
+
+    await page.getByTestId('status-folder').click();
+    /* The popover attaches its Escape handler when it mounts, so pressing the key
+       before it exists presses it into the void. Waiting for it is the difference
+       between asserting the behaviour and racing the render. */
+    await expect(page.getByTestId('status-popover')).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    await expect(page.getByTestId('status-popover')).toHaveCount(0);
+    await expect(page.getByTestId('status-folder')).toHaveText(before ?? '');
   });
 });
 

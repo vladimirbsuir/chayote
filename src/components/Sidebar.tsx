@@ -1,20 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import {
-  ChevronDown,
-  ChevronRight,
-  FilePlus,
-  Folder,
-  Hash,
-  Pin,
-  Plus,
-  Trash,
-} from 'lucide-react';
+import { FilePlus, Folder, Hash, Pin, Plus, Trash } from 'lucide-react';
 import type { NoteSummary, Selection } from '../types/ipc';
 import type { FolderNode } from '../types/folder';
 import type { TagWithCount } from '../types/tag';
 import type { Uuid } from '../types/note';
 import { NoteList } from './NoteList';
+import { FolderTree } from './FolderTree';
 
 /* The sidebar: three stacked regions, not three columns (`05-ui-ux.md` §2.1).
    Filters, then structure, then the list, separated by hairlines, with exactly
@@ -43,9 +35,30 @@ type SidebarProps = {
   onSelect: (selection: Selection) => void;
   onOpenNote: (id: Uuid) => void;
   onNewNote: () => void;
+  /** `05-ui-ux.md` §6.3a. Absent in the trash, where a deleted note's pin is not
+      something the user can act on. */
+  onTogglePin?: (id: Uuid) => void;
+  pinPendingId?: Uuid | null;
+  /** §6.2: delete, and — in the trash — restore and permanent delete. Absent in the
+      trash's own list header for `onEmptyTrash` when there is nothing to empty. */
+  onDeleteNote?: (id: Uuid) => void;
+  onRestoreNote?: (id: Uuid) => void;
+  onDestroyNote?: (id: Uuid) => void;
+  onEmptyTrash?: () => void;
   onToggleFolder: (id: Uuid) => void;
-  onCreateFolder: () => void;
+  /** §6.3: creating a folder is an inline input in the tree, committed with `Enter`.
+      Returns a promise so the input can stay open on a rejected write, rather than
+      closing and losing what was typed. */
+  onCreateFolder: (name: string, parentId: Uuid | null) => Promise<void>;
   onCreateTag: () => void;
+  onRenameFolder: (id: Uuid, name: string) => Promise<void>;
+  onDeleteFolder: (id: Uuid) => Promise<void>;
+  /** §6.3: drag to re-parent and reorder. `position` is sibling-local and the
+      backend densifies it (`03-data-model.md` §3.2). */
+  onMoveFolder: (id: Uuid, newParentId: Uuid | null, position: number) => Promise<void>;
+  /** Shown where a folder write failed. `AppError.message` is user-facing copy
+      by contract (`10-conventions.md` §6). */
+  onFolderError?: (message: string) => void;
 };
 
 export function Sidebar({
@@ -64,14 +77,30 @@ export function Sidebar({
   onSelect,
   onOpenNote,
   onNewNote,
+  onTogglePin,
+  pinPendingId,
+  onDeleteNote,
+  onRestoreNote,
+  onDestroyNote,
+  onEmptyTrash,
   onToggleFolder,
   onCreateFolder,
   onCreateTag,
+  onRenameFolder,
+  onDeleteFolder,
+  onMoveFolder,
+  onFolderError,
 }: SidebarProps) {
   const header = useMemo(
     () => headerFor(selection, notes ?? EMPTY_NOTES, folderNames),
     [selection, notes, folderNames],
   );
+
+  /* Whether the root-level folder create input is open. It lives here because the
+     `+` that opens it is in the section header above the tree, and the input
+     itself is rendered by `FolderTree` — the two halves of one control, each owned
+     by the component that actually draws it. */
+  const [creatingRoot, setCreatingRoot] = useState(false);
 
   const scoped = selection.kind === 'folder' || selection.kind === 'tag';
 
@@ -94,23 +123,28 @@ export function Sidebar({
           icon={<Folder className="icon i-16" aria-hidden="true" />}
           label="Folders"
           singular="folder"
-          onAdd={onCreateFolder}
+          /* §6.3: creating a folder is an inline input, not a dialog. `+` opens
+             it and `Enter` commits, which is why this is a request rather than a
+             write — the input has to exist before there is anything to write. */
+          onAdd={() => {
+            setCreatingRoot((open) => !open);
+          }}
         />
-        <div role="tree" aria-label="Folders" className="max-h-[40vh] overflow-y-auto px-2 pb-[10px]">
-          {folders === undefined || folders.length === 0 ? (
-            <p className="px-[6px] py-1 text-[13px] text-[var(--text-subtle)]">No folders yet</p>
-          ) : (
-            <FolderRows
-              nodes={folders}
-              depth={0}
-              counts={folderCounts}
-              selection={selection}
-              collapsed={collapsedFolders}
-              onSelect={onSelect}
-              onToggle={onToggleFolder}
-            />
-          )}
-        </div>
+        <FolderTree
+          nodes={folders}
+          counts={folderCounts}
+          selection={selection}
+          collapsed={collapsedFolders}
+          onSelect={onSelect}
+          onToggle={onToggleFolder}
+          onCreate={onCreateFolder}
+          onRename={onRenameFolder}
+          onDelete={onDeleteFolder}
+          onMove={onMoveFolder}
+          onError={onFolderError}
+          creatingRoot={creatingRoot}
+          onCreatingRootChange={setCreatingRoot}
+        />
       </section>
 
       <section aria-label="Tags" className="min-h-0 overflow-hidden">
@@ -162,12 +196,24 @@ export function Sidebar({
           <span className="truncate" data-testid="list-header">
             {header.title}
           </span>
-          <span
-            className="shrink-0 pl-2 font-normal text-[var(--text-subtle)]"
-            data-testid="list-count"
-          >
-            {header.count}
-          </span>
+          <div className="flex shrink-0 items-center gap-2 pl-2">
+            <span className="font-normal text-[var(--text-subtle)]" data-testid="list-count">
+              {header.count}
+            </span>
+            {/* §6.2: emptying the trash is destructive and irreversible, so it is
+                here rather than on a card, and only when there is something to
+                empty. */}
+            {selection.kind === 'trash' && onEmptyTrash !== undefined && (notes?.length ?? 0) > 0 ? (
+              <button
+                type="button"
+                data-testid="empty-trash"
+                onClick={onEmptyTrash}
+                className="text-[12px] text-[var(--danger)] hover:underline"
+              >
+                Empty trash
+              </button>
+            ) : null}
+          </div>
         </header>
 
         {isPending ? (
@@ -182,6 +228,11 @@ export function Sidebar({
             folderNames={folderNames}
             showFolder={!scoped}
             onOpen={onOpenNote}
+            onTogglePin={selection.kind === 'trash' ? undefined : onTogglePin}
+            pinPendingId={pinPendingId ?? null}
+            onDeleteNote={onDeleteNote}
+            onRestoreNote={onRestoreNote}
+            onDestroyNote={onDestroyNote}
             empty={emptyFor(selection, onNewNote)}
           />
         )}
@@ -257,99 +308,6 @@ function FilterTab({
       {icon}
       {label}
     </button>
-  );
-}
-
-function FolderRows({
-  nodes,
-  depth,
-  counts,
-  selection,
-  collapsed,
-  onSelect,
-  onToggle,
-}: {
-  nodes: FolderNode[];
-  depth: number;
-  counts: Map<string, number>;
-  selection: Selection;
-  collapsed: Uuid[];
-  onSelect: (next: Selection) => void;
-  onToggle: (id: Uuid) => void;
-}) {
-  return (
-    <>
-      {nodes.map((node) => {
-        const isCollapsed = collapsed.includes(node.id);
-        const hasChildren = node.children.length > 0;
-        const active = selection.kind === 'folder' && selection.id === node.id;
-        const count = counts.get(node.id) ?? 0;
-
-        return (
-          <div key={node.id} role="none">
-            <div
-              role="treeitem"
-              aria-selected={active}
-              aria-expanded={hasChildren ? !isCollapsed : undefined}
-              tabIndex={0}
-              data-testid="folder-row"
-              data-folder-id={node.id}
-              style={{ paddingLeft: 6 + depth * 16 }}
-              onClick={() => {
-                onSelect({ kind: 'folder', id: node.id });
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onSelect({ kind: 'folder', id: node.id });
-                }
-              }}
-              className={`flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] px-[6px] text-[13px] transition-colors ${
-                active
-                  ? 'bg-[var(--accent-soft)] font-medium text-[var(--accent)]'
-                  : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
-              }`}
-            >
-              <span className="flex w-[14px] flex-none">
-                {hasChildren ? (
-                  <button
-                    type="button"
-                    aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggle(node.id);
-                    }}
-                    className="flex text-[var(--text-subtle)] hover:text-[var(--text)]"
-                  >
-                    {isCollapsed ? (
-                      <ChevronRight className="icon i-16" aria-hidden="true" />
-                    ) : (
-                      <ChevronDown className="icon i-16" aria-hidden="true" />
-                    )}
-                  </button>
-                ) : null}
-              </span>
-              <Folder className="icon i-16 flex-none opacity-70" aria-hidden="true" />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{node.name}</span>
-              {count > 0 ? (
-                <span className="ml-auto pl-1 text-[11px] text-[var(--text-subtle)]">{count}</span>
-              ) : null}
-            </div>
-            {hasChildren && !isCollapsed ? (
-              <FolderRows
-                nodes={node.children}
-                depth={depth + 1}
-                counts={counts}
-                selection={selection}
-                collapsed={collapsed}
-                onSelect={onSelect}
-                onToggle={onToggle}
-              />
-            ) : null}
-          </div>
-        );
-      })}
-    </>
   );
 }
 
