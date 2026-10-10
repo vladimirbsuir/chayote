@@ -10,8 +10,12 @@ layouts, the whole of organisation — folders, tags, pinning and trash — sear
 and themes, settings and the full keyboard map. Work proceeds in order; a
 milestone is not "mostly done".
 
-**M7 is the only thing blocked, and it is blocked by the Android SDK alone.**
-M6 needed none of it.
+**M7 is the only thing outstanding, and what it waits on is a device, not a
+toolchain.** The Android SDK was installed all along — three documents said
+otherwise until M6 checked the filesystem — and `ANDROID_HOME` is now set. An
+APK can be built and inspected without anyone plugging anything in. What cannot
+be done without a phone is the entire runtime half of the milestone, listed in
+`11-verification.md` §3.5a.
 
 ---
 
@@ -253,7 +257,23 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 
 ### M7 — Android
 
-**Blocked until the Android SDK is installed.** Commands in `docs/11-verification.md` §3.5. Everything else in the roadmap is unaffected.
+**Not blocked on tooling.** The Android SDK, NDK 27, build-tools and accepted
+licences are all installed and `ANDROID_HOME` is set; only the Rust Android
+targets are missing, and `rustup target add` installs those without privileges.
+The roadmap said otherwise from M1 until M6 — see `11-verification.md` §2.
+
+**Blocked on a device.** `adb devices` lists nothing, and the entire runtime half
+of this milestone needs a physical arm64 handset: `adjustResize` against the
+on-screen keyboard, the back-button stack, `Pause`/`Resume` flushing, the oldest
+supported System WebView, long-press and 44 px touch targets, rotation, airplane
+mode, and the **real** SQLite backend running on device. Everything so far ran
+against the mock backend in a browser and against SQLite on Windows; the
+combination has never run on Android. `11-verification.md` §3.5a splits the two
+halves.
+
+The build half needs no device and should be done first: `tauri android init`,
+both Rust ABIs cross-compiling and linking, the APK against the 20 MB budget, and
+the manifest checked for a missing `INTERNET` permission.
 
 - `tauri android init`; configure min SDK 26, target 34, arm64 and armeabi-v7a.
 - No `INTERNET` permission (`06-platform.md` §4.2).
@@ -354,5 +374,5 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | M4 | **Done** | 2026-10-10. Branch `m4-organisation`, six commits. The folder tree keyboard pattern of `05-ui-ux.md` §10.1 (one tab stop, roving tabindex); inline create/rename/delete with the descendant-count confirmation and the per-row overflow menu; drag to re-parent and reorder with the three-band drop target and the pre-write cycle refusal; the pin toggle with `Ctrl+D`, which added one IPC command, `notes_set_pinned`; the trash actions with their undo toast; and the status bar's folder and tag slots with their two popovers. Q5 closed. 36 Rust tests, 303 TS, 95 Playwright. Two things worth carrying forward: the autosave needed an exception to §5.1's unchanged-document skip that has to survive the debounce, a note-switch flush *and* the retry timer — the retry is unreachable from the UI, so it is unit-tested; and creating a tag flushes before refetching, because `tags_list` hides a tag whose count is zero and the new tag is genuinely not in the library until the note carrying it is saved |
 | M5 | **Done** | 2026-10-10. Branch `m5-search`, four commits. The `useSearch` hook — 150 ms debounce, the ≥2-character minimum, the active selection as scope, the previous page kept while the next one loads, and paging via `nextOffset`; results replacing the list with `Esc` restoring it; one `NoteCard` for both with `NoteRow` carrying an optional snippet; a snippet allowlist holding `mark` and nothing else; the "No results for “query”" state and a polite live count; the mobile list view's own field; and a mock backend that answers with real prefix matching, the 8.0/1.0 weighting, and `<mark>` snippets rather than substrings and an opening excerpt. Four deviations from the plan recorded in §2. 36 Rust tests, 338 TS, 107 Playwright. The p95 half of "Done when" is **outstanding** and deliberately not covered |
 | M6 | **Done** | 2026-10-10. Branch `m6-themes-settings`, eight commits. `SettingsDialog` and `ThemeToggle`, the top-bar overflow menu that reaches them, the three-state theme cycle on the button and on `Ctrl/Cmd+Shift+L`, `Ctrl/Cmd+Enter` for sidebar→editor and `Esc` for the tablet drawer; `useDialogFocus` shared with `ConfirmDialog`; required test 12 over the icon inventory, with the inventory read out of `05-ui-ux.md` and an emoji scan over `src/` and `docs/`; the automated contrast check M6's "Done when" names, over both token tables; and level-2 screenshots at all six viewport-and-theme combinations. Q6 closed. 384 TS tests, 136 Playwright. **Four silent defects found, all shipped since M3**: the dark theme's accent was unreachable because `applyAccent` wrote `--accent` inline on the element carrying `data-theme` (ADR-019); §6.6's contrast claim was false as written and no preset holds 4.5:1 in both themes, so each preset now has a value per theme; `--text-subtle` sat at 2.60:1 light and 3.33:1 dark on note timestamps, and the ladder is now four steps with muted at 7:1; and four emoji sat in the specification's own diagrams. Five deviations from the plan recorded in §2 |
-| M7 | Not started | **Blocked** — needs Android SDK, `docs/11-verification.md` §3.5 |
+| M7 | Not started | **Blocked on a device, not on tooling** — the SDK is installed and `ANDROID_HOME` is set; `adb devices` lists nothing. The build half (init, both ABIs, APK size, manifest) needs no device and can be done now; the runtime half needs a physical arm64 handset. `docs/11-verification.md` §3.5a |
 | M8 | Not started | |

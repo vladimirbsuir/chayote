@@ -152,7 +152,7 @@ Implement with a Tauri back-button handler, not by listening for `popstate`. A p
 | No global shortcuts | Hardware-keyboard shortcuts work only while the app is focused |
 | No native file dialog until v1.2 | No import/export from Android in v1 |
 | System WebView version varies | Test on the oldest WebView that satisfies `minSdk`, not only on the newest |
-| SQLite `journal_mode = WAL` is supported | No behaviour difference from desktop; verified in M6 |
+| SQLite `journal_mode = WAL` is supported | No behaviour difference expected from desktop. **Not yet verified on a device** — M6 ran on desktop only, and the earlier note here claiming it was "verified in M6" was wrong; WAL on the device filesystem is part of what the `06-platform.md` §6 checklist exists to catch |
 
 ## 5. Build and verification commands
 

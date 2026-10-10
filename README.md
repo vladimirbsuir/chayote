@@ -21,9 +21,9 @@ They change together — see ADR-016.
 | Database filename | `chayote.db` |
 | Licence | MIT (`LICENSE`) |
 | Current milestone | **M6** — shipped 2026-10-10 |
-| Next milestone | **M7** — Android: blocked on the Android SDK, see §7 |
+| Next milestone | **M7** — Android: blocked on a **device**, not on tooling, see §7 |
 | Git repository | **Initialised**, `main` buildable, work on topic branches |
-| Android SDK | **Missing** — blocks M7 only, and nothing else |
+| Android SDK | **Installed** — `%LOCALAPPDATA%\Android\Sdk`, NDK 27, licences accepted. `ANDROID_HOME` set. Rust Android targets still to add |
 
 ---
 
@@ -71,7 +71,7 @@ Three documents carry the weight and are worth more attention than the rest: `02
 
 **M6 found four silent defects that had shipped since M3**, all recorded in `docs/08-roadmap.md` §2: the dark theme's accent was unreachable because `--accent` was written inline on the element carrying `data-theme`; `05-ui-ux.md` §6.6's contrast claim was false as written; `--text-subtle` carried note timestamps at 2.6:1; and four emoji sat in the specification's own diagrams. The first is ADR-019. The lesson worth carrying: **a number in a document is only worth what asserts it**, and none of these four looked wrong.
 
-**M7 is blocked and is the only thing that is.** The Android SDK is still missing; see §7. Nothing in M0–M6 or M8 depends on it.
+**M7 is outstanding, and what it waits on is a device.** The Android SDK was installed all along — three documents said otherwise until M6 checked the filesystem — and `ANDROID_HOME` is now set, so an APK can be built and measured today without anyone plugging anything in. The runtime half needs a physical arm64 handset; see §7. Nothing in M0–M6 or M8 depends on it.
 
 **One criterion is outstanding.** The p95 latency half of M5's "Done when" — under 50 ms on a seeded 50 MB corpus — is deliberately not covered by a test. Seeding that corpus is the slowest thing in the project, and it is recorded as outstanding in `docs/08-roadmap.md` §2 rather than claimed. Everything else in M5 is verified by a command.
 
@@ -244,6 +244,23 @@ The authoritative layout is `docs/10-conventions.md` §1. This is a summary.
 
 ## 7. Manual steps outstanding
 
-**Install the Android toolchain.** Required before M7, and only M7. Details and
-the exact commands are in `docs/11-verification.md` §3.5. M0–M6 and M8 are
-unaffected.
+**Connect an Android device.** One step, and it is the only thing M7 waits on.
+
+The toolchain is already here. The SDK, NDK 27, build-tools 34–36 and the
+accepted licences are installed at `%LOCALAPPDATA%\Android\Sdk`, JDK 21 is
+present, and `ANDROID_HOME` and `ANDROID_SDK_ROOT` are set as of M6. This file,
+`docs/08-roadmap.md` and `docs/11-verification.md` §2 all said the SDK was
+absent until that was checked against the filesystem — the correction is in
+`11-verification.md` §2 rather than quietly made.
+
+What remains is `rustup target add aarch64-linux-android armv7-linux-androideabi`,
+which needs no privileges, and a **physical arm64 handset** with USB debugging
+enabled. `adb devices` currently lists nothing.
+
+An APK can be built and measured without the handset, and that half is worth
+doing first. What only the handset can prove is listed in
+`docs/11-verification.md` §3.5a: `adjustResize` under the on-screen keyboard, the
+back-button stack, `Pause`/`Resume` flushing, the oldest supported System
+WebView, long-press and 44 px touch targets, rotation, airplane mode, and the
+real SQLite backend running on the device. Commands and verification steps are
+in `docs/11-verification.md` §3.5. M0–M6 and M8 are unaffected.

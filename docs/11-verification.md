@@ -18,7 +18,7 @@ That does not mean a human is never needed. It means the human's attention is sp
 
 ## 2. What an agent can and cannot verify alone
 
-Measured on the development machine, 2026-10-07. Re-measured at the end of M0:
+Measured on the development machine, 2026-10-07. Re-measured at the end of M0, and again at M6 on 2026-10-10:
 
 | Capability | Available | Notes |
 |------------|-----------|-------|
@@ -27,11 +27,16 @@ Measured on the development machine, 2026-10-07. Re-measured at the end of M0:
 | Git 2.50 | Yes | Repository initialised at M0 |
 | Chromium for Playwright | **Yes** | `npx playwright install chromium` must have been run for the installed `@playwright/test` revision; a version bump requires running it again |
 | Screen capture of a native window | **Yes** — `System.Drawing` available | Enables capturing the actual Tauri window |
-| JDK 21 | Yes | Sufficient for Android Gradle builds |
-| Android SDK / `adb` | **No** | `ANDROID_HOME` and `ANDROID_SDK_ROOT` both empty |
-| Rust Android targets | **No** — only `x86_64-pc-windows-msvc` installed | Needs `rustup target add aarch64-linux-android` |
+| JDK 21 (Temurin) | Yes | AGP 8.x requires 17 or newer |
+| Android SDK | **Yes** | `%LOCALAPPDATA%\Android\Sdk`. platforms android-33…37.0, build-tools 34.0.0…36.1.0, NDK 24.0.8215888 / 27.1.12297006 / **27.2.12479018**, `cmdline-tools` latest, **licences already accepted** |
+| `platform-tools` / `adb` | **Yes** — 1.0.41 | |
+| `ANDROID_HOME` / `ANDROID_SDK_ROOT` | **Yes**, set to the SDK path | Was empty until M6; both are read by Gradle and by Tauri |
+| Rust Android targets | **No** — only `x86_64-pc-windows-msvc` installed | Needs `rustup target add aarch64-linux-android armv7-linux-androideabi` |
+| A connected device or emulator | **No** | `adb devices` lists nothing |
 
-**Consequence:** milestones M0–M6 and M8 are fully agent-verifiable. **M7 (Android) cannot be built or run on this machine** until the SDK is installed. It is blocked, and pretending otherwise would produce an untested Android claim.
+**This table was wrong from M1 until M6.** Every version of it said the Android SDK was absent, and so did `README.md` §7 and `docs/08-roadmap.md` §2. The SDK had been installed the whole time — it simply was not on `PATH` and the environment variables were empty, and nobody checked the filesystem before writing it down. The correction is recorded here rather than quietly fixed, because the failure is the point: **a capability table written from assumption is a table that lies**, and three documents agreed with each other and were all wrong.
+
+**Consequence:** M0–M6 and M8 are fully agent-verifiable. **M7 is buildable without a device** — the toolchain is present and an APK can be produced and inspected — but **it cannot be verified** without one. What that leaves unverifiable is listed in §3.5.
 
 ## 3. The four verification layers
 
@@ -83,16 +88,42 @@ Use this sparingly — it is slower than Playwright, needs a display, and cannot
 
 `06-platform.md` §6 "Android" is a checklist a human walks through on a physical arm64 device. It cannot be automated on this machine.
 
-Before M7 can begin:
+The one-time toolchain setup, kept here because §2's table is a summary and this is the working form. `ANDROID_HOME` and `ANDROID_SDK_ROOT` are already set as of M6; the Rust targets are not:
 
 ```powershell
-$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 rustup target add aarch64-linux-android
 rustup target add armv7-linux-androideabi
 adb devices
 ```
 
-Until `adb devices` lists a device, no Android claim is verifiable and none should be made.
+Verify each, rather than trusting the exit code alone:
+
+```powershell
+rustup target list --installed    # aarch64-linux-android, armv7-linux-androideabi
+sdkmanager --list_installed       # platform-tools, platforms;android-34, ndk;27.2.12479018
+adb devices                       # a device id, status "device"
+adb shell getprop ro.product.cpu.abi   # arm64-v8a
+```
+
+**Building needs none of the device half.** `npx tauri android init` followed by an APK build produces a real artefact from the real Rust backend cross-compiled for Android, and that artefact can be measured against the 20 MB budget and its manifest inspected for the `INTERNET` permission. What it cannot do is run. Until `adb devices` lists a device, no **runtime** Android claim is verifiable and none should be made — a build is not a test.
+
+### 3.5a What a build proves and what only a device does
+
+The distinction matters because "it builds" reads like "it works", and on Android the gap between the two is where the platform-specific work lives. Both columns are M7's real content.
+
+| Checkable without a device | Needs a device or emulator |
+|---|---|
+| `tauri android init` scaffolds the Gradle project | `adjustResize`: the on-screen keyboard must never cover the editor or the status bar (`06-platform.md` §4.3) |
+| Both Rust ABIs cross-compile and link | The **real** SQLite backend running on device: migrations, FTS5, WAL on the device filesystem. Everything so far ran against the mock backend in the browser and against SQLite on Windows |
+| APK size against the 20 MB budget | The back button walking the view stack, via the Tauri handler rather than `popstate` (§4.4) |
+| The manifest requests no `INTERNET` permission | `Pause`/`Resume` flushing the autosave (§4.5) |
+| `adjustResize` present in the generated manifest — declared, not observed | The **oldest** System WebView that satisfies `minSdk` (§1 says never target above it) |
+| Frontend layout at 360 × 640 in Chromium — already covered by the level-2 captures | Long-press opening the context menu; real 44 px touch targets; no hover states |
+| | Rotation preserving the open note and the editor scroll position |
+| | Airplane mode changing nothing, because nothing is online |
+| | Cold start reaching an editable caret on the device |
+
+The second column is the reason M7 exists as a milestone rather than a build step. The first column is a real gate and worth running before anyone is asked to plug in a phone.
 
 ## 4. Visual regression against the prototype
 
