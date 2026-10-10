@@ -161,6 +161,26 @@ test.describe('mobile editor', () => {
 });
 
 test.describe('mobile list', () => {
+  test('the bar gear opens Settings — the hamburger it replaced was dead', async ({ page }) => {
+    /* The list bar's left slot was a `menu` "Open sidebar" button wired to a
+       no-op since M3: the sidebar content *is* the list view, so nothing opened,
+       and mobile had no path to Settings at all. The slot is a gear opening the
+       dialog directly — asserted here so a future edit cannot silently re-dead
+       it, since a dead icon button passes every assertion except one that
+       presses it. */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await expect(page.getByRole('button', { name: 'Open sidebar' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Open settings' }).click();
+    await expect(page.getByTestId('settings-dialog')).toBeVisible();
+
+    await page.getByTestId('settings-done').click();
+    await expect(page.getByTestId('settings-dialog')).toHaveCount(0);
+  });
+
   test('the sidebar fills the viewport with no dead strip at the edge', async ({ page }) => {
     /* Found on a phone: the list below the search field ended early with a
        vertical divider floating off the right edge. The mobile list reuses the

@@ -23,10 +23,14 @@ type TopBarProps = {
       than what a press would change it to. */
   theme: 'light' | 'dark';
   /** Only meaningful where the sidebar can be hidden — the tablet drawer.
-      `Ctrl/Cmd+\` covers the desktop collapse (§7). */
-  onToggleSidebar: () => void;
+      `Ctrl/Cmd+\` covers the desktop collapse (§7). Absent on mobile, where the
+      list *is* the sidebar and there is nothing to toggle. */
+  onToggleSidebar?: () => void;
   /** `true` in the tablet band, where the sidebar is a drawer. */
   showSidebarToggle?: boolean;
+  /** Desktop/tablet: opens the overflow menu whose Settings item opens the
+      dialog. Mobile: opens the settings dialog directly — the bar has no room
+      for an overflow menu, so the gear is the button itself. */
   onOpenOverflow: () => void;
 };
 
@@ -82,11 +86,18 @@ export function TopBar({
   };
 
   if (variant === 'mobile') {
+    /* The left slot was a `menu` "Open sidebar" button wired to a no-op: on the
+       single-pane list view the sidebar content *is* the view, so there was
+       nothing to open and the control only looked tappable. It now opens the
+       settings dialog directly — a gear, not a hamburger, since it never opened
+       a navigation drawer — which also closes the gap where mobile had no path
+       to Settings at all. Theme stays inside the dialog; the bar has no room
+       for a second control. */
     return (
       <>
         <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2">
-          <IconButton label="Open sidebar" onClick={onToggleSidebar} size="mobile">
-            <Menu className="icon i-24" aria-hidden="true" />
+          <IconButton label="Open settings" onClick={onOpenOverflow} size="mobile">
+            <SettingsIcon className="icon i-24" aria-hidden="true" />
           </IconButton>
           <span className="flex-1 text-[15px] font-semibold tracking-[-0.01em]">Chayote</span>
           <IconButton label="New note" onClick={onNewNote} size="mobile">
@@ -94,7 +105,7 @@ export function TopBar({
           </IconButton>
         </header>
         {/* The prototype's mobile list view carries its own field under the bar
-            rather than a field inside it: at 360 px the bar's three controls and
+            rather than a field inside it: at 360 px the bar's two controls and
             a usable field do not fit on one row, and §9's reason for not putting
             the desktop bar on this view at all applies to the field with it. */}
         <div className="mx-3 mt-3 flex h-10 flex-none items-center gap-2 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text-subtle)] focus-within:border-[var(--border-strong)] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]">
@@ -124,7 +135,7 @@ export function TopBar({
           in the tablet band: on desktop the sidebar is always shown, and a button
           whose only effect would be to hide something that must be visible is a
           control that changes nothing. `Ctrl/Cmd+\` (§7) covers desktop. */}
-      {showSidebarToggle ? (
+      {showSidebarToggle && onToggleSidebar ? (
         <IconButton label="Toggle sidebar" onClick={onToggleSidebar}>
           <Menu className="icon i-20" aria-hidden="true" />
         </IconButton>

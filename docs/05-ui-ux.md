@@ -1,6 +1,6 @@
 # 05 — UI & UX Specification
 
-**Status:** Frozen. Last updated 2026-10-09.
+**Status:** Frozen. Last updated 2026-10-10.
 
 ---
 
@@ -71,7 +71,7 @@ Single pane. One view visible at a time; navigation pushes a view onto an in-app
 ```
   Desktop layout      Android: list view         Android: editor view
 ┌─────────┬────────┐  ┌──────────────────────┐   ┌──────────────────────┐
-│ sidebar │ editor │  │[menu] Chayote    [+] │   │[back] Chayote    [···]│
+│ sidebar │ editor │  │[gear] Chayote    [+] │   │[back] Chayote    [···]│
 └─────────┴────────┘  │[search] Search…      │   │                      │
                       │ All   [pin] Pinned    │   │  Meeting notes       │
                       │ [folder] Folders      │   │                      │
@@ -85,6 +85,8 @@ Single pane. One view visible at a time; navigation pushes a view onto an in-app
 ```
 
 Back behaviour: the Android system back button pops the view stack. At the root it moves the task to the background. The list → editor transition is a horizontal slide matching the platform convention. Leaving the editor closes the note with the view: the list shows no open marker, because on a single pane there is no open note once the editor is gone — a marker there reads as a stuck selection.
+
+The list view's bar carries a settings gear, the app name, and a new-note button. The gear opens the settings dialog directly: the bar has no room for the desktop's overflow menu, and the slot previously held a `menu` "Open sidebar" button that did nothing — the sidebar content *is* the list view, so there was nothing to open. A hamburger that opens settings would be the same control wearing the wrong icon, so the gear says what it does.
 
 The editor view has its own top bar because it needs a back affordance, the note title, and a delete action. It does not reuse the desktop top bar.
 
@@ -213,7 +215,7 @@ Every icon used in v1, and nothing else. Adding an icon to the UI means adding i
 | `sun` | Light theme |
 | `moon` | Dark theme |
 | `monitor` | System theme |
-| `menu` | Android sidebar toggle |
+| `menu` | Tablet drawer toggle (§2.3) — deliberately absent from the mobile list bar, where there is no drawer to open |
 | `arrow-left` | Android back |
 | `chevron-down` | Expanded tree branch, collapsed section header |
 | `chevron-right` | Collapsed tree branch |
@@ -241,7 +243,7 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 
 | Component | Responsibility |
 |-----------|----------------|
-| `TopBar` | Search field, new note, theme toggle, overflow menu. Present on desktop; variant `Mobile` on Android list. |
+| `TopBar` | Search field, new note, theme toggle, overflow menu. Present on desktop; variant `Mobile` on the Android list carries a settings gear, the app name and a new-note button, with the search field below the bar. |
 | `Sidebar` | Filters, tag rows with counts, `NoteList`. The tag list renders here; there is no `TagList.tsx`. Owns selection state. |
 | `FolderTree`, `folderRows.ts` | Recursive tree. Keyboard navigable. Drag to re-parent and reorder. |
 | `NoteList` | Virtualised list. Renders `NoteSummary`, never loads full documents. |
@@ -460,6 +462,8 @@ Each value is its hue at the lightness that clears **4.5:1 against its own theme
 
 **A custom accent is used verbatim, in both themes.** It cannot be a curated pair, and deriving one at runtime was rejected: it puts colour maths and a second rendering of the same colour in the app, for a control that is by definition off the preset list. The custom input therefore shows the colour's contrast against the current theme's surfaces and warns when it is below 4.5:1, so the consequence is visible at the moment of choosing it rather than afterwards. This is the one place the accent can fail the contrast bar, and it is the user's own colour doing it.
 
+Reached from the top-bar overflow menu on desktop and tablet, and from the gear on the mobile list bar (§2.4) — every breakpoint has a path to it, which mobile lacked until the dead hamburger became the gear.
+
 Settings live in the Tauri store, never in the notes database, so resetting or syncing settings can never touch notes.
 
 ## 7. Keyboard shortcuts
@@ -550,7 +554,7 @@ loses the pointer mid-drag. It is painted as a 1 px hairline and hit-tested at
 9 px, centred on it.
 
 **The top bar is not rendered on the mobile list view.** The Android list view
-carries its own bar with a `menu` button, the app name, and a new-note button
+carries its own bar with a `settings` gear button, the app name, and a new-note button
 (§2.4); the desktop bar would be a second bar above it.
 
 ## 10. Accessibility

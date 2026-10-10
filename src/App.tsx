@@ -635,12 +635,13 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
                 onNewNote={() => {
                   void createNote();
                 }}
-                onToggleSidebar={NOOP}
                 onToggleTheme={() => {
                   useSettingsStore.getState().setTheme(nextTheme(themeSetting));
                 }}
                 theme={theme}
-                onOpenOverflow={NOOP}
+                onOpenOverflow={() => {
+                  setSettingsOpen(true);
+                }}
               />
               {sidebar}
             </div>
@@ -746,13 +747,6 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
     </div>
   );
 }
-
-/* Tag creation, drag-reordering, and pinning are later parts of M4. The `+` in the
-    Tags header and the top-bar overflow menu stay wired to this until they are: the
-    controls are already in the prototype and in `05-ui-ux.md`, and removing them
-    would be a change to the specified appearance rather than to the implementation.
-    Each is annotated at its call site with the milestone that lands it. */
-const NOOP = (): void => {};
 
 /* One shared empty list rather than a fresh `[]` per render, so the sidebar's
    memoised rows are not handed a new reference on every tick. */
