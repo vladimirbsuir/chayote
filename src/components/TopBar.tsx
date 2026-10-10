@@ -61,7 +61,7 @@ export function TopBar({
             rather than a field inside it: at 360 px the bar's three controls and
             a usable field do not fit on one row, and §9's reason for not putting
             the desktop bar on this view at all applies to the field with it. */}
-        <div className="mx-3 mt-3 flex h-10 flex-none items-center gap-2 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text-subtle)] focus-within:border-[var(--border-strong)]">
+        <div className="mx-3 mt-3 flex h-10 flex-none items-center gap-2 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text-subtle)] focus-within:border-[var(--border-strong)] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]">
           <Search className="icon i-18" aria-hidden="true" />
           <input
             ref={inputRef}
@@ -96,7 +96,7 @@ export function TopBar({
 
       <span className="w-[120px] text-[14px] font-semibold tracking-[-0.01em]">Chayote</span>
 
-      <div className="flex h-8 max-w-[460px] flex-1 items-center gap-2 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] px-[10px] text-[13px] text-[var(--text-subtle)] focus-within:border-[var(--border-strong)]">
+      <div className="flex h-8 max-w-[460px] flex-1 items-center gap-2 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] px-[10px] text-[13px] text-[var(--text-subtle)] focus-within:border-[var(--border-strong)] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]">
         <Search className="icon i-16" aria-hidden="true" />
         <input
           ref={inputRef}
