@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
-import { FilePlus, Menu, MoreHorizontal, Search, Sun, X } from 'lucide-react';
+import { FilePlus, Menu, MoreHorizontal, Search, X } from 'lucide-react';
 import { IconButton } from './IconButton';
+import { ThemeIcon } from './ThemeToggle';
 
 /* `05-ui-ux.md` §4. Search field, new note, theme toggle, overflow menu;
    variant `mobile` for the Android list view. Metrics are copied from the
@@ -17,6 +18,9 @@ type TopBarProps = {
   onSearchChange: (value: string) => void;
   onNewNote: () => void;
   onToggleTheme: () => void;
+  /** The theme in effect, so the button's icon shows what is on screen rather
+      than what a press would change it to. */
+  theme: 'light' | 'dark';
   /** Only meaningful where the sidebar can be hidden — the tablet drawer.
       `Ctrl/Cmd+\` covers the desktop collapse (§7). */
   onToggleSidebar: () => void;
@@ -32,6 +36,7 @@ export function TopBar({
   onSearchChange,
   onNewNote,
   onToggleTheme,
+  theme,
   onToggleSidebar,
   showSidebarToggle = false,
   onOpenOverflow,
@@ -124,8 +129,8 @@ export function TopBar({
       <IconButton label="New note" onClick={onNewNote}>
         <FilePlus className="icon i-20" aria-hidden="true" />
       </IconButton>
-      <IconButton label="Toggle theme" onClick={onToggleTheme}>
-        <Sun className="icon i-20" aria-hidden="true" />
+      <IconButton label="Change theme" onClick={onToggleTheme}>
+        <ThemeIcon effective={theme} className="icon i-20" />
       </IconButton>
       <IconButton label="More" onClick={onOpenOverflow}>
         <MoreHorizontal className="icon i-20" aria-hidden="true" />

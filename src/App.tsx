@@ -25,6 +25,7 @@ import {
   useSettingsStore,
 } from './stores/settings';
 import { TopBar } from './components/TopBar';
+import { nextTheme } from './lib/theme';
 import { Sidebar } from './components/Sidebar';
 import { DesktopLayout, MobileLayout, TabletLayout } from './layout/DesktopLayout';
 import { useBreakpoint } from './layout/useBreakpoint';
@@ -72,6 +73,7 @@ function Shell() {
   const openNoteId = useSelectionStore((state) => state.openNoteId);
 
   const theme = useSettingsStore((state) => resolveTheme(state.theme, systemDark));
+  const themeSetting = useSettingsStore((state) => state.theme);
   const accent = useSettingsStore((state) => state.accent);
   const sidebarWidth = useSettingsStore((state) => state.sidebarWidth);
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
@@ -343,6 +345,16 @@ function Shell() {
         }
         return;
       }
+      /* §7: `Toggle theme` is `Ctrl/Cmd+Shift+L`. Light, dark, system, in that
+         order — the same cycle as the top-bar button, because a shortcut that
+         did something different from the control beside it would be worse than
+         having neither. `Shift+L` alone is left alone: browsers use it for
+         nothing, but the modifier is part of the binding either way. */
+      if (key === 'l' && event.shiftKey) {
+        event.preventDefault();
+        useSettingsStore.getState().setTheme(nextTheme(themeSetting));
+        return;
+      }
       /* §7: `Delete note` is `Ctrl/Cmd+Backspace`. Not plain Backspace — in a WebView
          that navigates back, and in the editor that deletes a character. */
       if (key === 'backspace') {
@@ -355,7 +367,7 @@ function Shell() {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [createNote, deleteOpenNote, tablet]);
+  }, [createNote, deleteOpenNote, tablet, themeSetting]);
 
   /* Leaving the editor on a small screen pops the view stack (§2.4), which is
      what the Android back button does natively in M7. */
@@ -463,8 +475,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
             void createNote();
           }}
           onToggleTheme={() => {
-            useSettingsStore.getState().setTheme(theme === 'dark' ? 'light' : 'dark');
+            useSettingsStore.getState().setTheme(nextTheme(themeSetting));
           }}
+          theme={theme}
           onToggleSidebar={() => {
             if (tablet) {
               setDrawerOpen((open) => !open);
@@ -494,8 +507,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
                 }}
                 onToggleSidebar={NOOP}
                 onToggleTheme={() => {
-                  useSettingsStore.getState().setTheme(theme === 'dark' ? 'light' : 'dark');
+                  useSettingsStore.getState().setTheme(nextTheme(themeSetting));
                 }}
+                theme={theme}
                 onOpenOverflow={NOOP}
               />
               {sidebar}
