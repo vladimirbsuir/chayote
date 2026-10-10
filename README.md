@@ -20,9 +20,10 @@ They change together — see ADR-016.
 | Bundle identifier | **`com.chayote.app`** |
 | Database filename | `chayote.db` |
 | Licence | MIT (`LICENSE`) |
-| Current milestone | **M6** — Themes, settings, keyboard, polish: not started |
+| Current milestone | **M6** — shipped 2026-10-10 |
+| Next milestone | **M7** — Android: blocked on the Android SDK, see §7 |
 | Git repository | **Initialised**, `main` buildable, work on topic branches |
-| Android SDK | **Missing** — blocks M7 only, and M6 needs none of it |
+| Android SDK | **Missing** — blocks M7 only, and nothing else |
 
 ---
 
@@ -62,10 +63,15 @@ Three documents carry the weight and are worth more attention than the rest: `02
 | Sync implementation | **Not started** — architecture only, see §5 |
 | Specification | **Complete**, 11 documents |
 | UI prototype | **Complete and approved** — `prototype/index.html` |
-| Application code | **M0–M5 complete** — scaffold, tokens, icon layer, IPC seam, SQLite data layer, editor with autosave, UI shell with sidebar and virtualised note list, organisation: folders, tags, pinning, trash, and search |
-| Current milestone | **M6** — Themes, settings, keyboard, polish: not started |
+| Application code | **M0–M6 complete** — scaffold, tokens, icon layer, IPC seam, SQLite data layer, editor with autosave, UI shell with sidebar and virtualised note list, organisation: folders, tags, pinning, trash, search, and themes, settings and the full keyboard map |
+| Current milestone | **M7** — Android: **blocked** on the missing Android SDK |
+| Frozen decisions | 18. ADR-019 was added at M6: the accent is per-theme |
 
-**M6 is next.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08, M3 on 2026-10-09, M4 and M5 on 2026-10-10. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 36 Rust tests, 338 TypeScript tests, and 107 Playwright tests cover the data layer, the editor, the shell, organisation and search, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The sidebar's folder tree is keyboard-navigable and draggable, folders and tags are created, renamed and deleted in place, notes can be pinned, filed, tagged, trashed and restored, the editor's status bar changes a note's folder and tags, and `Ctrl+F` finds notes by title or body with the matching words marked and `Esc` restoring the list. The Android SDK is still missing and blocks M7 only, see §7.
+**M6 shipped on 2026-10-10; M7 is next.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08, M3 on 2026-10-09, M4, M5 and M6 on 2026-10-10. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 36 Rust tests, 384 TypeScript tests, and 136 Playwright tests cover the data layer, the editor, the shell, organisation, search and themes, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The sidebar's folder tree is keyboard-navigable and draggable, folders and tags are created, renamed and deleted in place, notes can be pinned, filed, tagged, trashed and restored, the editor's status bar changes a note's folder and tags, `Ctrl+F` finds notes by title or body with the matching words marked and `Esc` restoring the list, and the settings dialog themes the app per theme with an accent that is verified for contrast in both. The whole app is operable from the keyboard alone, checked as one continuous flow in `e2e/keyboard.spec.ts`.
+
+**M6 found four silent defects that had shipped since M3**, all recorded in `docs/08-roadmap.md` §2: the dark theme's accent was unreachable because `--accent` was written inline on the element carrying `data-theme`; `05-ui-ux.md` §6.6's contrast claim was false as written; `--text-subtle` carried note timestamps at 2.6:1; and four emoji sat in the specification's own diagrams. The first is ADR-019. The lesson worth carrying: **a number in a document is only worth what asserts it**, and none of these four looked wrong.
+
+**M7 is blocked and is the only thing that is.** The Android SDK is still missing; see §7. Nothing in M0–M6 or M8 depends on it.
 
 **One criterion is outstanding.** The p95 latency half of M5's "Done when" — under 50 ms on a seeded 50 MB corpus — is deliberately not covered by a test. Seeding that corpus is the slowest thing in the project, and it is recorded as outstanding in `docs/08-roadmap.md` §2 rather than claimed. Everything else in M5 is verified by a command.
 
@@ -92,6 +98,7 @@ Do not re-litigate any of these. The reasoning for each, and the alternatives th
 | 014 | First launch creates **no** folders or tags |
 | 015 | Icons are **Lucide vectors**. No emoji in the UI, ever |
 | 016 | The prototype is a **permanent** visual reference, changed with the docs |
+| 019 | The accent is **per-theme**; a custom accent is used verbatim |
 
 Full table with dates in [`docs/09-decisions.md`](docs/09-decisions.md).
 
