@@ -299,6 +299,8 @@ Delete moves the note to trash with an **undo toast** for 6 seconds offering "Un
 
 **The note row menu is portalled and positioned against the viewport.** The note list is virtualised, and every row is a transformed, absolutely positioned element — which creates a stacking context, so a menu rendered inside a row cannot be lifted above the rows after it by `z-index`, and the scroll container's `overflow` clips it as well. Measured in the click handler rather than in an effect, because the geometry is available at the click. It opens upward when there is no room below, which is the common case for the last card and not only for the last card.
 
+**The folder row menu is portalled the same way.** The tree scrolls inside its own `overflow` container, and the in-row menu was clipped by it — the long-press menu on a phone arrived as a sliver showing only Rename. Same contract: measured by the opener, flipped upward with no room below, closed by `Esc` and outside press.
+
 **The undo toast names the note it deleted**, sits at the bottom of the window rather than inside the sidebar, and moves no focus. A delete can come from `Ctrl/Cmd+Backspace` while the caret is in the editor, so a toast pinned to the sidebar would be off-screen from where the user is looking — and a focus move would break the keystroke in progress. It announces politely rather than assertively, for the same reason: an assertive announcement interrupts whatever a screen reader is reading. A second delete replaces the toast and its timer rather than stacking a second one; two timers racing would restore whichever note each was pointed at.
 
 **`Ctrl/Cmd+Backspace` deletes the open note**, not plain `Backspace` — in a WebView that navigates back, and in the editor that deletes a character.
@@ -307,7 +309,7 @@ Delete moves the note to trash with an **undo toast** for 6 seconds offering "Un
 
 Creating a folder is inline: a single text input in place, `Enter` commits, `Esc` cancels, empty input cancels. Renaming is the same. Deleting a folder with children requires confirmation naming the count. Reordering and re-parenting by drag; `position` values are densified in one transaction (`03-data-model.md` §3.2).
 
-**Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. On touch, long-press initiates a folder drag; otherwise the gesture scrolls.
+**Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. A tap on the twisty collapses on touch exactly as a click does on desktop. On touch, long-press opens the row's menu; otherwise the gesture scrolls. Drag to re-parent is mouse-only in v1 — touch fires no HTML5 drag events — so on a phone re-parenting waits on the v1.1 "move to…" menu item, like keyboard re-parenting does.
 
 **A drop target has three bands.** The outer quarter at each end reorders among siblings, drawn as a 2 px accent rule pinned to that edge; the middle half makes the row the new parent, drawn as a soft accent fill. A quarter rather than a third, because re-parenting is the rarer intent but needs a target big enough to hit, and thirds would have left it under nine pixels on a 26 px row. A rule on the wrong edge would read as re-ordering when the intent was re-parenting, which is the whole distinction.
 
@@ -343,7 +345,7 @@ There is no cap on pinned notes. If a user pins 50 notes, the ordering stops bei
 
 ### 6.4 Tags
 
-A tag is created by typing a new name into the tag editor; existing names complete. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; a tag disappears from the sidebar only when its note count reaches zero (`03-data-model.md` §5).
+A tag is created by typing a new name into the tag editor; existing names complete. There is deliberately no add control in the sidebar's Tags section: `tags_list` hides zero-count tags (`03-data-model.md` §5), so creating one there would appear to do nothing. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; a tag disappears from the sidebar only when its note count reaches zero (`03-data-model.md` §5).
 
 **The editor and the picker are one visual language.** Both are portalled popovers anchored to their status-bar slot, and both are listboxes. They are the same component with different options, because a tag editor that looked different from the folder picker would be two visual languages for "choose a value" in a 28 px row. The picker is portalled rather than rendered in place because the status bar sits at the bottom of a `flex` column with its own stacking contexts: in place, the popover would be clipped by the editor pane and could not be raised above it. Its position is measured in the click handler rather than in an effect — the geometry is in hand at the click, and an effect that reads the DOM and then sets state is a second render for a value already known.
 
@@ -516,6 +518,8 @@ Every empty state explains the cause, not just the fact. No illustration, no mas
 | 1024–1279 px | Two panes, sidebar default 280 px |
 | 768–1023 px | Sidebar as overlay drawer, editor full width |
 | < 768 px | Single pane, view stack, no hover states |
+
+**On Android the single pane holds in both orientations.** The width bands above govern desktop windows. A phone in landscape widens past 768 px, and width alone would flip the navigation model: the tablet band always renders the editor, so rotating on the list yanked the user into the last-opened note with desktop chrome. The navigation model is a device property (ADR-006) — `01-product.md` §8 requires the Android UI in portrait and landscape alike — so the breakpoint answers `mobile` for any Android WebView regardless of width. Narrow desktop windows keep the width bands.
 
 The sidebar is **collapsible on desktop and dismissible as a drawer on tablet**, and
 the two are different affordances:

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { FolderTree } from './FolderTree';
+import { InlineNameInput } from './InlineNameInput';
 import type { FolderNode } from '../types/folder';
 import type { Selection } from '../types/ipc';
 
@@ -170,6 +171,50 @@ describe('inline folder editing', () => {
 
     expect(onCreate).toHaveBeenCalledWith('Research', null);
     expect(screen.queryByTestId('folder-name-input')).toBeNull();
+  });
+
+  it('commits once when Enter and blur fire for the same dismissal', () => {
+    /* Found on a phone: the soft keyboard's Enter both commits and drops
+       focus, so the blur handler committed a second time — and folder names
+       carry no uniqueness constraint, so one Enter made two folders. Driven
+       through the input itself rather than the tree: the tree closes the
+       editor on the first commit, which would unmount the field before the
+       second event and test nothing. */
+    const onCommit = vi.fn();
+    render(
+      <InlineNameInput
+        label="New folder name"
+        placeholder="Folder name"
+        value="Research"
+        error={null}
+        onChange={() => {}}
+        onCommit={onCommit}
+        onCancel={() => {}}
+      />,
+    );
+
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    fireEvent.blur(input());
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays retryable after a refused commit, since editing clears the guard', async () => {
+    const onCreate = vi
+      .fn()
+      .mockRejectedValueOnce({ code: 'VALIDATION', message: 'No good.' })
+      .mockResolvedValue(undefined);
+    render(<StatefulTree onCreate={onCreate} />);
+    fireEvent.click(screen.getByTestId('open-root-create'));
+
+    fireEvent.change(input(), { target: { value: 'Research' } });
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    await settle();
+    fireEvent.change(input(), { target: { value: 'Research 2' } });
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    await settle();
+
+    expect(onCreate).toHaveBeenCalledTimes(2);
   });
 
   it('trims the name, so a stray space cannot create " Work" beside "Work"', async () => {
@@ -483,5 +528,42 @@ describe('folder row menu', () => {
     fireEvent.mouseDown(document.body);
 
     expect(screen.queryByTestId('folder-menu')).toBeNull();
+  });
+
+  it('portals the menu to the body, outside the scrolling tree', () => {
+    /* Found on a phone: the menu rendered in the row and the tree's `overflow`
+       clipped it to a sliver. A menu under the tree in the DOM cannot be
+       clipped by it; `e2e/shell.spec.ts` right-clicks a real row for the same
+       path, and `e2e/mobile.spec.ts` asserts the geometry where it matters. */
+    render(<StatefulTree />);
+    openMenuFor('Work');
+
+    const menu = screen.getByTestId('folder-menu');
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.className).toContain('fixed');
+  });
+
+  it('opens upward when the row has no room below it', () => {
+    render(<StatefulTree />);
+
+    const target = row('a');
+    target.getBoundingClientRect = (): DOMRect =>
+      ({ top: 700, bottom: 726, left: 8, right: 300, width: 292, height: 26 }) as DOMRect;
+    fireEvent.contextMenu(target);
+
+    /* 726 + 120 clears the 768 px jsdom viewport, and 700 clears the menu
+       above — so the menu lands above the row rather than clipped below it. */
+    expect(screen.getByTestId('folder-menu').style.top).toBe('696px');
+  });
+
+  it('gives the twisty a larger tap target on coarse pointers', () => {
+    /* §9's 44 px bar does not fit a 16 px twisty in a 26 px row; the invisible
+       hit slop below roughly doubles the target on touch without moving any
+       pixel or stealing taps on desktop, where the rule is hover, not touch. */
+    render(<StatefulTree />);
+
+    expect(screen.getByLabelText('Collapse Work').className).toContain(
+      "pointer-coarse:before:content-['']",
+    );
   });
 });

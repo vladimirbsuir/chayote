@@ -5,6 +5,7 @@ import {
   breakpointOf,
   clampSidebarWidth,
   defaultSidebarWidth,
+  isAndroidWebView,
 } from './breakpoints';
 import { INITIAL_STACK, canPop, currentView, popView, pushView } from './viewStack';
 
@@ -36,6 +37,32 @@ describe('breakpointOf', () => {
     expect(defaultSidebarWidth(1920)).toBe(320);
     expect(defaultSidebarWidth(1024)).toBe(280);
     expect(defaultSidebarWidth(1279)).toBe(280);
+  });
+});
+
+describe('isAndroidWebView', () => {
+  /* Found on a phone: rotation to landscape widened the viewport past 768 px
+     and flipped the navigation model, yanking the list into the editor with
+     desktop chrome. Width bands govern desktop windows; the device decides. */
+  const ANDROID_PHONE =
+    'Mozilla/5.0 (Linux; Android 13; X6836 Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/153.0.8010.57 Mobile Safari/537.36';
+
+  it('recognises the System WebView UA, portrait or landscape', () => {
+    expect(isAndroidWebView(ANDROID_PHONE)).toBe(true);
+  });
+
+  it('ignores desktop UAs, so narrow windows keep the width bands', () => {
+    expect(
+      isAndroidWebView(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
+      ),
+    ).toBe(false);
+    expect(
+      isAndroidWebView(
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+      ),
+    ).toBe(false);
+    expect(isAndroidWebView('')).toBe(false);
   });
 });
 

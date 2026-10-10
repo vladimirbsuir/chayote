@@ -475,7 +475,9 @@ const confirmRef = useRef(confirm);
   const sidebar = (
     <Sidebar
       selection={selection}
-      width={sidebarWidth}
+      /* The mobile list view is a full-width column (§2.4), not a sized pane:
+         a desktop width here ends the content early with a stray divider. */
+      width={mobile ? null : sidebarWidth}
       folders={folders}
       tags={tags}
       notes={listNotes}
@@ -539,7 +541,6 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
       }}
       onToggleFolder={useSettingsStore.getState().toggleFolderCollapsed}
       onCreateFolder={createFolder}
-      onCreateTag={NOOP}
       onRenameFolder={renameFolder}
       onDeleteFolder={deleteFolder}
       onMoveFolder={moveFolder}

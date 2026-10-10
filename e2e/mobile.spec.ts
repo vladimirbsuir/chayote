@@ -123,3 +123,113 @@ test.describe('mobile editor', () => {
     }
   });
 });
+
+test.describe('mobile list', () => {
+  test('the sidebar fills the viewport with no dead strip at the edge', async ({ page }) => {
+    /* Found on a phone: the list below the search field ended early with a
+       vertical divider floating off the right edge. The mobile list reuses the
+       desktop sidebar, which carried its fixed pane width into a full-width
+       column — and a divider against nothing. Like the status-bar tests above,
+       the defect is only visible in geometry. */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    const box = await page.getByTestId('sidebar').boundingBox();
+    expect(box, 'sidebar has no box').not.toBeNull();
+    if (box === null) return;
+    expect(box.x, 'sidebar does not start at the viewport edge').toBe(0);
+    expect(box.width, 'sidebar does not fill the viewport').toBe(MOBILE.width);
+  });
+});
+
+const ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 13; X6836 Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/153.0.8010.57 Mobile Safari/537.36';
+const LANDSCAPE = { width: 800, height: 360 };
+
+test.describe('mobile landscape', () => {
+  test.use({ viewport: LANDSCAPE, userAgent: ANDROID_UA });
+
+  /* Found on a phone: rotating on the list widened the viewport past 768 px,
+     flipped the breakpoint to the tablet band — which always renders the
+     editor — and landed the user in the last-opened note with desktop chrome.
+     The navigation model is a device property, so on Android the answer stays
+     the single-pane stack in both orientations. */
+
+  test('rotation keeps the list instead of jumping into a note', async ({ page }) => {
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await expect(page.getByTestId('app-shell')).toHaveAttribute('data-breakpoint', 'mobile');
+    const box = await page.getByTestId('sidebar').boundingBox();
+    expect(box?.width, 'sidebar does not fill the landscape viewport').toBe(LANDSCAPE.width);
+  });
+
+  test('rotation keeps the open note rather than choosing one', async ({ page }) => {
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.setViewportSize(MOBILE);
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await page.getByTestId('note-card').first().click();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+
+    await page.setViewportSize(LANDSCAPE);
+    await expect(page.getByRole('button', { name: 'Back to list' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await expect(page.getByTestId('note-list')).toHaveCount(0);
+
+    await page.setViewportSize(MOBILE);
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+  });
+});
+
+test.describe('narrow desktop window', () => {
+  test.use({ viewport: LANDSCAPE });
+
+  test('the width bands still govern non-Android viewports', async ({ page }) => {
+    /* The Android carve-out changes nothing on desktop: an 800 px window keeps
+       the tablet drawer, whatever the height. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('app-shell')).toHaveAttribute('data-breakpoint', 'tablet');
+  });
+});
+
+test.describe('mobile touch', () => {
+  test.use({
+    viewport: MOBILE,
+    userAgent: ANDROID_UA,
+    hasTouch: true,
+    isMobile: true,
+  });
+
+  test('the folder menu opens fully inside the viewport', async ({ page }) => {
+    /* The defect this file keeps finding: the in-row menu arrived clipped to a
+       sliver by the tree's scroll container, and only a phone showed it. The
+       long-press gesture itself is proven on hardware (`input swipe x y x y
+       900` opens it); what this pins is the portal contract at a phone
+       viewport — the whole panel, Rename through Delete, inside the screen —
+       through the right-click, which reaches the same `openMenu` measurement. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    const row = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await expect(row).toBeVisible();
+    await row.click({ button: 'right' });
+
+    const menu = page.getByTestId('folder-menu');
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox, 'folder menu has no box').not.toBeNull();
+    if (menuBox === null) return;
+    expect(menuBox.x, 'menu starts off-screen').toBeGreaterThanOrEqual(0);
+    expect(menuBox.y, 'menu starts off-screen').toBeGreaterThanOrEqual(0);
+    expect(menuBox.x + menuBox.width, 'menu overflows the viewport').toBeLessThanOrEqual(
+      MOBILE.width,
+    );
+    expect(menuBox.y + menuBox.height, 'menu overflows the viewport').toBeLessThanOrEqual(
+      MOBILE.height,
+    );
+  });
+});

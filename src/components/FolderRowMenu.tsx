@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { MoreHorizontal } from 'lucide-react';
 import type { Uuid } from '../types/note';
 
@@ -17,15 +18,25 @@ import type { Uuid } from '../types/note';
    words, the menu is text — which is also §1's rule that no icon sits where a word
    is clearer, applied to a menu whose items are three distinct English verbs.
 
-   The menu is a `menu` with `menuitem`s rather than a list of buttons, because that
-   is what lets the arrow keys move between items and `Esc` return focus to the row
-   — the behaviour a user expects from a menu that opened under their cursor. */
+    The menu is a `menu` with `menuitem`s rather than a list of buttons, because that
+    is what lets the arrow keys move between items and `Esc` return focus to the row
+    — the behaviour a user expects from a menu that opened under their cursor.
+
+    Portalled against the viewport, like `NoteRowMenu`: the tree scrolls inside
+    an `overflow` container, and a menu rendered in the row is clipped by it —
+    the long-press menu on a phone arrived as a sliver. Placement is measured by
+    the opener and arrives as a prop, never measured here in an effect. */
 
 export type FolderMenuAction = 'rename' | 'create' | 'delete';
 
 type FolderRowMenuProps = {
   folderId: Uuid;
   folderName: string;
+  /** Viewport coordinates, measured by the row in the handler that opened the
+      menu — the same contract as `NoteRowMenu`, for the same reason: an effect
+      that measures and then sets state is a second render for geometry that
+      was already in hand. */
+  placement: { top: number; left: number };
   onAction: (action: FolderMenuAction, id: Uuid) => void;
   onClose: () => void;
 };
@@ -33,6 +44,7 @@ type FolderRowMenuProps = {
 export function FolderRowMenu({
   folderId,
   folderName,
+  placement,
   onAction,
   onClose,
 }: FolderRowMenuProps) {
@@ -71,7 +83,7 @@ export function FolderRowMenu({
     { action: 'delete', label: 'Delete', danger: true },
   ];
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
       role="menu"
@@ -94,7 +106,8 @@ export function FolderRowMenu({
         const next = (current === -1 ? 0 : current + delta + count) % count;
         itemRefs.current[next]?.focus();
       }}
-      className="absolute right-1 top-[24px] z-20 min-w-[168px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-pop)]"
+      style={{ top: placement.top, left: placement.left }}
+      className="fixed z-50 min-w-[168px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-pop)]"
     >
       {items.map((item, index) => (
         <button
@@ -119,7 +132,8 @@ export function FolderRowMenu({
           {item.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -132,7 +146,7 @@ export function FolderMenuButton({
   onOpen,
 }: {
   folderName: string;
-  onOpen: () => void;
+  onOpen: (button: HTMLElement) => void;
 }) {
   return (
     <button
@@ -143,7 +157,7 @@ export function FolderMenuButton({
       title={`${folderName} actions`}
       onClick={(event) => {
         event.stopPropagation();
-        onOpen();
+        onOpen(event.currentTarget);
       }}
       className="ml-auto grid h-[22px] w-[22px] flex-none place-items-center rounded text-[var(--text-subtle)] transition-colors hover:bg-[var(--surface-sunken)] hover:text-[var(--text)]"
     >

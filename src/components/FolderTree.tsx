@@ -81,6 +81,9 @@ type CommitTarget =
     folder, which is what draws the "not allowed" cursor instead of a drop line. */
 type DragState = { draggedId: Uuid; targetId: Uuid | null; zone: DropZone | null };
 
+const MENU_WIDTH = 168;
+const MENU_ESTIMATED_HEIGHT = 120;
+
 export function FolderTree({
   nodes,
   counts,
@@ -98,7 +101,30 @@ export function FolderTree({
 }: FolderTreeProps) {
   const rows = useMemo(() => visibleFolderRows(nodes ?? [], collapsed), [nodes, collapsed]);
   const [editing, setEditing] = useState<Editing>(null);
-  const [menuFor, setMenuFor] = useState<Uuid | null>(null);
+  const [menu, setMenu] = useState<{ id: Uuid; placement: { top: number; left: number } } | null>(
+    null,
+  );
+
+  /* Measured here, in the handler that opens the menu — the `NoteCard` contract.
+     The tree scrolls inside an `overflow` container, so a menu opening downward
+     past the container's edge is clipped; flip upward when there is no room
+     below, against the viewport rather than the row. */
+  const openMenu = (id: Uuid, anchor: HTMLElement): void => {
+    const rect = anchor.getBoundingClientRect();
+    const up =
+      rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight &&
+      rect.top > MENU_ESTIMATED_HEIGHT;
+    setMenu({
+      id,
+      placement: {
+        top: up ? rect.top - 4 : rect.bottom + 4,
+        left: Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8),
+      },
+    });
+  };
+  const closeMenu = (): void => {
+    setMenu(null);
+  };
   /* Which row is being dragged, which row is under the pointer, and which of the
      three bands of it. Held here rather than read from the event on drop, because
      `dragover` fires many times and the drop event carries only the dragged id. */
@@ -270,7 +296,7 @@ export function FolderTree({
   };
 
   const runMenuAction = (action: FolderMenuAction, id: Uuid): void => {
-    setMenuFor(null);
+    setMenu(null);
     switch (action) {
       case 'rename': {
         const node = rows.find((row) => row.node.id === id)?.node;
@@ -305,7 +331,7 @@ export function FolderTree({
           rowRefs={rowRefs}
           editing={editing}
           editError={editError}
-          menuFor={menuFor}
+          menu={menu}
           drag={drag}
           creatingRoot={creatingRoot}
           onSelect={onSelect}
@@ -318,7 +344,8 @@ export function FolderTree({
           }}
           onCommitEditing={commitEditing}
           onEditEditing={closeEditing}
-          onMenu={setMenuFor}
+          onOpenMenu={openMenu}
+          onCloseMenu={closeMenu}
           onMenuAction={runMenuAction}
           onShortcut={runMenuAction}
           onDragStart={onDragStart}
@@ -394,7 +421,7 @@ function FolderRows({
   rowRefs,
   editing,
   editError,
-  menuFor,
+  menu,
   drag,
   creatingRoot,
   onSelect,
@@ -405,7 +432,8 @@ function FolderRows({
   onClearError,
   onCommitEditing,
   onEditEditing,
-  onMenu,
+  onOpenMenu,
+  onCloseMenu,
   onMenuAction,
   onShortcut,
   onDragStart,
@@ -423,7 +451,7 @@ function FolderRows({
   rowRefs: React.RefObject<Map<Uuid, HTMLDivElement>>;
   editing: Editing;
   editError: string | null;
-  menuFor: Uuid | null;
+  menu: { id: Uuid; placement: { top: number; left: number } } | null;
   drag: DragState | null;
   /** The root create input is open, which suspends dragging for the whole tree. */
   creatingRoot: boolean;
@@ -437,7 +465,8 @@ function FolderRows({
   onClearError: () => void;
   onCommitEditing: () => void;
   onEditEditing: () => void;
-  onMenu: (id: Uuid | null) => void;
+  onOpenMenu: (id: Uuid, anchor: HTMLElement) => void;
+  onCloseMenu: () => void;
   onMenuAction: (action: FolderMenuAction, id: Uuid) => void;
   onShortcut: (action: FolderMenuAction, id: Uuid) => void;
   onDragStart: (id: Uuid) => void;
@@ -504,16 +533,18 @@ function FolderRows({
               data-folder-id={node.id}
               data-dragging={isDragged ? 'true' : undefined}
               /* No `aria-dropeffect`: it is deprecated in ARIA 1.1 and, more to the
-                 point, drag-and-drop has no keyboard equivalent in the DOM at all.
-                 `05-ui-ux.md` §6.3's answer to that is that re-parenting is also
-                 reachable from the row menu, and the keyboard route to a specific
-                 position is a documented gap rather than a fake ARIA attribute. */
+                 point, drag-and-drop has neither a keyboard equivalent in the DOM
+                 at all nor a touch path — touch gestures never fire HTML5 drag
+                 events, so re-parenting is mouse-only in v1. The keyboard route
+                 to a specific position is a documented gap (`05-ui-ux.md` §6.3)
+                 rather than a fake ARIA attribute, and touch re-parenting waits
+                 on the same v1.1 "move to…" item. */
               style={{ paddingLeft: 6 + depth * 16 }}
               /* `draggable` only while nothing else is going on. A row being renamed
                  is an input, and dragging a menu open over the tree would otherwise
                  start a drag from whatever is underneath it. */
               draggable={
-                editing === null && menuFor === null && drag === null && !creatingRoot
+                editing === null && menu === null && drag === null && !creatingRoot
               }
               onDragStart={() => {
                 onDragStart(node.id);
@@ -545,7 +576,7 @@ function FolderRows({
                  row's own button, all reach the same menu. */
               onContextMenu={(event) => {
                 event.preventDefault();
-                onMenu(node.id);
+                onOpenMenu(node.id, event.currentTarget);
               }}
               onKeyDown={(event) => {
                 /* §7: F2 renames, Delete removes. Both go through the same handler
@@ -566,7 +597,7 @@ function FolderRows({
                    the standard way to ask for the menu of the focused item. */
                 if (event.key === 'ContextMenu') {
                   event.preventDefault();
-                  onMenu(node.id);
+                  onOpenMenu(node.id, event.currentTarget);
                   return;
                 }
 
@@ -632,7 +663,16 @@ function FolderRows({
                       event.stopPropagation();
                       onToggle(node.id);
                     }}
-                    className="flex text-[var(--text-subtle)] hover:text-[var(--text)]"
+                    /* Collapsing works from touch today — the twisty is a real
+                       button — but 16 px is a miss waiting to happen against §9's
+                       44 px touch bar. The row is 26 px tall and the name owns the
+                       rest of it, so a full-size target would steal taps from its
+                       neighbours; the invisible hit slop below roughly doubles the
+                       target on coarse pointers without moving any pixel. A 44 px
+                       target genuinely does not fit here — recorded in the M8
+                       tracker rather than faked with an overlap that misattributes
+                       taps to the rows above and below. */
+                    className="relative flex text-[var(--text-subtle)] hover:text-[var(--text)] pointer-coarse:before:absolute pointer-coarse:before:-inset-x-3 pointer-coarse:before:-inset-y-2 pointer-coarse:before:content-['']"
                   >
                     {isCollapsed ? (
                       <ChevronRight className="icon i-16" aria-hidden="true" />
@@ -647,13 +687,14 @@ function FolderRows({
               {count > 0 ? (
                 <span className="ml-auto pl-1 text-[11px] text-[var(--text-subtle)]">{count}</span>
               ) : null}
-              {menuFor === node.id ? (
+              {menu !== null && menu.id === node.id ? (
                 <FolderRowMenu
                   folderId={node.id}
                   folderName={node.name}
+                  placement={menu.placement}
                   onAction={onMenuAction}
                   onClose={() => {
-                    onMenu(null);
+                    onCloseMenu();
                   }}
                 />
               ) : (
@@ -667,8 +708,8 @@ function FolderRows({
                 <span className="ml-auto hidden flex-none pointer-fine:group-hover:flex">
                   <FolderMenuButton
                     folderName={node.name}
-                    onOpen={() => {
-                      onMenu(node.id);
+                    onOpen={(button) => {
+                      onOpenMenu(node.id, button);
                     }}
                   />
                 </span>
@@ -702,7 +743,7 @@ function FolderRows({
                 rowRefs={rowRefs}
                 editing={editing}
                 editError={editError}
-                menuFor={menuFor}
+                menu={menu}
                 drag={drag}
                 creatingRoot={creatingRoot}
                 onSelect={onSelect}
@@ -717,7 +758,8 @@ function FolderRows({
                 onClearError={onClearError}
                 onCommitEditing={onCommitEditing}
                 onEditEditing={onEditEditing}
-                onMenu={onMenu}
+                onOpenMenu={onOpenMenu}
+                onCloseMenu={onCloseMenu}
                 onMenuAction={onMenuAction}
                 onShortcut={onShortcut}
               />

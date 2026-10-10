@@ -255,4 +255,4 @@ npm run build                       # must complete with no TS errors
 - Backgrounding during typing loses nothing.
 - Airplane mode changes nothing, because nothing is online.
 - Long-press opens the context menu; 44 px touch targets respected.
-- Rotation preserves the open note and the editor scroll position.
+- Rotation preserves the open note, the editor scroll position, and the current view: rotating on the list stays on the list, rotating in a note stays in that note. The view is stack state, not a function of the width, so the breakpoint change must not choose a note.

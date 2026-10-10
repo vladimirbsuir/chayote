@@ -62,7 +62,6 @@ function renderSidebar(overrides: Partial<React.ComponentProps<typeof Sidebar>> 
     onNewNote: () => {},
     onToggleFolder: () => {},
     onCreateFolder: noWrite,
-    onCreateTag: () => {},
 onRenameFolder: noWrite,
     onDeleteFolder: noWrite,
     onMoveFolder: noMove,
@@ -97,10 +96,19 @@ describe('Sidebar', () => {
   it('shows the first-launch empty state with no seeded folders or tags', () => {
     renderSidebar({ firstLaunch: true, notes: [], folders: [], tags: [] });
 
-    expect(screen.getByTestId('first-launch-new-note')).toBeDefined();
     expect(screen.getByText('No notes yet')).toBeDefined();
     expect(screen.getByText('No folders yet')).toBeDefined();
     expect(screen.getByText('No tags yet')).toBeDefined();
+  });
+
+  it('offers no add control for tags, which are created from a note instead', () => {
+    /* A tag with no notes is invisible by the `tags_list` count rule, so a
+       sidebar create control would appear to do nothing. Creation lives in the
+       note's tag editor (§6.4); the section header carries no button. */
+    renderSidebar();
+
+    expect(screen.getByRole('button', { name: 'New folder' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'New tag' })).toBeNull();
   });
 
   it('distinguishes an empty pinned filter from an empty all-notes view', () => {
@@ -135,7 +143,6 @@ describe('Sidebar', () => {
         onNewNote={() => {}}
         onToggleFolder={() => {}}
         onCreateFolder={noWrite}
-        onCreateTag={() => {}}
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}
@@ -169,7 +176,6 @@ describe('Sidebar', () => {
         onNewNote={() => {}}
         onToggleFolder={() => {}}
         onCreateFolder={noWrite}
-        onCreateTag={() => {}}
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}
@@ -208,7 +214,6 @@ describe('Sidebar', () => {
         onNewNote={() => {}}
         onToggleFolder={() => {}}
         onCreateFolder={noWrite}
-        onCreateTag={() => {}}
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}
@@ -308,6 +313,29 @@ describe('Sidebar while searching', () => {
 
     const marked = screen.getByTestId('sidebar').querySelector('[data-testid="note-snippet"] mark');
     expect(marked?.textContent).toBe('roadmap');
+  });
+
+  it('fills the column with no divider when the width is null (mobile list view)', () => {
+    /* Found on a phone: the desktop width ended the list early with a stray
+       border at the viewport edge (`05-ui-ux.md` §2.4 draws no divider there).
+       jsdom computes no layout, so this asserts the classes and the style the
+       layout comes from rather than any geometry; `e2e/mobile.spec.ts` measures
+       the real box at 360 px. */
+    renderSidebar({ width: null });
+
+    const sidebar = screen.getByTestId('sidebar');
+    expect(sidebar.style.width).toBe('');
+    expect(sidebar.className).toContain('flex-1');
+    expect(sidebar.className).not.toContain('border-r');
+    expect(sidebar.className).not.toContain('flex-none');
+  });
+
+  it('keeps the sized pane with its divider on desktop', () => {
+    renderSidebar({ width: 320 });
+
+    const sidebar = screen.getByTestId('sidebar');
+    expect(sidebar.style.width).toBe('320px');
+    expect(sidebar.className).toContain('border-r');
   });
 });
 

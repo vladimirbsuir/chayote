@@ -33,7 +33,11 @@ export type SidebarSearch = {
 
 type SidebarProps = {
   selection: Selection;
-  width: number;
+  /** Desktop/tablet pane width in px. Null in the mobile list view, where the
+      sidebar is the whole column (`05-ui-ux.md` §2.4) rather than a sized pane
+      with a divider — a fixed width there leaves a dead strip and a stray
+      border at the viewport edge. */
+  width: number | null;
   folders: FolderNode[] | undefined;
   tags: TagWithCount[] | undefined;
   notes: NoteRow[] | undefined;
@@ -69,7 +73,6 @@ type SidebarProps = {
       Returns a promise so the input can stay open on a rejected write, rather than
       closing and losing what was typed. */
   onCreateFolder: (name: string, parentId: Uuid | null) => Promise<void>;
-  onCreateTag: () => void;
   onRenameFolder: (id: Uuid, name: string) => Promise<void>;
   onDeleteFolder: (id: Uuid) => Promise<void>;
   /** §6.3: drag to re-parent and reorder. `position` is sibling-local and the
@@ -107,7 +110,6 @@ export function Sidebar({
   onEmptyTrash,
   onToggleFolder,
   onCreateFolder,
-  onCreateTag,
   onRenameFolder,
   onDeleteFolder,
   onMoveFolder,
@@ -135,8 +137,10 @@ export function Sidebar({
     <aside
       aria-label="Sidebar"
       data-testid="sidebar"
-      style={{ width }}
-      className="flex flex-none flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--surface-raised)]"
+      style={width === null ? undefined : { width }}
+      className={`flex flex-col overflow-hidden bg-[var(--surface-raised)] ${
+        width === null ? 'min-h-0 flex-1' : 'flex-none border-r border-[var(--border)]'
+      }`}
     >
       <Filters selection={selection} onSelect={onSelect} />
 
@@ -170,11 +174,14 @@ export function Sidebar({
       </section>
 
       <section aria-label="Tags" className="min-h-0 overflow-hidden">
+        {/* No add control here: a tag with no notes is invisible by the
+            `tags_list` count rule (`03-data-model.md` §5), so creating one from
+            this section would appear to do nothing. Tags are created by typing
+            a new name into a note's tag editor (§6.4). */}
         <SectionHead
           icon={<Hash className="icon i-16" aria-hidden="true" />}
           label="Tags"
           singular="tag"
-          onAdd={onCreateTag}
         />
         <div className="max-h-[25vh] overflow-y-auto px-2 pb-[10px]">
           {tags === undefined || tags.length === 0 ? (
@@ -359,21 +366,25 @@ function SectionHead({
   icon: ReactNode;
   label: string;
   singular: string;
-  onAdd: () => void;
+  /** Absent where there is nothing to add in place — the Tags section, where a
+      fresh tag would be invisible until a note carries it. */
+  onAdd?: () => void;
 }) {
   return (
     <div className="flex items-center gap-[6px] px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
       <span className="flex text-[var(--text-subtle)]">{icon}</span>
       {label}
-      <button
-        type="button"
-        aria-label={`New ${singular}`}
-        title={`New ${singular}`}
-        onClick={onAdd}
-        className="ml-auto grid h-5 w-5 place-items-center rounded bg-transparent text-[var(--text-subtle)] transition-colors hover:bg-[var(--surface-sunken)] hover:text-[var(--accent)]"
-      >
-        <Plus className="icon i-16" aria-hidden="true" />
-      </button>
+      {onAdd === undefined ? null : (
+        <button
+          type="button"
+          aria-label={`New ${singular}`}
+          title={`New ${singular}`}
+          onClick={onAdd}
+          className="ml-auto grid h-5 w-5 place-items-center rounded bg-transparent text-[var(--text-subtle)] transition-colors hover:bg-[var(--surface-sunken)] hover:text-[var(--accent)]"
+        >
+          <Plus className="icon i-16" aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 }
