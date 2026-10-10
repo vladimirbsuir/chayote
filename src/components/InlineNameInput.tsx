@@ -40,12 +40,27 @@ export function InlineNameInput({
 }: InlineNameInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
+  /* Enter and blur fire for the same dismissal: the soft keyboard's Enter both
+     commits and drops focus, and the blur handler below commits again. Without
+     the guard one keystroke writes twice — and folder names carry no uniqueness
+     constraint to catch the second write, so a single Enter made two folders on
+     a phone. Reset on change so a commit refused with `VALIDATION` stays
+     retryable: after a failure the input stays open, and blocking the retry
+     would strand the user's text. */
+  const committedRef = useRef(false);
+
   useEffect(() => {
     const input = inputRef.current;
     if (input === null) return;
     input.focus();
     input.select();
   }, []);
+
+  const commitOnce = (): void => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    onCommit();
+  };
 
   return (
     <div className="px-[6px] py-[3px]">
@@ -58,12 +73,13 @@ export function InlineNameInput({
         value={value}
         aria-invalid={error !== null}
         onChange={(event) => {
+          committedRef.current = false;
           onChange(event.target.value);
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             event.preventDefault();
-            onCommit();
+            commitOnce();
             return;
           }
           if (event.key === 'Escape') {
@@ -75,10 +91,10 @@ export function InlineNameInput({
           }
         }}
         /* Losing focus commits rather than cancels: a user who clicks away has
-           still named the thing, and cancelling their work because they reached
-           for something else is worse than committing a name they typed. */
+            still named the thing, and cancelling their work because they reached
+            for something else is worse than committing a name they typed. */
         onBlur={() => {
-          onCommit();
+          commitOnce();
         }}
         className={`h-[26px] w-full rounded-[var(--r-input)] border bg-[var(--surface)] px-[6px] text-[13px] text-[var(--text)] outline-none ${
           error === null ? 'border-[var(--border-strong)]' : 'border-[var(--danger)]'

@@ -62,7 +62,6 @@ function renderSidebar(overrides: Partial<React.ComponentProps<typeof Sidebar>> 
     onNewNote: () => {},
     onToggleFolder: () => {},
     onCreateFolder: noWrite,
-    onCreateTag: () => {},
 onRenameFolder: noWrite,
     onDeleteFolder: noWrite,
     onMoveFolder: noMove,
@@ -97,10 +96,19 @@ describe('Sidebar', () => {
   it('shows the first-launch empty state with no seeded folders or tags', () => {
     renderSidebar({ firstLaunch: true, notes: [], folders: [], tags: [] });
 
-    expect(screen.getByTestId('first-launch-new-note')).toBeDefined();
     expect(screen.getByText('No notes yet')).toBeDefined();
     expect(screen.getByText('No folders yet')).toBeDefined();
     expect(screen.getByText('No tags yet')).toBeDefined();
+  });
+
+  it('offers no add control for tags, which are created from a note instead', () => {
+    /* A tag with no notes is invisible by the `tags_list` count rule, so a
+       sidebar create control would appear to do nothing. Creation lives in the
+       note's tag editor (§6.4); the section header carries no button. */
+    renderSidebar();
+
+    expect(screen.getByRole('button', { name: 'New folder' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'New tag' })).toBeNull();
   });
 
   it('distinguishes an empty pinned filter from an empty all-notes view', () => {
@@ -135,7 +143,6 @@ describe('Sidebar', () => {
         onNewNote={() => {}}
         onToggleFolder={() => {}}
         onCreateFolder={noWrite}
-        onCreateTag={() => {}}
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}
@@ -169,7 +176,6 @@ describe('Sidebar', () => {
         onNewNote={() => {}}
         onToggleFolder={() => {}}
         onCreateFolder={noWrite}
-        onCreateTag={() => {}}
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}
@@ -208,7 +214,6 @@ describe('Sidebar', () => {
         onNewNote={() => {}}
         onToggleFolder={() => {}}
         onCreateFolder={noWrite}
-        onCreateTag={() => {}}
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}

@@ -541,7 +541,6 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
       }}
       onToggleFolder={useSettingsStore.getState().toggleFolderCollapsed}
       onCreateFolder={createFolder}
-      onCreateTag={NOOP}
       onRenameFolder={renameFolder}
       onDeleteFolder={deleteFolder}
       onMoveFolder={moveFolder}

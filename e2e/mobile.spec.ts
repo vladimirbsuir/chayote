@@ -196,3 +196,40 @@ test.describe('narrow desktop window', () => {
     await expect(page.getByTestId('app-shell')).toHaveAttribute('data-breakpoint', 'tablet');
   });
 });
+
+test.describe('mobile touch', () => {
+  test.use({
+    viewport: MOBILE,
+    userAgent: ANDROID_UA,
+    hasTouch: true,
+    isMobile: true,
+  });
+
+  test('the folder menu opens fully inside the viewport', async ({ page }) => {
+    /* The defect this file keeps finding: the in-row menu arrived clipped to a
+       sliver by the tree's scroll container, and only a phone showed it. The
+       long-press gesture itself is proven on hardware (`input swipe x y x y
+       900` opens it); what this pins is the portal contract at a phone
+       viewport — the whole panel, Rename through Delete, inside the screen —
+       through the right-click, which reaches the same `openMenu` measurement. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    const row = page.getByTestId('folder-row').filter({ hasText: 'Work' });
+    await expect(row).toBeVisible();
+    await row.click({ button: 'right' });
+
+    const menu = page.getByTestId('folder-menu');
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox, 'folder menu has no box').not.toBeNull();
+    if (menuBox === null) return;
+    expect(menuBox.x, 'menu starts off-screen').toBeGreaterThanOrEqual(0);
+    expect(menuBox.y, 'menu starts off-screen').toBeGreaterThanOrEqual(0);
+    expect(menuBox.x + menuBox.width, 'menu overflows the viewport').toBeLessThanOrEqual(
+      MOBILE.width,
+    );
+    expect(menuBox.y + menuBox.height, 'menu overflows the viewport').toBeLessThanOrEqual(
+      MOBILE.height,
+    );
+  });
+});
