@@ -364,6 +364,8 @@ Untitled · Work · #work +2 · [pin]   342 words    Saved
 | Word count | Derived at save |
 | Save state | Frontend save state machine, §5.2 |
 
+**This is the desktop row.** Below 768 px it carries folder, tags, an abbreviated word count and the save state only — the title is in the bar above and the pin is in that bar's overflow menu. `05-ui-ux.md` §2.4 has the reasoning and the measurement; at 360 px all six elements were present and all six were unreadable. The mobile row is also 44 px rather than 28, so §5.2's states and §9's slots have a 44 px touch target as `05-ui-ux.md` §9 requires on Android.
+
 M2 ships title, word count, and save state. The folder, tag and pin elements need
 M4's data and arrive with it, rather than as controls that do nothing.
 

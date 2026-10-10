@@ -250,15 +250,16 @@ is in `docs/11-verification.md` §3.5a: the real SQLite backend including migrat
 FTS5 and WAL on the device filesystem, derivation, survival of a hard `force-stop`, the
 `Pause` flush, `Resume`, rotation, and `adjustResize` observed rather than merely
 declared. It also found a defect the browser could not — the app drew under the system
-status and navigation bars — which is fixed.
+status and navigation bars — which is fixed. **The back button is now built too**
+— ADR-020 is the decision it needed, since Tauri 2.12 has no back-button event
+JavaScript can reach — **and the mobile editor's cramped status bar is fixed**: the
+user pointed at it and the prototype already solved it, so below 768 px the row
+carries folder, tags, an abbreviated word count and the save state, while the pin
+and the delete action live in the "three dots" overflow menu that finally works.
 
 **What is still outstanding:**
 
-- **The back button**, which is the reason this section exists. `06-platform.md` §4.4
-  prescribes a Tauri back-button handler and rejects `popstate`; Tauri 2.12 has no
-  JavaScript-reachable back-button event, and §4.4 now explains that from the source.
-  It needs an ADR before it can be built.
-- **Long-press, 44 px touch targets, and airplane mode** — unmeasured.
+- **Long-press and airplane mode** — need a human thumb or a permission this shell does not have. Recorded as unmeasured in `§3.5a` rather than folded into "verified on device".
 - **The Android 15+ `adjustResize` question.** This device is Android 13, so it could
   not settle whether `targetSdk 37` plus `enableEdgeToEdge()` makes the attribute inert
   on a newer phone. Recorded as unmeasured rather than folded into "verified on device".

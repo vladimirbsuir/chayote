@@ -160,7 +160,8 @@ The fix is `viewport-fit=cover` in `index.html` plus `env(safe-area-inset-*)` pa
 on `#root` in `base.css`, via the `--inset-top` / `--inset-bottom` tokens.
 `viewport-fit=cover` is load-bearing and not decoration: without it both `env()`
 values are `0` on Android and the rule silently does nothing. A desktop browser also
-reports `0`, so the rule is inert there.
+reports `0`, so the rule is inert there. ADR-020 records why this is CSS and not a
+`WindowInsetsCompat` listener in the generated Kotlin.
 
 ### 4.4 Back navigation
 
@@ -175,33 +176,21 @@ The Android back gesture must not exit the app from the editor.
 Implement with a Tauri back-button handler, not by listening for `popstate`. A
 popstate-based implementation breaks on gesture navigation.
 
-**This is the one requirement M7 could not implement as written, and the reason is in
-Tauri's source.** There is no back-button event reachable from JavaScript in Tauri
-2.12:
+**Tauri 2.12 has no such handler reachable from JavaScript, and this is how it is
+actually built** — **ADR-020** carries the full reasoning, the rejected alternatives, and
+the source evidence:
 
-- `AppPlugin.kt` registers an `OnBackPressedCallback` for the `back-button` event,
-  and **when a listener exists it dispatches instead of taking its default** — which is
-  the behaviour §4.4 wants. But `hasListener()` reads `Plugin.kt`'s private `listeners`
-  map, populated only by the plugin's own `registerListener` command. A JavaScript
-  `listen('back-button', …)` goes through Rust's event system instead and never appears
-  in that map, so the check always fails.
-- `Plugin.trigger()` sends only to those same Java channels, so even a listener that did
-  register would not receive the event.
-- `WryActivity.handleBackNavigation` is the other native hook; `TauriActivity` sets it
-  `false`, and `true` only installs wry's own `goBack`-or-finish callback. It does not
-  reach the web layer either.
+- `AppPlugin.hasListener` reads a Java-only map that a JS `listen()` never populates,
+  `Plugin.trigger` sends only to Java channels, and `WryActivity.handleBackNavigation`
+  installs `goBack`-or-finish rather than reaching the web layer.
+- So `MainActivity.kt` installs the callback from `onWebViewCreate` and asks the web
+  layer whether it consumed the press. **Verified on device at M7**: back in the editor
+  returns to the note list, and at the root the press is handed back to the platform.
+- The JS bridge is one function installed by `ipc.ts`, so R6 still has exactly one path
+  to the platform.
 
-Measured on a device with a JavaScript listener in place: the press fell through to
-`webView.goBack()`, the WebView had no history, and **back in the editor did nothing**.
-
-So the mechanism that works is Kotlin — an `OnBackPressedCallback` installed from
-`MainActivity.onWebViewCreate`, which `WryActivity` exposes precisely for this — either
-pushing a WebView history entry or evaluating JavaScript. That is a change to how the
-frontend meets the platform, and it is **not yet decided**; it needs an ADR, because it
-either puts a second path to the platform outside `ipc.ts` (against R6's structure) or
-revises this section's explicit rejection of `popstate`. It is left unimplemented and
-recorded rather than half-built, because a handler that looks like a fix and does
-nothing is worse than the documented gap.
+The rule that survives is the one that was always the point: **back walks the view
+stack, and at the root the platform decides.**
 
 ### 4.5 Lifecycle
 

@@ -88,6 +88,12 @@ Back behaviour: the Android system back button pops the view stack. At the root 
 
 The editor view has its own top bar because it needs a back affordance, the note title, and a delete action. It does not reuse the desktop top bar.
 
+**The editor's status bar is a different row on mobile, and M7 measured what the desktop one costs at 360 px.** `04-editor.md` §9's five-element row is the *desktop* row. Rendered unchanged on a phone, every one of them failed at once: the title truncated to an ellipsis, the folder to a single letter, and `342 words` wrapped onto a second line that pushed the save state out of the row. Nothing was missing; everything was unreadable, and no DOM assertion could have caught it.
+
+So below 768 px the row carries **folder, tags, `342 w`, and Saved** — what `prototype/index.html` §3 already drew. The title is absent because the bar above it carries the title, and the pin is absent because §2.4 gives the editor its own bar for actions and the pin goes in that bar's overflow menu, beside the delete action. §9's row is unchanged.
+
+The row is also **44 px tall on mobile rather than 28**, because §9 requires 44 × 44 px touch targets on Android and a 28 px row cannot contain one. The bar grows rather than the target overflowing a row too short to hold it, which would look wrong to someone who can see exactly where the tap lands.
+
 ### 2.5 Editor measure
 
 Body text is constrained to a 720 px column, centred in the editor pane, with 32 px minimum padding. This is a deliberate readability limit. ProseMirror's default `white-space: pre-wrap` plus `word-break: break-word` handles long unbroken strings and long words without horizontal scrolling.
