@@ -1,0 +1,54 @@
+name: Release
+
+# M8 packaging: every bundle in 06-platform.md §3.7 is produced on a clean
+# runner, one job per OS. Run by hand from the Actions tab, or by pushing a
+# tag like v0.1.0. The Android APK is intentionally not built here: it needs
+# the NDK, the Rust Android targets and a signing key, and M7 already proved
+# the documented local build (`npx tauri android build --apk`) on hardware.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  desktop:
+    name: Bundle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: app,dmg
+          - os: ubuntu-latest
+            bundles: deb,appimage
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux webview dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+      - run: npm ci
+      - run: npx tauri build --bundles ${{ matrix.bundles }}
+      - name: Portable executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npx tauri build --no-bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chayote-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/
+            src-tauri/target/release/chayote.exe
