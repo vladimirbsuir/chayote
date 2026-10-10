@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { foldersApi, notesApi, windowApi } from './lib/ipc';
+import { foldersApi, installBackHandler, notesApi, windowApi } from './lib/ipc';
 import { isInsideSubtree } from './components/folderRows';
 import { useNow, useNotes } from './hooks/useNotes';
 import { useSearch } from './hooks/useSearch';
@@ -30,7 +30,7 @@ import { nextTheme } from './lib/theme';
 import { Sidebar } from './components/Sidebar';
 import { DesktopLayout, MobileLayout, TabletLayout } from './layout/DesktopLayout';
 import { useBreakpoint } from './layout/useBreakpoint';
-import { currentView, popView, pushView } from './layout/viewStack';
+import { canPop, currentView, popView, pushView } from './layout/viewStack';
 import type { ViewStack } from './layout/viewStack';
 import type { Uuid } from './types/note';
 import type { NoteSummary } from './types/ipc';
@@ -415,7 +415,44 @@ useEffect(() => {
   overlayOpenRef.current = overlayOpen;
 }, [overlayOpen]);
 
-useEffect(() => {
+const confirmRef = useRef(confirm);
+  useEffect(() => {
+    confirmRef.current = confirm;
+  }, [confirm]);
+  const settingsOpenRef = useRef(settingsOpen);
+  useEffect(() => {
+    settingsOpenRef.current = settingsOpen;
+  }, [settingsOpen]);
+
+  /* `06-platform.md` §4.4: back dismisses an open dialog, else pops the view stack,
+     and at the root returns false so `MainActivity.kt` hands the press back to the
+     platform. The three cases are in that order because a dialog is modal — popping
+     the stack behind one would leave it floating over a different view.
+
+     Registered once and reading refs, rather than re-registering per state change:
+     the bridge is a window property the activity calls on every press, and swapping
+     it mid-press would be a race. `§4.4` explains why this is Kotlin at all. */
+  const stackRef = useRef(stack);
+  useEffect(() => {
+    stackRef.current = stack;
+  }, [stack]);
+  useEffect(() =>
+    installBackHandler(() => {
+      if (confirmRef.current !== null) {
+        setConfirm(null);
+        return true;
+      }
+      if (settingsOpenRef.current) {
+        setSettingsOpen(false);
+        return true;
+      }
+      if (!canPop(stackRef.current)) return false;
+      setStack(popView);
+      return true;
+    }),
+  );
+
+  useEffect(() => {
     if (!drawerOpen) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return;
@@ -519,6 +556,17 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
           noteId={openNoteId}
           selectionKey={selectionKey(selection)}
           onClose={mobile ? closeEditor : undefined}
+          /* Only where there is no note row to carry it: §2.4 gives the mobile editor
+             bar its delete action, and on desktop the row menu already owns the verb.
+             The trash selection is excluded for §6.2's reason — a live row must not
+             offer a second delete, and a trashed one must not be deleted again. */
+          onTrash={
+            mobile && openNoteId !== null && selection.kind !== 'trash'
+              ? () => {
+                  softDeleteWithToast(openNoteId);
+                }
+              : undefined
+          }
         />
       </Suspense>
     </main>

@@ -2,14 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Editor } from '@tiptap/core';
-import { AlertCircle, ArrowLeft, MoreHorizontal, RotateCw } from 'lucide-react';
+import { AlertCircle, ArrowLeft, RotateCw } from 'lucide-react';
 import { notesApi, tagsApi } from '../lib/ipc';
 import { useAutosave } from '../hooks/useAutosave';
 import { useFolders, folderNamesById } from '../hooks/useFolders';
 import { useTags } from '../hooks/useTags';
+import { useTogglePin } from '../hooks/useTogglePin';
 import { openNote, selectSaveState, useEditorStore } from '../stores/editor';
 import { qk } from '../queries/keys';
 import { IconButton } from './IconButton';
+import { EditorOverflowMenu } from './EditorOverflowMenu';
 import type { JsonDoc, Uuid } from '../types/note';
 import type { Note, NoteSummary, SaveNoteInput } from '../types/ipc';
 import { NoteEditor } from '../editor/NoteEditor';
@@ -28,6 +30,10 @@ type EditorPaneProps = {
   /** Backs the mobile editor view's back affordance (§2.4). A no-op on desktop,
       where there is no view stack to pop. */
   onClose?: () => void;
+  /** `05-ui-ux.md` §2.4: the mobile editor bar carries "a delete action". Undefined on
+      desktop, where the note row's own menu owns it and two controls for one verb is
+      the duplication §6.2 warns about. */
+  onTrash?: () => void;
 };
 
 const UNTITLED = 'Untitled';
@@ -57,7 +63,7 @@ type Active = {
  * editor at the moment of the write, which keeps a large document off the render
  * path entirely.
  */
-export function EditorPane({ noteId, selectionKey, onClose }: EditorPaneProps) {
+export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPaneProps) {
   const queryClient = useQueryClient();
   const activeRef = useRef<Active>({ folderId: null, tagIds: [], isPinned: false });
   /* Mirrors `activeRef.isPinned` as state. The status-bar control has to re-render
@@ -269,18 +275,25 @@ const createTag = useCallback(
     [autosave, queryClient, toggleTag],
   );
 
+  /* Pinning goes through `useTogglePin`, the same hook the note card uses, rather
+     than calling `notesApi.setPinned` directly.
+
+     M7 found this on a device: the editor pinned the note, the editor's own state
+     followed, and the **Pinned filter still said zero notes**. The card path patches
+     every `['notes']` cache and invalidates the list, because a pin reorders every
+     list in the app; the editor's copy did neither, so every list kept serving a
+     `is_pinned` of 0. One write, one cache policy — two implementations of "set the
+     pin" is how they drift apart. The local mirror is still set first so the editor
+     reacts on the keystroke rather than after the round trip. */
+  const { togglePin: writePin } = useTogglePin();
+
   const togglePin = useCallback((): void => {
     if (noteId === null) return;
     const next = !pinned;
     setPinned(next);
     activeRef.current = { ...activeRef.current, isPinned: next };
-    void notesApi.setPinned(noteId, next).catch(() => {
-      /* Put both back, so a failed write cannot leave the editor showing a pin the
-         database does not have. The next autosave then writes the truth. */
-      setPinned(!next);
-      activeRef.current = { ...activeRef.current, isPinned: !next };
-    });
-  }, [noteId, pinned]);
+    writePin(noteId, next);
+  }, [noteId, pinned, writePin]);
 
   useEffect(() => {
     openNote(noteId);
@@ -393,6 +406,7 @@ status={
           onEditTags={(anchor) => {
             setPopover({ kind: 'tags', anchor, placement: popoverPlacement(anchor) });
           }}
+          variant={onClose === undefined ? 'desktop' : 'mobile'}
         />
       }
       popover={
@@ -430,7 +444,13 @@ status={
                 Your text is still on this device. The save will be retried automatically.
               </span>
             ) : null}
-            <MobileEditorBar title={displayTitle(data.title)} onBack={onClose} />
+            <MobileEditorBar
+              title={displayTitle(data.title)}
+              onBack={onClose}
+              isPinned={pinned}
+              onTogglePin={togglePin}
+              onTrash={onTrash ?? NOOP}
+            />
             <NoteEditor
               key={data.id}
               doc={data.doc}
@@ -484,7 +504,19 @@ function Centred({ children }: { children: ReactNode }) {
    `display: none` boundary, which moves focus out of the editor — the caret is
    in ProseMirror, not in the button, so `Ctrl+Enter` then toggles nothing. Not
    rendering is also the honest answer: there is no back affordance to offer. */
-function MobileEditorBar({ title, onBack }: { title: string; onBack?: () => void }) {
+function MobileEditorBar({
+  title,
+  onBack,
+  isPinned,
+  onTogglePin,
+  onTrash,
+}: {
+  title: string;
+  onBack?: () => void;
+  isPinned: boolean;
+  onTogglePin: () => void;
+  onTrash: () => void;
+}) {
   if (onBack === undefined) return null;
   return (
     <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2">
@@ -492,9 +524,7 @@ function MobileEditorBar({ title, onBack }: { title: string; onBack?: () => void
         <ArrowLeft className="icon i-24" aria-hidden="true" />
       </IconButton>
       <span className="flex-1 truncate text-[14px] font-semibold">{title}</span>
-      <IconButton label="More" size="mobile">
-        <MoreHorizontal className="icon i-24" aria-hidden="true" />
-      </IconButton>
+      <EditorOverflowMenu isPinned={isPinned} onTogglePin={onTogglePin} onTrash={onTrash} />
     </header>
   );
 }
