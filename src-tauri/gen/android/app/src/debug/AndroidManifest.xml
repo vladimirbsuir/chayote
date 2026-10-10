@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Debug-only. `tauri android dev` serves the WebView from the local dev
+         server, which needs a socket. A release build loads from the bundled
+         assets and has no INTERNET permission at all — see
+         06-platform.md §4.2 and src/main/AndroidManifest.xml. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>
