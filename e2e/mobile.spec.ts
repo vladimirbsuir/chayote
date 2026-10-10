@@ -98,6 +98,23 @@ test.describe('mobile editor', () => {
     );
   });
 
+  test('deleting the open note returns to the list, not the desktop empty state', async ({
+    page,
+  }) => {
+    /* Found on a phone: deleting the open note closed it but left the editor
+       view on the stack, so the phone showed the desktop "No note open …
+       Ctrl+N" pane instead of the list. The pop lives next to the editor
+       close in `onOpenNoteGone`, so this pins the visible view, not the
+       stack value. */
+    await openEditor(page);
+
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('editor-overflow-trash').click();
+
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await expect(page.getByText('No note open')).toHaveCount(0);
+  });
+
   test('a pin made in the editor reaches the Pinned filter', async ({ page }) => {
     /* The regression M7 found on the device: `EditorPane` called `notesApi.setPinned`
        directly, so it updated its own state and left every `['notes']` cache stale —

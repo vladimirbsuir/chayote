@@ -118,6 +118,12 @@ function Shell() {
     onOpenNoteGone: (goneId) => {
       if (goneId === null || goneId === useSelectionStore.getState().openNoteId) {
         setOpenNote(null);
+        /* `05-ui-ux.md` §2.4: on mobile the editor is a pushed view, not a side
+           pane — closing the note without popping strands the user on the
+           desktop "No note open" empty state instead of the list. Found on a
+           phone: deleting the open note showed that pane. At the root the pop
+           is a no-op, so deleting from the list view is unaffected. */
+        if (mobile) setStack(popView);
         if (useSelectionStore.getState().selection.kind === 'folder') {
           setSelection({ kind: 'all' });
         }
