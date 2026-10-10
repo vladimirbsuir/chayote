@@ -10,6 +10,10 @@
 chayote/
 ├── README.md
 ├── LICENSE                    # MIT, Copyright (c) 2026 Chayote contributors
+├── INSTALL.md                   # end-user install guide, separate from the spec
+├── .github/workflows/
+│   ├── ci.yml                   # gates on every push: typecheck, lint, tests, clippy, e2e
+│   └── release.yml              # M8: clean-runner desktop bundles (nsis, app+dmg, deb+appimage)
 ├── docs/                              # this specification
 │   ├── 01-product.md
 │   ├── 02-architecture.md
@@ -40,12 +44,15 @@ chayote/
 │   │   ├── settings.ts                # Tauri store; localStorage fallback outside Tauri
 │   │   ├── debounce.ts
 │   │   ├── relativeTime.ts
-│   │   └── sanitize.ts                # DOMPurify config
+│   │   ├── sanitize.ts                # DOMPurify config
+│   │   ├── contrast.ts                # M6: accent contrast measurement for the settings dialog
+│   │   └── theme.ts                   # M6: theme resolution (light/dark/system)
 │   ├── mock/                          # browser fallback backend, never imported by components
 │   │   ├── adapter.ts                 # implements every command in 02-architecture.md §7
 │   │   ├── derive.ts                  # title, excerpt, word_count over JsonDoc
 │   │   ├── errors.ts                  # MockBackendError carrying the AppError code
 │   │   ├── fixtures.ts                # seeded notes; ids come from generate.ts
+│   │   ├── search.ts                  # M5: prefix matching, bm25 weighting, <mark> snippets
 │   │   └── generate.ts                # 10 000-note generator for scroll tests
 │   ├── test/
 │   │   └── setup.ts                   # jsdom stubs: Range for ProseMirror, rects for the virtualiser
@@ -64,7 +71,9 @@ chayote/
 │   │   ├── useFolders.ts
 │   │   ├── useTags.ts
 │   │   ├── useSearch.ts
-│   │   └── useAutosave.ts
+│   │   ├── useAutosave.ts
+│   │   ├── useTogglePin.ts            # M7: the one pin path for cards and the editor
+│   │   └── useTrashActions.ts         # per-selection trash actions for the row menu
 │   ├── editor/
 │   │   ├── extensions.ts              # TipTap extension set
 │   │   ├── editorProps.ts
@@ -74,23 +83,32 @@ chayote/
 │   │   └── NoteEditor.tsx              # one instance per note_id; see §6
 │   ├── components/                    # presentational, one responsibility each
 │   │   ├── TopBar.tsx
-│   │   ├── Sidebar.tsx                # filters + folder tree + tag rows + list; M3
+│   │   ├── Sidebar.tsx                # filters + folder tree + tag rows + list; M3. The tag
+│   │   │                             # list renders here; there is no TagList.tsx
 │   │   ├── FolderTree.tsx             # M4: drag to re-parent, inline create
-│   │   ├── TagList.tsx                # M4: inline rename, counts
+│   │   ├── folderRows.ts              # M4: flattened rows, drop-band geometry, slot arithmetic
+│   │   ├── InlineNameInput.tsx        # M4: in-place folder create/rename input
+│   │   ├── FolderRowMenu.tsx          # M4: per-row folder overflow menu
 │   │   ├── NoteList.tsx               # M3: virtualised, measured rows
 │   │   ├── NoteCard.tsx               # M3
+│   │   ├── NoteRowMenu.tsx            # M4: portalled, viewport-positioned, keyed by note
+│   │   ├── UndoToast.tsx              # M4: six-second delete undo, names the note
 │   │   ├── EditorPane.tsx
 │   │   ├── EditorStatusBar.tsx
-│   │   ├── TagEditor.tsx
-│   │   ├── FolderPicker.tsx
+│   │   ├── StatusPopovers.tsx         # M4: FolderPicker + TagEditor, one listbox component
+│   │   ├── popoverPlacement.ts        # click-handler geometry for the status-bar popovers
+│   │   ├── EditorOverflowMenu.tsx     # M7: mobile three-dots menu (pin, trash)
+│   │   ├── summaryOf.ts               # M5: NoteSummary patching from save responses
 │   │   ├── ConfirmDialog.tsx
 │   │   ├── SettingsDialog.tsx
+│   │   ├── useDialogFocus.ts          # M6: shared focus trap for dialogs
+│   │   ├── useUndoToast.ts            # M4: single-toast state with timer replacement
 │   │   ├── IconButton.tsx             # icon + optional aria-label, 32/44px hit area
 │   │   ├── EmptyState.tsx             # title + cause + optional action, 05-ui-ux.md §8
 │   │   └── ThemeToggle.tsx
 │   ├── layout/
-│   │   ├── DesktopLayout.tsx          # two panes + the resize separator
-│   │   ├── MobileLayout.tsx           # single pane, one view at a time
+│   │   ├── DesktopLayout.tsx          # all three layouts: desktop panes, tablet drawer,
+│   │   │                             # mobile single pane. There is no MobileLayout.tsx
 │   │   ├── breakpoints.ts             # §9 ranges as pure functions, tested
 │   │   ├── useBreakpoint.ts           # the one resize listener
 │   │   └── viewStack.ts               # in-app navigation stack reducer
@@ -136,7 +154,8 @@ chayote/
         │   ├── tags.rs
         │   └── search.rs
         ├── tests.rs                   # integration tests over a temp database
-        └── sync/                      # empty in v1; reserved for 07-sync-plan.md
+        └── sync/                      # reserved for 07-sync-plan.md; created when the
+                                        # sync phase starts, absent in v1
 ```
 
 `services/` holds derivation and search rather than per-entity modules: the
@@ -161,7 +180,7 @@ without adding a boundary anything could enforce.
 
 Rust booleans are `is_*` / `has_*`. Database booleans are `is_*` / `has_*` and store 0/1.
 
-**No comments in code.** The specification is the documentation. A comment that restates the code is noise; a comment that explains a non-obvious constraint belongs in `docs/` and is referenced from the type or function name where possible. This is a deliberate rule, not a preference: comments drift out of date and the docs are reviewed.
+**No comments in code, with one narrow exception.** The specification is the documentation. A comment that restates the code is noise; a comment that explains a non-obvious constraint belongs in `docs/` and is referenced from the type or function name where possible. The exception is a brief trap warning at the exact site where the trap is: one or two lines naming the constraint and the document section that decides it (e.g. why a write bypasses the autosave comparison, per `04-editor.md` §9). Such a comment never carries the rationale itself — that lives once, in `docs/`. This is a deliberate rule, not a preference: comments drift out of date and the docs are reviewed.
 
 ## 3. TypeScript
 

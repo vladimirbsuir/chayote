@@ -233,6 +233,7 @@ on `docs/07-sync-plan.md`, which would otherwise cost a rewrite of the write pat
 chayote/
 ├── README.md                  ← you are here; also the agent onboarding doc (§4)
 ├── LICENSE                    ← MIT
+├── INSTALL.md                   ← end-user install guide, separate from the spec
 ├── docs/                      ← specification, 11 documents
 ├── prototype/index.html       ← visual source of truth, permanent (ADR-016)
 ├── src/                       ← React frontend

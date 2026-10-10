@@ -240,19 +240,18 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 | Component | Responsibility |
 |-----------|----------------|
 | `TopBar` | Search field, new note, theme toggle, overflow menu. Present on desktop; variant `Mobile` on Android list. |
-| `Sidebar` | Filters, `FolderTree`, `TagList`, `NoteList`. Owns selection state. |
-| `FolderTree` | Recursive tree. Keyboard navigable. Drag to re-parent and reorder. |
-| `TagList` | Flat list with counts. Inline rename on double-click. |
+| `Sidebar` | Filters, tag rows with counts, `NoteList`. The tag list renders here; there is no `TagList.tsx`. Owns selection state. |
+| `FolderTree`, `folderRows.ts` | Recursive tree. Keyboard navigable. Drag to re-parent and reorder. |
 | `NoteList` | Virtualised list. Renders `NoteSummary`, never loads full documents. |
 | `NoteCard` | Title, excerpt, timestamp, pinned indicator. Optional folder name when the selection is All or Pinned. |
+| `EditorOverflowMenu` | Mobile three-dots menu: pin and trash for the open note. |
 | `EditorPane` | Owns the TipTap instance, autosave state machine, status bar. |
 | `EditorStatusBar` | Folder, tags, word count, save state (`04-editor.md` §9). |
-| `TagEditor` | Popover for adding and removing tags on the current note. |
-| `FolderPicker` | Popover for changing a note's folder. |
+| `StatusPopovers` | One listbox component behind both popovers: `TagEditor` for adding and removing tags, `FolderPicker` for changing a note's folder. |
 | `ConfirmDialog` | Destructive confirmation only. Used by permanent delete and empty trash. Never for save or navigation. |
 | `ThemeToggle` | Light / Dark / System cycle. |
 | `SettingsDialog` | Theme, accent, default folder, reset. |
-| `SearchEmpty`, `NoteListEmpty` | Empty states (§8). |
+| `EmptyState` | All empty states (§8). |
 
 Icons are never components of their own. They are imported from `lucide-react` at the point of use, sized by the `.i-*` classes in §3.3, and wrapped only when a control needs a hit area — `IconButton`, which renders an icon plus an optional `aria-label` and enforces the 32/44 px minimum. There is no `AppIcon.tsx` indirection.
 
