@@ -162,6 +162,50 @@ describe('createAutosave', () => {
     expect(save.mock.calls[0]?.[0].folderId).toBe(OTHER);
   });
 
+  it('overlapping flushes wait for the in-flight save instead of spinning', async () => {
+    /* Found on a phone: type a title into a fresh note, press back, freeze. The
+       tap blurs the editor — flush one starts the save — and the unmount
+       flushes again — flush two — while it is still running. The old
+       `while (inFlight)` loop re-entered `persist` and early-returned forever:
+       a microtask loop that starves the task queue the save's own response
+       arrives on, so on a real WebView the save never settles and the app
+       deadlocks. A platform IPC response arrives on a later task, so this test
+       resolves the save from a `setTimeout`: with the spin in place the timer
+       never fires and the test times out instead of passing. */
+    vi.useRealTimers();
+    try {
+      const autosave = createAutosave(vi.fn());
+      autosave.setBaseline(base);
+
+      let resolveSave!: (note: Note) => void;
+      save.mockImplementationOnce(
+        (input) =>
+          new Promise<Note>((resolve) => {
+            resolveSave = () => {
+              resolve(asNote(input));
+            };
+          }),
+      );
+
+      autosave.noteChanged({ ...base, doc: doc('A brand new title') });
+      const first = autosave.flush();
+      const second = autosave.flush();
+
+      /* The platform answers on a later task. */
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      resolveSave(asNote({ ...base, doc: doc('A brand new title') }));
+
+      await first;
+      await second;
+      autosave.dispose();
+
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(useEditorStore.getState().saveState).toBe('saved');
+    } finally {
+      vi.useFakeTimers();
+    }
+  });
+
   it('does not write on a flush of an untouched note', async () => {
     const autosave = createAutosave(vi.fn());
     autosave.setBaseline(base);

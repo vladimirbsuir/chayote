@@ -181,6 +181,31 @@ test.describe('mobile list', () => {
     await expect(page.getByTestId('settings-dialog')).toHaveCount(0);
   });
 
+  test('typing a title then going back returns to the list, unfrozen', async ({ page }) => {
+    /* Found on a phone: create a note, immediately type a title, press the back
+       arrow — the app froze and answered nothing. The tap blurs the editor
+       (flush one starts the save) and the unmount flushes again while it is
+       still running; the old flush spun on the in-flight flag and starved the
+       save's own response. In a browser the mock resolves in a microtask so the
+       spin terminates — this pins the flow, and `useAutosave.test.ts` pins the
+       deadlock itself. */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await page.getByRole('button', { name: 'New note' }).click();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Note content' }).pressSequentially('A brand new title');
+    await page.getByRole('button', { name: 'Back to list' }).click();
+
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await expect(page.getByText('No note open')).toHaveCount(0);
+    await expect(
+      page.getByTestId('note-card').filter({ hasText: 'A brand new title' }),
+    ).toHaveCount(1);
+  });
+
   test('the sidebar fills the viewport with no dead strip at the edge', async ({ page }) => {
     /* Found on a phone: the list below the search field ended early with a
        vertical divider floating off the right edge. The mobile list reuses the
