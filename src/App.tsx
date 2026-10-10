@@ -171,8 +171,8 @@ function Shell() {
   }, [theme]);
 
   useEffect(() => {
-    applyAccent(accent);
-  }, [accent]);
+    applyAccent(accent, theme === 'dark');
+  }, [accent, theme]);
 
   /* One startup pass: tell Rust the first paint has happened — `window_ready`
      exists so the window is shown after this rather than flashing white

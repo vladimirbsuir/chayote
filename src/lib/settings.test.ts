@@ -17,7 +17,7 @@ describe('settings store', () => {
 
   it('starts from the documented defaults, with nothing pre-created', () => {
     expect(DEFAULT_SETTINGS.theme).toBe('system');
-    expect(DEFAULT_SETTINGS.accent).toBe('#2f6fed');
+    expect(DEFAULT_SETTINGS.accent).toBeNull();
     // ADR-014: first launch creates no folders, so the default folder is none.
     expect(DEFAULT_SETTINGS.defaultFolderId).toBeNull();
     expect(DEFAULT_SETTINGS.collapsedFolders).toEqual([]);
@@ -79,28 +79,50 @@ describe('settings store', () => {
     expect((await loadSettings()).theme).toBe('dark');
   });
 
-  it('offers six accent presets, each with a name', () => {
+  it('offers six accent presets, each with a name and a value per theme', () => {
     expect(ACCENT_PRESETS).toHaveLength(6);
-    const values = ACCENT_PRESETS.map((preset) => preset.value);
-    expect(new Set(values).size).toBe(6);
+    const light = ACCENT_PRESETS.map((preset) => preset.light);
+    const dark = ACCENT_PRESETS.map((preset) => preset.dark);
+    expect(new Set(light).size).toBe(6);
+    expect(new Set(dark).size).toBe(6);
     for (const preset of ACCENT_PRESETS) {
-      expect(preset.value).toMatch(/^#[0-9a-f]{6}$/);
+      expect(preset.light).toMatch(/^#[0-9a-f]{6}$/);
+      expect(preset.dark).toMatch(/^#[0-9a-f]{6}$/);
       expect(preset.name.length).toBeGreaterThan(0);
     }
-    // The first preset is the documented default accent.
-    expect(ACCENT_PRESETS[0]?.value).toBe(DEFAULT_SETTINGS.accent);
   });
 
   it('matches the swatches the prototype ships', () => {
-    // `prototype/index.html` §4 lists these in this order. If they drift, the
+    // `prototype/index.html` §5 lists these in this order. If they drift, the
     // settings dialog and the prototype disagree, which ADR-016 forbids.
-    expect(ACCENT_PRESETS.map((preset) => preset.value)).toEqual([
-      '#2f6fed',
+    expect(ACCENT_PRESETS.map((preset) => preset.light)).toEqual([
+      '#2769ec',
       '#1f7a4d',
-      '#8b5cf6',
+      '#814ef5',
       '#c2410c',
       '#b91c5c',
       '#0f766e',
     ]);
+    expect(ACCENT_PRESETS.map((preset) => preset.dark)).toEqual([
+      '#4881ef',
+      '#26975f',
+      '#9469f7',
+      '#ea4f0e',
+      '#e44a88',
+      '#13948a',
+    ]);
+  });
+
+  it('reads a stored preset hex as the default, not as a custom accent', async () => {
+    // A file written before the accent became per-theme holds `#2f6fed`. Left
+    // alone it would read as a custom accent, be written inline, and defeat the
+    // cascade in dark mode — which is the bug the `null` default removes.
+    window.localStorage.setItem(STORE_FILE, JSON.stringify({ accent: '#2f6fed' }));
+    expect((await loadSettings()).accent).toBeNull();
+  });
+
+  it('keeps a genuinely custom accent', async () => {
+    window.localStorage.setItem(STORE_FILE, JSON.stringify({ accent: '#123456' }));
+    expect((await loadSettings()).accent).toBe('#123456');
   });
 });

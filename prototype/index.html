@@ -18,10 +18,10 @@
   --border: #e3e3e6;
   --border-strong: #c9c9cf;
   --text: #18181b;
-  --text-muted: #6b6b76;
-  --text-subtle: #9a9aa4;
-  --accent: #2f6fed;
-  --accent-soft: rgba(47, 111, 237, 0.12);
+  --text-muted: #54545c;
+  --text-subtle: #70707d;
+  --accent: #2769ec;
+  --accent-soft: rgba(39, 105, 236, 0.12);
   --danger: #c0392b;
   --warning: #b26a00;
   --success: #1f7a4d;
@@ -47,10 +47,10 @@
   --border: #2a2a2f;
   --border-strong: #3d3d44;
   --text: #ececef;
-  --text-muted: #9b9ba4;
-  --text-subtle: #6e6e78;
-  --accent: #6f9bff;
-  --accent-soft: rgba(111, 155, 255, 0.16);
+  --text-muted: #a7a7af;
+  --text-subtle: #84848e;
+  --accent: #4881ef;
+  --accent-soft: rgba(72, 129, 239, 0.16);
   --danger: #e57366;
   --warning: #e0a75c;
   --success: #5cbb8a;
@@ -1002,9 +1002,9 @@ body {
           <div class="field">
             <label>Accent colour</label>
             <div class="swatches">
-              <span class="swatch" style="background:#2f6fed" title="Default"></span>
+              <span class="swatch" style="background:#2769ec" title="Default"></span>
               <span class="swatch" style="background:#1f7a4d" title="Green"></span>
-              <span class="swatch" style="background:#8b5cf6" title="Violet"></span>
+              <span class="swatch" style="background:#814ef5" title="Violet"></span>
               <span class="swatch" style="background:#c2410c" title="Rust"></span>
               <span class="swatch" style="background:#b91c5c" title="Magenta"></span>
               <span class="swatch" style="background:#0f766e" title="Teal"></span>
@@ -1150,14 +1150,28 @@ const accentBtn = document.getElementById('accent-btn');
 const accentLabel = document.getElementById('accent-label');
 
 const accents = [
-  ['#2f6fed', 'default'],
+  ['#2769ec', 'default'],
   ['#1f7a4d', 'green'],
-  ['#8b5cf6', 'violet'],
+  ['#814ef5', 'violet'],
   ['#c2410c', 'rust'],
   ['#b91c5c', 'magenta'],
   ['#0f766e', 'teal']
 ];
 let accentIdx = 0;
+
+/* The six swatches each have a value per theme (docs/05-ui-ux.md §6.6): an accent
+   is used as text on active rows, so it needs 4.5:1 against the raised surface of
+   whichever theme is showing, and one hex cannot clear it in both. The demo below
+   writes the light pair inline, which is the custom-accent path in the app; the
+   dark values come from the [data-theme="dark"] block. */
+const accentsDark = [
+  '#4881ef',
+  '#26975f',
+  '#9469f7',
+  '#ea4f0e',
+  '#e44a88',
+  '#13948a'
+];
 
 themeBtn.addEventListener('click', () => {
   const dark = root.dataset.theme === 'dark';
@@ -1170,8 +1184,9 @@ themeBtn.addEventListener('click', () => {
 accentBtn.addEventListener('click', () => {
   accentIdx = (accentIdx + 1) % accents.length;
   const [hex, name] = accents[accentIdx];
-  root.style.setProperty('--accent', hex);
-  root.style.setProperty('--accent-soft', hex + '20');
+  const value = root.dataset.theme === 'dark' ? accentsDark[accentIdx] : hex;
+  root.style.setProperty('--accent', value);
+  root.style.setProperty('--accent-soft', value + '20');
   accentLabel.textContent = 'Accent: ' + name;
 });
 </script>

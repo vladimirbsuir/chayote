@@ -261,7 +261,7 @@ Each of these was resolved conservatively. Revisit the moment implementation pro
 | Q3 | `is_pinned` versus `is_favorite` | **Answered** — `is_pinned` only. `is_favorite` removed from the schema | — | Resolved |
 | Q4 | Timestamp style in the note list | **Answered** — relative only, no tooltip, per `05-ui-ux.md` §6.5a. The default in this table had contradicted itself; §6.5a now settles it | — | Resolved |
 | Q5 | Remember collapsed folder-tree state per folder | **Answered** — persisted per folder in settings, shipped at M4 | — | Resolved |
-| Q6 | Accent palette: one configurable colour, or presets plus custom | **Open** | Six presets plus a custom colour picker | M6 |
+| Q6 | Accent palette: one configurable colour, or presets plus custom | **Answered** — six presets plus a custom colour picker, **each preset carrying a value per theme**; shipped at M6 under ADR-019 | — | Resolved |
 | Q7 | Should pinning be visible as a dedicated filter, or only as an ordering? | **Answered** — both, per `05-ui-ux.md` §5 and §6.3a. The filter ships in M4 with the rest of the pinning work; the ordering already does | — | Resolved |
 | Q8 | Repository directory rename from `notes` to `chayote` | **Answered** — done, the directory is `D:\Projects\chayote` | — | Resolved |
 

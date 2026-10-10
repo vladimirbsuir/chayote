@@ -18,7 +18,7 @@ export type SettingsState = Settings & {
       the persisted value would contradict. */
   hydrated: boolean;
   setTheme: (theme: Theme) => void;
-  setAccent: (accent: string) => void;
+  setAccent: (accent: string | null) => void;
   setSidebarWidth: (width: number) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -120,13 +120,26 @@ export function flushSettings(): void {
 }
 
 /** The only tokens a user configures are `--accent` and `--accent-soft`
-    (`05-ui-ux.md` §6.6). Setting them inline switches the accent with no
-    re-render of the editor subtree, which is the reason themes are CSS
-    variables at all (ADR-008). */
-export function applyAccent(accent: string): void {
+    (`05-ui-ux.md` §6.6), and only when they pick a colour of their own.
+
+    With no custom accent nothing is written at all, so `--accent` resolves
+    through the cascade and each theme gets its own value from
+    `--accent-preset-1`. Writing it unconditionally is what made the dark
+    theme's accent unreachable: an inline custom property on
+    `document.documentElement` beats the `[data-theme='dark']` rule on that same
+    element whatever its specificity.
+
+    Setting the inline value back to `''` rather than leaving it is what lets a
+    user who had chosen a colour go back to the theme default without a reload. */
+export function applyAccent(accent: string | null, dark: boolean): void {
   const root = document.documentElement;
+  if (accent === null) {
+    root.style.removeProperty('--accent');
+    root.style.removeProperty('--accent-soft');
+    return;
+  }
   root.style.setProperty('--accent', accent);
-  root.style.setProperty('--accent-soft', `${accent}20`);
+  root.style.setProperty('--accent-soft', `${accent}${dark ? '29' : '20'}`);
 }
 
 /** `system` resolves against the OS preference (`05-ui-ux.md` §6.6). */

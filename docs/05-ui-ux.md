@@ -108,9 +108,9 @@ Light:
 | `--border` | `#e3e3e6` | Hairlines |
 | `--border-strong` | `#c9c9cf` | Input borders |
 | `--text` | `#18181b` | Primary |
-| `--text-muted` | `#6b6b76` | Secondary, timestamps |
-| `--text-subtle` | `#9a9aa4` | Placeholders |
-| `--accent` | user-configurable, default `#2f6fed` | Selection, focus ring, active state |
+| `--text-muted` | `#54545c` | Secondary, timestamps |
+| `--text-subtle` | `#70707d` | Placeholders |
+| `--accent` | user-configurable, default `#2769ec` | Selection, focus ring, active state |
 | `--accent-soft` | accent at 12 % | Active row background |
 | `--danger` | `#c0392b` | Delete, error |
 | `--warning` | `#b26a00` | Unsaved state |
@@ -126,10 +126,14 @@ Dark:
 | `--border` | `#2a2a2f` |
 | `--border-strong` | `#3d3d44` |
 | `--text` | `#ececef` |
-| `--text-muted` | `#9b9ba4` |
-| `--text-subtle` | `#6e6e78` |
+| `--text-muted` | `#a7a7af` |
+| `--text-subtle` | `#84848e` |
 
-Rules: the dark palette is not a mechanical inversion — contrast is verified per theme. Text on `--surface` must reach 7:1 and on `--surface-raised` 4.5:1. Focus rings use `--accent` at 2 px with a 2 px offset and must be visible in both themes. No colour carries meaning alone; the accent never appears as the sole indicator of state.
+Rules: the dark palette is not a mechanical inversion — contrast is verified per theme. **Every text token clears 4.5:1 against both `--surface` and `--surface-raised` in both themes**, and `--text` reaches 7:1. Focus rings use `--accent` at 2 px with a 2 px offset and must be visible in both themes. No colour carries meaning alone; the accent never appears as the sole indicator of state.
+
+**Text is a four-step ladder, and the bottom step used to be broken.** `--text-subtle` is not decorative — it carries note-list timestamps and the "Untitled" title — and at the values this table originally held it sat at **2.60:1** on `--surface-raised` in the light theme and 3.33:1 in the dark, against the 4.5:1 §10 requires of body text. Nothing asserted any of it, so it shipped through M5. Lifting it alone would have put it within 0.04:1 of `--text-muted` and collapsed the hierarchy into two steps, so `--text-muted` deepens to 7:1 in both themes to keep a step between them. The ladder is now 17.7 / 7.5 / 4.9 on `--surface` and 16.6 / 7.0 / 4.6 on `--surface-raised`, light; 15.3 / 7.6 / 4.9 and 14.3 / 7.0 / 4.5, dark. `src/styles/tokens.test.ts` asserts every ratio, so the next silent edit of a text token fails the build.
+
+**The accent is also per-theme.** `--accent` resolves from `--accent-preset-1`, and the `[data-theme='dark']` block redefines the six `--accent-preset-N` variables, so each theme's default accent is its own value rather than one hex used twice. This was a defect until M6: the frontend wrote `--accent` as an **inline** custom property on `document.documentElement`, which is the same element carrying `data-theme`, and an inline value beats the dark block whatever its specificity — so the dark accent was unreachable and every user saw the light one. The rule that follows from it: **nothing writes `--accent` inline unless the user has chosen a colour of their own**, and `05-ui-ux.md` §6.6 explains what happens then.
 
 ### 3.2 Spacing, radius, type
 
@@ -426,11 +430,26 @@ A modal dialog with:
 | Setting | Control | Default |
 |---------|---------|---------|
 | Theme | Segmented: Light / Dark / System | System |
-| Accent colour | **Six preset swatches plus a custom colour input** | `#2f6fed` |
+| Accent colour | **Six preset swatches plus a custom colour input** | Each theme's own preset 1 |
 | Default folder for new notes | Folder picker, "None" allowed | None — everything starts unfiled |
 | Reset settings | Destructive button with confirmation | — |
 
-**On accent presets:** six swatches are offered because a raw colour input is an unpleasant way to make a first choice, and picking a preset is one click. The custom input remains, because one person's preset list is not everyone taste. Presets are defined once in `src/styles/tokens.css` as `--accent-preset-1` … `--accent-preset-6`, each chosen to hold 4.5:1 contrast against both `--surface` and `--surface-raised`.
+**On accent presets:** six swatches are offered because a raw colour input is an unpleasant way to make a first choice, and picking a preset is one click. The custom input remains, because one person's preset list is not everyone taste. Presets are defined once in `src/styles/tokens.css` as `--accent-preset-1` … `--accent-preset-6`, redefined in the `[data-theme='dark']` block, and mirrored as data in `lib/settings.ts`.
+
+**Each preset has a value per theme, and the reason is contrast.** An accent is used as *text* — the active folder row and the active tag row set `color: var(--accent)` — so it has to clear 4.5:1 against the surface behind it. That surface is `--surface-raised` for the sidebar and `--surface` for the editor, and `--surface-raised` is the harder of the two in **both** themes: darker than `--surface` in light, lighter in dark. One hex therefore cannot serve both themes, and the earlier claim that a single value held 4.5:1 against both surfaces was measured and found false — Violet was 4.23 and 3.96 in the light theme alone.
+
+| Preset | Light | Dark |
+|--------|-------|------|
+| Default | `#2769ec` | `#4881ef` |
+| Green | `#1f7a4d` | `#26975f` |
+| Violet | `#814ef5` | `#9469f7` |
+| Rust | `#c2410c` | `#ea4f0e` |
+| Magenta | `#b91c5c` | `#e44a88` |
+| Teal | `#0f766e` | `#13948a` |
+
+Each value is its hue at the lightness that clears **4.5:1 against its own theme's `--surface-raised`**, held in HSL so the hue and saturation are the preset's and only the lightness moves. Four of the six light values are the reviewed palette unchanged; Default and Violet are the two that did not hold. `src/styles/tokens.test.ts` asserts the ratio over both token tables, which is what makes the claim above true rather than aspirational.
+
+**A custom accent is used verbatim, in both themes.** It cannot be a curated pair, and deriving one at runtime was rejected: it puts colour maths and a second rendering of the same colour in the app, for a control that is by definition off the preset list. The custom input therefore shows the colour's contrast against the current theme's surfaces and warns when it is below 4.5:1, so the consequence is visible at the moment of choosing it rather than afterwards. This is the one place the accent can fail the contrast bar, and it is the user's own colour doing it.
 
 Settings live in the Tauri store, never in the notes database, so resetting or syncing settings can never touch notes.
 
