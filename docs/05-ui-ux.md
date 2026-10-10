@@ -517,6 +517,8 @@ Every empty state explains the cause, not just the fact. No illustration, no mas
 | 768–1023 px | Sidebar as overlay drawer, editor full width |
 | < 768 px | Single pane, view stack, no hover states |
 
+**On Android the single pane holds in both orientations.** The width bands above govern desktop windows. A phone in landscape widens past 768 px, and width alone would flip the navigation model: the tablet band always renders the editor, so rotating on the list yanked the user into the last-opened note with desktop chrome. The navigation model is a device property (ADR-006) — `01-product.md` §8 requires the Android UI in portrait and landscape alike — so the breakpoint answers `mobile` for any Android WebView regardless of width. Narrow desktop windows keep the width bands.
+
 The sidebar is **collapsible on desktop and dismissible as a drawer on tablet**, and
 the two are different affordances:
 

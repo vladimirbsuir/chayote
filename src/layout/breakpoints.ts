@@ -26,6 +26,18 @@ export function breakpointOf(width: number): Breakpoint {
   return 'desktop';
 }
 
+/* A phone in landscape is still a phone. Width alone reports 800+ px after
+   rotation, which would flip the navigation model under the user: the tablet
+   band always renders the editor, so rotating on the list yanked the user
+   into the last-opened note with desktop chrome. The navigation model is a
+   device property (ADR-006), not a width — `01-product.md` §8 requires the
+   Android UI to run correctly in both orientations — so on Android the answer
+   is always the single-pane stack. The System WebView UA carries "Android";
+   no desktop UA does. */
+export function isAndroidWebView(userAgent: string): boolean {
+  return /android/i.test(userAgent);
+}
+
 /** 320 px above 1280 px, 280 px in the 1024–1279 band (§9). Only used to seed the
     persisted width the first time the app runs; after that the user's choice
     wins. */

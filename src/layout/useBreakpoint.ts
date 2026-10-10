@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { TABLET_MAX, type Breakpoint, breakpointOf } from './breakpoints';
+import { type Breakpoint, breakpointOf, isAndroidWebView } from './breakpoints';
 
 /* The responsive breakpoint of `05-ui-ux.md` §9, in JS.
 
@@ -11,14 +11,19 @@ import { TABLET_MAX, type Breakpoint, breakpointOf } from './breakpoints';
    One resize listener on the window rather than a `matchMedia` query per
    breakpoint: the three thresholds are adjacent integers, so a single width read
    answers the same question with one listener instead of three. */
+
+function current(): Breakpoint {
+  if (typeof window === 'undefined') return 'tablet';
+  if (isAndroidWebView(window.navigator.userAgent)) return 'mobile';
+  return breakpointOf(window.innerWidth);
+}
+
 export function useBreakpoint(): Breakpoint {
-  const [breakpoint, setBreakpoint] = useState<Breakpoint>(() =>
-    breakpointOf(typeof window === 'undefined' ? TABLET_MAX : window.innerWidth),
-  );
+  const [breakpoint, setBreakpoint] = useState<Breakpoint>(() => current());
 
   useEffect(() => {
     const onResize = (): void => {
-      setBreakpoint(breakpointOf(window.innerWidth));
+      setBreakpoint(current());
     };
     window.addEventListener('resize', onResize);
     onResize();

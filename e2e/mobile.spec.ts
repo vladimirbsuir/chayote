@@ -143,3 +143,56 @@ test.describe('mobile list', () => {
     expect(box.width, 'sidebar does not fill the viewport').toBe(MOBILE.width);
   });
 });
+
+const ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 13; X6836 Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/153.0.8010.57 Mobile Safari/537.36';
+const LANDSCAPE = { width: 800, height: 360 };
+
+test.describe('mobile landscape', () => {
+  test.use({ viewport: LANDSCAPE, userAgent: ANDROID_UA });
+
+  /* Found on a phone: rotating on the list widened the viewport past 768 px,
+     flipped the breakpoint to the tablet band — which always renders the
+     editor — and landed the user in the last-opened note with desktop chrome.
+     The navigation model is a device property, so on Android the answer stays
+     the single-pane stack in both orientations. */
+
+  test('rotation keeps the list instead of jumping into a note', async ({ page }) => {
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await expect(page.getByTestId('app-shell')).toHaveAttribute('data-breakpoint', 'mobile');
+    const box = await page.getByTestId('sidebar').boundingBox();
+    expect(box?.width, 'sidebar does not fill the landscape viewport').toBe(LANDSCAPE.width);
+  });
+
+  test('rotation keeps the open note rather than choosing one', async ({ page }) => {
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.setViewportSize(MOBILE);
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await page.getByTestId('note-card').first().click();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+
+    await page.setViewportSize(LANDSCAPE);
+    await expect(page.getByRole('button', { name: 'Back to list' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await expect(page.getByTestId('note-list')).toHaveCount(0);
+
+    await page.setViewportSize(MOBILE);
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+  });
+});
+
+test.describe('narrow desktop window', () => {
+  test.use({ viewport: LANDSCAPE });
+
+  test('the width bands still govern non-Android viewports', async ({ page }) => {
+    /* The Android carve-out changes nothing on desktop: an 800 px window keeps
+       the tablet drawer, whatever the height. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('app-shell')).toHaveAttribute('data-breakpoint', 'tablet');
+  });
+});
