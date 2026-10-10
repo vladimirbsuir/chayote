@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { Inbox } from 'lucide-react';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NoteList } from './NoteList';
@@ -19,6 +20,12 @@ import type { NoteSummary } from '../types/ipc';
    clicks it. */
 
 const NOW = 1_800_000_000_000;
+
+const EMPTY_STATE = {
+  title: 'Trash is empty',
+  body: 'Deleted notes stay in the trash until you empty it.',
+  icon: <Inbox className="icon i-20" aria-hidden="true" />,
+};
 
 function note(overrides: Partial<NoteSummary> = {}): NoteSummary {
   return {
@@ -54,7 +61,7 @@ function List(props: {
       onDeleteNote={props.onDelete}
       onRestoreNote={props.onRestore}
       onDestroyNote={props.onDestroy}
-      empty={{ title: 'Nothing here', body: 'No notes in this view.' }}
+      empty={EMPTY_STATE}
     />
   );
 }
@@ -197,7 +204,7 @@ describe('note row actions', () => {
         showFolder
         onOpen={onOpen}
         onDeleteNote={noop}
-        empty={{ title: 'Nothing here', body: 'No notes in this view.' }}
+        empty={EMPTY_STATE}
       />,
     );
 

@@ -69,6 +69,29 @@ body {
   outline-offset: 2px;
 }
 
+/* The search field is the one control in the app whose focusable element is not
+   the thing the user sees: the visible control is its container, drawn by the
+   `focus-within:` utilities in `TopBar.tsx`.
+
+   Two things follow, and neither can be fixed from the component. The bare input
+   picks up the `:focus-visible` rule above, so it draws a second ring inside the
+   container — and `outline-none` on that input cannot remove it, because the
+   rule above is unlayered and beats every utility in `@layer utilities`. That is
+   the same layer-order trap required test 14 in `10-conventions.md` §10 exists
+   for, and it needs a literal here rather than a class.
+
+   And `type="search"` draws Chromium's own cancel button beside the field's own
+   `x`, so an empty-looking field has two clear controls and a full one looks like
+   it has a second search icon. */
+input[type='search'] {
+  outline: none;
+}
+
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-decoration {
+  appearance: none;
+}
+
 /* Icons: Lucide geometry, four fixed sizes, stroke steps down as size rises.
    05-ui-ux.md §3.3. Never a hard-coded colour; never a free-form size. */
 .icon {

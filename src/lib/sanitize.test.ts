@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasVisibleContent, sanitizeAndNormalize, textToParagraphs } from './sanitize';
+import { hasVisibleContent, sanitizeAndNormalize, sanitizeSnippet, textToParagraphs } from './sanitize';
 
 /* `04-editor.md` §4.1, rules 1–8. Required test 10 in `10-conventions.md` §10
    is rules 1–3: pasted script tags, presentational attributes, and URLs do not
@@ -139,5 +139,44 @@ describe('hasVisibleContent', () => {
     expect(hasVisibleContent('<p>kept</p>')).toBe(true);
     expect(hasVisibleContent('<hr>')).toBe(true);
     expect(hasVisibleContent('<p><br></p>')).toBe(true);
+  });
+});
+
+/* A snippet is `plain_text` with the match wrapped in `mark`, and `plain_text` is
+   whatever the user typed. FTS5 escapes none of it, so a note containing a script
+   tag produces a snippet containing a script tag — and the snippet is the only
+   backend-supplied markup that reaches the DOM anywhere in the app. */
+describe('sanitizeSnippet', () => {
+  it('keeps the highlight and the surrounding text', () => {
+    expect(sanitizeSnippet('Blocked on the <mark>design review</mark> until Dana is back.')).toBe(
+      'Blocked on the <mark>design review</mark> until Dana is back.',
+    );
+  });
+
+  it('drops a script element that a note put into plain_text', () => {
+    const clean = sanitizeSnippet('a <script>window.stolen = 1</script><mark>b</mark>');
+
+    expect(clean).not.toContain('script');
+    expect(clean).not.toContain('stolen');
+    expect(clean).toContain('<mark>b</mark>');
+  });
+
+  it('keeps every element except mark out, however it was written', () => {
+    const clean = sanitizeSnippet('<img src=x onerror="steal()"><b>bold</b>text');
+
+    expect(clean).not.toContain('img');
+    expect(clean).not.toContain('steal');
+    expect(clean).not.toContain('<b>');
+    expect(clean).toContain('bold');
+  });
+
+  it('strips attributes from the highlight itself', () => {
+    const clean = sanitizeSnippet('<mark class="x" onclick="steal()">term</mark>');
+
+    expect(clean).toBe('<mark>term</mark>');
+  });
+
+  it('returns an empty string when there is no snippet', () => {
+    expect(sanitizeSnippet('')).toBe('');
   });
 });

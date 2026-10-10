@@ -356,6 +356,49 @@ Focus with `Ctrl/Cmd+F`, or click the field. Results replace the note list; the 
 
 Search results are ordered by `bm25` relevance, **not** by the pinned/updated ordering of the normal list. Mixing the two produces a confusing result set; a user who searches wants the best match at the top. Pinned notes are not boosted in search.
 
+**Search covers all five selections, including the trash.** `01-product.md` §5.3 lists
+the scope as "all / pinned / folder / tag" and omits `trash`, but `trash` is a
+selection like any other and the Rust service already answered for it. Making it
+the one selection where the field silently does nothing would need a rule, a copy
+and a test to explain an exception that has no reason to exist. Resolved at M5.
+
+**"The last query is restored" means within the session.** The field's text is
+shell state, and dropping below two characters puts the selection's own list back
+— that is the restore. Nothing is written to the settings store, so a relaunch
+opens an empty field. A persisted query would mean the search box is populated at
+every startup, and search is not in `06-platform.md` §2's restored state.
+
+**The highlight is backend markup, and the frontend does not trust it.** Rust's
+`snippet()` returns `<mark>`-wrapped HTML (`03-data-model.md` §3.6), and so does
+the browser mock. `lib/sanitize.ts` has a second allowlist holding exactly `mark`
+and no attributes, separate from the paste list on purpose: adding a node to the
+editor must never widen what search markup may contain. `plain_text` is whatever
+the user typed and FTS5 escapes none of it, so a note containing `<script>`
+produces a snippet containing one.
+
+**The result list pages, and the header says so.** A two-character query matches
+more notes than one page holds. The header names the *applied* query — the
+debounced one, not the field's text, which may be a keystroke newer than the rows
+on screen — and the count reads `3 of 4,123 results` while a second page exists. A
+header reporting only the loaded rows tells someone searching for a common word
+that they had finished. `Show more` sits below the scroll container rather than
+inside it, so it stays reachable without scrolling past the loaded results.
+
+**A search has no loading state.** The previous result set stays on screen while
+the next one loads (`01-product.md` §8). A list that blanks and refills on every
+keystroke is the visible loading state whatever it is called.
+
+**The mobile list view carries its own field, below its bar.** The prototype puts
+a 40 px field under the Android bar rather than inside it: at 360 px the bar's
+three controls and a usable field do not fit on one row, which is the same reason
+§9 keeps the desktop bar off this view entirely.
+
+**The field's focus ring is its container's.** The visible control is the rounded
+box; the `<input>` inside it draws nothing. Both halves need a literal in
+`base.css` — `outline-none` loses to the unlayered `:focus-visible` rule, and
+`type="search"` otherwise draws Chromium's own cancel button beside the field's
+`x`.
+
 ### 6.5a Timestamps in the note list
 
 Relative by default: `now`, `2 min`, `3 h`, `yesterday`, then a short absolute date once older than a week (`3 Feb`). **No tooltip on desktop** — the relative form is what matters, and a hover state on every row is visual noise. The exact timestamp is visible in the editor's detail area when the note is open, where there is room for it.

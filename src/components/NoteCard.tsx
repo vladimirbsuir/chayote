@@ -1,7 +1,8 @@
 import { memo, useState } from 'react';
 import { Folder, Hash, MoreHorizontal, Pin } from 'lucide-react';
 import { NoteRowMenu } from './NoteRowMenu';
-import type { NoteSummary } from '../types/ipc';
+import { sanitizeSnippet } from '../lib/sanitize';
+import type { NoteRow } from '../types/ipc';
 
 /* One row of the note list: title, excerpt, relative timestamp, pinned
    indicator, and an optional folder or tag chip (`05-ui-ux.md` §4). It receives
@@ -29,7 +30,7 @@ type MenuState = {
 };
 
 type NoteCardProps = {
-  note: NoteSummary;
+  note: NoteRow;
   isOpen: boolean;
   /** Already formatted by the caller, so every row in a render shares one clock
       reading (`05-ui-ux.md` §6.5a). */
@@ -173,7 +174,9 @@ export const NoteCard = memo(function NoteCard({
         </span>
       </div>
 
-      {note.excerpt.length > 0 ? (
+      {note.snippet !== undefined && note.snippet.length > 0 ? (
+        <Snippet snippet={note.snippet} />
+      ) : note.excerpt.length > 0 ? (
         <p className="mt-[2px] line-clamp-2 overflow-hidden text-[13px] leading-[1.45] text-[var(--text-muted)]">
           {note.excerpt}
         </p>
@@ -231,8 +234,29 @@ export const NoteCard = memo(function NoteCard({
   );
 });
 
-function titleOf(note: NoteSummary): string {
+function titleOf(note: NoteRow): string {
   return note.title.length === 0 ? UNTITLED : note.title;
+}
+
+/**
+ * A search result shows the sentence that matched rather than the note's
+ * opening (`05-ui-ux.md` §6.5), with FTS5's `<mark>` around the terms.
+ *
+ * The snippet is backend-supplied markup: `plain_text` is whatever the user
+ * typed and FTS5 escapes none of it, so a note containing a script tag produces
+ * a snippet containing a script tag. It goes through the snippet allowlist
+ * before insertion, and only `mark` survives it.
+ *
+ * The highlight's four values are the prototype's `.note-card mark` rule.
+ */
+function Snippet({ snippet }: { snippet: string }) {
+  return (
+    <p
+      data-testid="note-snippet"
+      className="mt-[2px] line-clamp-2 overflow-hidden text-[13px] leading-[1.45] text-[var(--text-muted)] [&_mark]:rounded-[2px] [&_mark]:bg-[var(--accent-soft)] [&_mark]:px-[1px] [&_mark]:text-[var(--accent)]"
+      dangerouslySetInnerHTML={{ __html: sanitizeSnippet(snippet) }}
+    />
+  );
 }
 
 function PinButton({
@@ -241,7 +265,7 @@ function PinButton({
   pending,
   onTogglePin,
 }: {
-  note: NoteSummary;
+  note: NoteRow;
   pinned: boolean;
   pending: boolean;
   onTogglePin?: (id: string) => void;

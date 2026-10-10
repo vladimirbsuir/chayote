@@ -1,8 +1,7 @@
 import { useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Inbox } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { NoteSummary } from '../types/ipc';
+import type { NoteRow } from '../types/ipc';
 import type { Uuid } from '../types/note';
 import { relativeTime } from '../lib/relativeTime';
 import { NoteCard } from './NoteCard';
@@ -26,7 +25,10 @@ const ESTIMATED_CARD_HEIGHT = 96;
 const OVERSCAN = 6;
 
 type NoteListProps = {
-  notes: NoteSummary[];
+  /** `NoteSummary` in a selection, `SearchHit` while searching — the second is
+      assignable to the first with a snippet, which is the whole reason the row
+      type exists (`src/types/ipc.ts`). */
+  notes: NoteRow[];
   openNoteId: Uuid | null;
   /** One clock reading for the whole list, re-read every 60 s (§6.5a). */
   now: number;
@@ -45,8 +47,11 @@ type NoteListProps = {
   onDeleteNote?: (id: Uuid) => void;
   onRestoreNote?: (id: Uuid) => void;
   onDestroyNote?: (id: Uuid) => void;
-  /** Copy for the empty state, which differs per selection (§8). */
-  empty: { title: string; body: string; action?: ReactNode };
+  /** Copy for the empty state, which differs per selection and per search (§8).
+      The icon comes from the sidebar rather than from here: §3.3's inventory
+      gives each state its own glyph, and a list that chose for itself would have
+      to know which of the six situations it is in. */
+  empty: { title: string; body: string; icon: ReactNode; action?: ReactNode };
 };
 
 export function NoteList({
@@ -89,7 +94,7 @@ export function NoteList({
         <EmptyState
           title={empty.title}
           body={empty.body}
-          icon={<Inbox className="icon i-20" aria-hidden="true" />}
+          icon={empty.icon}
           action={empty.action}
         />
       </div>

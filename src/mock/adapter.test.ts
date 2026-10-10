@@ -78,6 +78,33 @@ describe('mock adapter', () => {
     }
   });
 
+  it('finds a body match by prefix and marks it in the snippet', async () => {
+    const backend = createMockBackend(buildMockDatabase());
+
+    /* `roadmap` appears in the body of two fixtures and in the title of one.
+       Asserting on a hit rather than on the array's type is the point: the old
+       substring test would also have matched, so this is what stops a mock from
+       quietly answering a different question than FTS5 does. */
+    const page = await backend.invoke('search_query', {
+      input: { query: 'roadm', filter: filterAll, limit: 20, offset: 0 },
+    });
+
+    expect(page.total).toBeGreaterThan(0);
+    expect(page.hits.some((hit) => hit.snippet.includes('<mark>roadmap</mark>'))).toBe(true);
+    expect(page.hits.every((hit) => hit.snippet.includes('<mark>'))).toBe(true);
+  });
+
+  it('does not match a token that only appears inside another word', async () => {
+    const backend = createMockBackend(buildMockDatabase());
+
+    const page = await backend.invoke('search_query', {
+      input: { query: 'aunch', filter: filterAll, limit: 20, offset: 0 },
+    });
+
+    expect(page.total).toBe(0);
+    expect(page.hits).toEqual([]);
+  });
+
   it('scopes a folder search to the active selection', async () => {
     const backend = createMockBackend(buildMockDatabase());
     const tree = await backend.invoke('folders_list', {});
@@ -85,9 +112,17 @@ describe('mock adapter', () => {
     if (folder === undefined) throw new Error('fixture folders missing');
 
     const page = await backend.invoke('search_query', {
-      input: { query: 'notes', filter: { kind: 'folder', id: folder.id }, limit: 20, offset: 0 },
+      input: { query: 'the', filter: { kind: 'folder', id: folder.id }, limit: 20, offset: 0 },
     });
     expect(page.hits.every((hit) => hit.folderId === folder.id)).toBe(true);
+    expect(page.total).toBe(page.hits.length);
+
+    /* The same query unscoped reaches notes the folder selection cannot, which is
+       the only way the assertion above proves anything at all. */
+    const everywhere = await backend.invoke('search_query', {
+      input: { query: 'the', filter: filterAll, limit: 20, offset: 0 },
+    });
+    expect(everywhere.total).toBeGreaterThan(page.total);
   });
 
   it('recomputes derived values on save', async () => {

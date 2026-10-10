@@ -62,10 +62,12 @@ Three documents carry the weight and are worth more attention than the rest: `02
 | Sync implementation | **Not started** — architecture only, see §5 |
 | Specification | **Complete**, 11 documents |
 | UI prototype | **Complete and approved** — `prototype/index.html` |
-| Application code | **M0–M4 complete** — scaffold, tokens, icon layer, IPC seam, SQLite data layer, editor with autosave, UI shell with sidebar and virtualised note list, and organisation: folders, tags, pinning, trash |
-| Current milestone | **M5** — Search: FTS5, filtering, snippets |
+| Application code | **M0–M5 complete** — scaffold, tokens, icon layer, IPC seam, SQLite data layer, editor with autosave, UI shell with sidebar and virtualised note list, organisation: folders, tags, pinning, trash, and search |
+| Current milestone | **M6** — Themes, settings, keyboard, polish: not started |
 
-**M5 is next.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08, M3 on 2026-10-09, M4 on 2026-10-10. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 36 Rust tests, 303 TypeScript tests, and 95 Playwright tests cover the data layer, the editor, the shell and organisation, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The sidebar's folder tree is keyboard-navigable and draggable, folders and tags are created, renamed and deleted in place, notes can be pinned, filed, tagged, trashed and restored, and the editor's status bar changes a note's folder and tags. The Android SDK is still missing and blocks M7 only, see §7.
+**M6 is next.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08, M3 on 2026-10-09, M4 and M5 on 2026-10-10. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 36 Rust tests, 338 TypeScript tests, and 107 Playwright tests cover the data layer, the editor, the shell, organisation and search, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The sidebar's folder tree is keyboard-navigable and draggable, folders and tags are created, renamed and deleted in place, notes can be pinned, filed, tagged, trashed and restored, the editor's status bar changes a note's folder and tags, and `Ctrl+F` finds notes by title or body with the matching words marked and `Esc` restoring the list. The Android SDK is still missing and blocks M7 only, see §7.
+
+**One criterion is outstanding.** The p95 latency half of M5's "Done when" — under 50 ms on a seeded 50 MB corpus — is deliberately not covered by a test. Seeding that corpus is the slowest thing in the project, and it is recorded as outstanding in `docs/08-roadmap.md` §2 rather than claimed. Everything else in M5 is verified by a command.
 
 ---
 
