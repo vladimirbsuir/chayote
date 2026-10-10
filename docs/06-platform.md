@@ -105,6 +105,10 @@ Code signing is out of scope for v1. Document the platform-specific unsigned-lau
 
 `npx tauri android init` scaffolds the Gradle project. Release builds are APKs signed with a keystore that is **not** in the repository. Store distribution (AAB, Play) is out of scope for v1.
 
+**The generator's defaults do not match this table, and M7 changed all three.** `android init` emits `minSdk 24`, and this project builds at 26. The generated project is **tracked in git** (`src-tauri/gen/android/`), because these corrections live in it and an untracked `gen/` meant a fresh clone reproduced the uncorrected configuration — the same class of failure `11-verification.md` §2 records, where three documents agreed and were all wrong. Build output, `jniLibs`, `local.properties`, and keystores stay ignored.
+
+As built at M7: **minSdk 26, compile/target SDK 37**, NDK `27.2.12479018`, Gradle 9.6.1, AGP 9.3.1, Kotlin 2.2.10, JDK 21. Both arm ABIs cross-compile and link; `aarch64-linux-android` and `armv7-linux-androideabi` are installed, and `android init` additionally installs the two x86 targets for the emulator, which are not shipped.
+
 ### 4.2 Manifest and permissions
 
 The manifest requests the minimum. No `INTERNET` permission until the sync phase — that makes the offline guarantee enforceable by the platform, not just by convention.
@@ -115,7 +119,24 @@ The manifest requests the minimum. No `INTERNET` permission until the sync phase
 | `WRITE_EXTERNAL_STORAGE` | No | Attachments only (v1.2) |
 | `VIBRATE` | No | |
 
-`android:windowSoftInputMode="adjustResize"` is **required**, not optional: without it the on-screen keyboard covers the editor and the app is unusable.
+`android:windowSoftInputMode="adjustResize"` is **required**, not optional: without it the on-screen keyboard covers the editor and the app is unusable. `android init` does not add it; it is set in `app/src/main/AndroidManifest.xml`.
+
+**`INTERNET` is declared in `app/src/debug/AndroidManifest.xml`, not the main one.** The generator adds it unconditionally because `tauri android dev` serves the WebView from a local dev server and needs a socket; a release build loads the bundled assets and does not. Splitting it by build type is what makes the guarantee real rather than aspirational — a permission in a debug-only manifest cannot reach a release APK.
+
+The one permission a release APK *does* carry is `com.chayote.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, injected by `androidx.core` at `protectionLevel="signature"`. It is not a capability and grants the app nothing it does not already have.
+
+**Verified at M7 against the built APK, not against the source file** — `aapt2 dump permissions` and `aapt2 dump xmltree`, since a manifest that is correct on disk and correct in the artefact are not the same claim:
+
+| Property | Observed |
+|----------|----------|
+| `INTERNET` | **absent** |
+| `usesCleartextTraffic` | `false` in release (`true` in debug, for the dev server) |
+| `minSdkVersion` / `targetSdkVersion` | `26` / `37` |
+| `windowSoftInputMode` | `0x10` — `adjustResize` |
+| `native-code` | `arm64-v8a`, `armeabi-v7a` |
+| Size | **14.65 MiB** against the 20 MB budget in `02-architecture.md` §8 |
+
+13.11 MiB of that is the two `.so` files; the frontend is embedded in them rather than shipped as loose assets, which is why the APK contains no `.js`, `.css`, or `.woff` entries. The cyrillic subsets of Inter are present.
 
 ### 4.3 Keyboard and viewport
 
@@ -127,6 +148,21 @@ The manifest requests the minimum. No `INTERNET` permission until the sync phase
 | Window resize | Flush the autosave on the `Focus`/`Pause` lifecycle event |
 | Hardware keyboard | `Ctrl/Cmd` shortcuts from §7 of `05-ui-ux.md` are active |
 
+**Window insets are consumed in CSS, and this was found on a device at M7.** Tauri's
+generated `MainActivity` calls `enableEdgeToEdge()`, so the WebView fills the window
+and the app draws under the status bar and the navigation bar. Measured on a device:
+the mobile top bar sat under the clock and battery with the hamburger clipped at the
+edge, and the editor status bar sat behind the three-button navigation bar — which is
+also why it disappeared entirely while the keyboard was open, contradicting the first
+row of this table.
+
+The fix is `viewport-fit=cover` in `index.html` plus `env(safe-area-inset-*)` padding
+on `#root` in `base.css`, via the `--inset-top` / `--inset-bottom` tokens.
+`viewport-fit=cover` is load-bearing and not decoration: without it both `env()`
+values are `0` on Android and the rule silently does nothing. A desktop browser also
+reports `0`, so the rule is inert there. ADR-020 records why this is CSS and not a
+`WindowInsetsCompat` listener in the generated Kotlin.
+
 ### 4.4 Back navigation
 
 The Android back gesture must not exit the app from the editor.
@@ -137,12 +173,29 @@ The Android back gesture must not exit the app from the editor.
 | List view | Move the task to the background |
 | Any dialog open | Dismiss the dialog |
 
-Implement with a Tauri back-button handler, not by listening for `popstate`. A popstate-based implementation breaks on gesture navigation.
+Implement with a Tauri back-button handler, not by listening for `popstate`. A
+popstate-based implementation breaks on gesture navigation.
+
+**Tauri 2.12 has no such handler reachable from JavaScript, and this is how it is
+actually built** — **ADR-020** carries the full reasoning, the rejected alternatives, and
+the source evidence:
+
+- `AppPlugin.hasListener` reads a Java-only map that a JS `listen()` never populates,
+  `Plugin.trigger` sends only to Java channels, and `WryActivity.handleBackNavigation`
+  installs `goBack`-or-finish rather than reaching the web layer.
+- So `MainActivity.kt` installs the callback from `onWebViewCreate` and asks the web
+  layer whether it consumed the press. **Verified on device at M7**: back in the editor
+  returns to the note list, and at the root the press is handed back to the platform.
+- The JS bridge is one function installed by `ipc.ts`, so R6 still has exactly one path
+  to the platform.
+
+The rule that survives is the one that was always the point: **back walks the view
+stack, and at the root the platform decides.**
 
 ### 4.5 Lifecycle
 
 | Event | Required behaviour |
-|-------|---------|
+|-------|-------------------|
 | `Pause` (backgrounded) | Flush the autosave synchronously |
 | `Resume` | Refresh the note list if the system may have destroyed the WebView |
 | `LowMemory` | Nothing special; do not force a flush beyond the normal debounce |
@@ -156,7 +209,7 @@ Implement with a Tauri back-button handler, not by listening for `popstate`. A p
 | No global shortcuts | Hardware-keyboard shortcuts work only while the app is focused |
 | No native file dialog until v1.2 | No import/export from Android in v1 |
 | System WebView version varies | Test on a current stable System WebView. The oldest supported WebView is no longer a test target (§1) |
-| SQLite `journal_mode = WAL` is supported | No behaviour difference expected from desktop. **Not yet verified on a device** — M6 ran on desktop only, and the earlier note here claiming it was "verified in M6" was wrong; WAL on the device filesystem is part of what the `06-platform.md` §6 checklist exists to catch |
+| SQLite `journal_mode = WAL` is supported | **Verified on device at M7** — `chayote.db`, `chayote.db-wal` and `chayote.db-shm` are all present in the app's data directory and the WAL grew as writes landed. The same run verified migrations, FTS5 search with `bm25` and `snippet()`, and that the row survived a `force-stop` |
 
 ## 5. Build and verification commands
 

@@ -86,4 +86,42 @@ describe('EditorStatusBar', () => {
 
     expect(screen.getByTestId('word-count').textContent).toBe('1 word');
   });
+
+  /* `prototype/index.html` §3's Android editor view draws folder, tags, `342 w` and
+     Saved — no title, because the bar above it carries the title, and no pin,
+     because §2.4 gives the editor its own bar for actions. M7 measured what the
+     desktop row does at 360 px: every element truncated, and `342 words` wrapping
+     onto a second line. `05-ui-ux.md` §9's five-element row is the desktop row. */
+  describe('mobile variant', () => {
+    it('drops the title, which the bar above already carries', () => {
+      render(bar({ variant: 'mobile' }));
+
+      expect(screen.queryByText('Meeting notes')).toBeNull();
+    });
+
+    it('drops the pin, which moves to the editor overflow menu', () => {
+      render(bar({ variant: 'mobile', isPinned: true }));
+
+      expect(screen.queryByTestId('editor-pin-toggle')).toBeNull();
+    });
+
+    it('abbreviates the word count, as the prototype draws it', () => {
+      render(bar({ variant: 'mobile', wordCount: 342 }));
+
+      expect(screen.getByTestId('word-count').textContent).toBe('342 w');
+    });
+
+    it('keeps folder, tags and save state — the row is reduced, not emptied', () => {
+      render(bar({ variant: 'mobile', folderName: 'Work', tagNames: ['urgent'] }));
+
+      expect(screen.getByTestId('status-folder').textContent).toContain('Work');
+      expect(screen.getByTestId('status-tags').textContent).toBe('#urgent');
+      expect(screen.getByTestId('save-state').textContent).toBe('Saved');
+    });
+
+    /* The 44 px claim is deliberately NOT asserted here. jsdom never loads the
+       Tailwind layer, so `getBoundingClientRect` would be 0 and the assertion would
+       pass or fail on nothing. It lives in `e2e/mobile.spec.ts`, which runs the real
+       stylesheet — the same split `10-conventions.md` §10 draws for required test 14. */
+  });
 });

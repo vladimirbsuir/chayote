@@ -27,8 +27,81 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 017 | README.md is the agent onboarding document | Accepted |
 | 018 | The frontend runs without Tauri, so the UI is testable in a browser | Accepted |
 | 019 | The accent is per-theme; custom accents are used verbatim | Accepted |
+| 020 | The Android back button is handled in Kotlin, and window insets in CSS | Accepted |
 
 ---
+
+## ADR-020 — The Android back button is handled in Kotlin, and window insets in CSS
+
+**Status:** Accepted · **Date:** 2026-10-10
+
+**Context.** M7 ran the runtime half on a physical device and found that the mobile
+editor was wrong in four ways, none of them visible in a browser. Two of the four were
+platform behaviour rather than styling, and both had a prescribed solution in the
+specification that turned out to be unbuildable or misplaced.
+
+`06-platform.md` §4.4 said: *"Implement with a Tauri back-button handler, not by
+listening for `popstate`."* Tauri 2.12 has no such handler reachable from JavaScript:
+
+- `AppPlugin.kt` registers a `back-button` event whose callback **replaces** its default
+  — which is the behaviour §4.4 wants — but `hasListener()` reads `Plugin.kt`'s private
+  Java map, populated only by the plugin's own `registerListener`. A JavaScript
+  `listen()` goes through Rust's event system and never appears there.
+- `Plugin.trigger()` sends only to those same Java channels, so a listener that did
+  register would not receive the event either.
+- `WryActivity.handleBackNavigation` is the other native hook. `TauriActivity` sets it
+  `false`, and `true` installs wry's `goBack`-or-finish callback — never reaching the
+  web layer.
+
+Measured on the device with a JavaScript listener in place: the press fell through to
+`webView.goBack()`, the WebView had no history, and back in the editor did nothing.
+
+Separately, `enableEdgeToEdge()` in the generated `MainActivity` means the app draws
+under the system status and navigation bars, and nothing consumed the insets.
+
+**Decision.** Two different layers, for two different reasons.
+
+**The back button is Kotlin**, in `MainActivity.onWebViewCreate` — the hook
+`WryActivity.setWebView` calls once the real WebView exists, which is why it cannot be
+done in `onCreate`. It evaluates one expression and, if the web layer did not consume
+the press, disables itself and re-dispatches so `AppPlugin` applies the platform
+default. The JS side is one function installed by `ipc.ts`; **it lives there because R6
+makes that the only module permitted to touch the platform**, and a `window` property
+assigned anywhere else would be a second path to it.
+
+**Window insets are CSS** — `viewport-fit=cover` plus `env(safe-area-inset-*)` on
+`#root`.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| `history.pushState` per view, driven by `popstate` | Pure JS and no generated code, but §4.4 rejects it explicitly and the rejection is right: popstate is unreliable under gesture navigation. The device runs the three-button nav bar, so this path would have passed here and failed on a gesture device — the worst possible outcome for a test that cannot see the difference. |
+| A Tauri plugin in Rust registering `back-button` | `registerListener` is a plugin command, and `trigger` only reaches channels that plugin registered. Plausible, but it is a second event path for one button, and the activity already owns the back dispatcher. |
+| A JS `popstate` listener *and* a Kotlin fallback | Two implementations of one rule, which is exactly how the pin reached two implementations and drifted. |
+| Kotlin `WindowInsetsCompat` for the insets | Works, but `gen/android/` is generated code a Tauri version bump overwrites, and this is a layout concern the prototype already describes. CSS also keeps it inert on desktop, where the values are 0. |
+| Removing `enableEdgeToEdge()` | One line, and it fixes this device — but edge-to-edge is *enforced* on Android 15+ for `targetSdk` 35+, so the defect returns on a newer phone. The CSS is future-proof. |
+
+**Consequences.**
+
+- §4.4 keeps its substance and loses its mechanism. The rule that survives is the one
+  that was always the point: **back walks the view stack, and at the root the platform
+  decides.** Whether the app can pop is a question for the web layer; whether the task
+  backgrounds is not.
+- The web layer returns "consumed" or not, so a root press needs no special case in
+  Kotlin and no `exit` call. The app never decides when to quit.
+- A handler that throws returns `false` rather than swallowing the press. A bridge
+  that swallowed it would make back do nothing at all, which is the failure the whole
+  path exists to remove.
+- The insets live in `base.css` next to the rest of the token layer, and
+  `viewport-fit=cover` is load-bearing rather than decorative: without it both `env()`
+  values are `0` on Android and the rule silently does nothing.
+
+**A note on what this cost.** Three of the four mobile defects were found by looking at
+a real phone, and the fourth — the pin never reaching the list cache — had been wrong on
+**desktop since M4** and was found only because the same code was exercised on Android.
+No browser test could have caught it: the bug is that a cache was not invalidated, and
+a cache is not rendered.
 
 ## ADR-001 — Application shell: Tauri 2
 

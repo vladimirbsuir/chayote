@@ -31,12 +31,14 @@ Measured on the development machine, 2026-10-07. Re-measured at the end of M0, a
 | Android SDK | **Yes** | `%LOCALAPPDATA%\Android\Sdk`. platforms android-33…37.0, build-tools 34.0.0…36.1.0, NDK 24.0.8215888 / 27.1.12297006 / **27.2.12479018**, `cmdline-tools` latest, **licences already accepted** |
 | `platform-tools` / `adb` | **Yes** — 1.0.41 | |
 | `ANDROID_HOME` / `ANDROID_SDK_ROOT` | **Yes**, set to the SDK path | Was empty until M6; both are read by Gradle and by Tauri |
-| Rust Android targets | **No** — only `x86_64-pc-windows-msvc` installed | Needs `rustup target add aarch64-linux-android armv7-linux-androideabi` |
-| A connected device or emulator | **No** | `adb devices` lists nothing |
+| Rust Android targets | **Yes** — installed at M7 on 2026-10-10 | `aarch64-linux-android`, `armv7-linux-androideabi`, plus `i686` and `x86_64` which `android init` adds for the emulator |
+| A connected device or emulator | **No** | `adb devices` listed nothing through M6. **The build half ran at M7 without one**; the runtime half below still needs it |
 
 **This table was wrong from M1 until M6.** Every version of it said the Android SDK was absent, and so did `README.md` §7 and `docs/08-roadmap.md` §2. The SDK had been installed the whole time — it simply was not on `PATH` and the environment variables were empty, and nobody checked the filesystem before writing it down. The correction is recorded here rather than quietly fixed, because the failure is the point: **a capability table written from assumption is a table that lies**, and three documents agreed with each other and were all wrong.
 
 **Consequence:** M0–M6 and M8 are fully agent-verifiable. **M7 is buildable without a device** — the toolchain is present and an APK can be produced and inspected — but **it cannot be verified** without one. What that leaves unverifiable is listed in §3.5.
+
+**The build half of M7 ran on 2026-10-10 and passed.** `tauri android init`, both arm ABIs cross-compiling and linking, a 14.65 MiB release APK against the 20 MB budget, and a manifest checked with `aapt2` for a missing `INTERNET` permission and a present `adjustResize`. Details and the commands are in §3.5. The runtime half remains unverified, and no Android *runtime* claim is made anywhere in this repository until a device is attached.
 
 ## 3. The four verification layers
 
@@ -84,28 +86,41 @@ npm run tauri dev
 
 Use this sparingly — it is slower than Playwright, needs a display, and cannot be run headless. It is the check for window-level behaviour: theme switching through the real IPC path, `adjustResize` on Android, window close flushing an autosave, native clipboard.
 
-### 3.5 Android — manual, and blocked until the SDK exists
+### 3.5 Android — the build half is automated; the runtime half is manual and blocked on a device
 
 `06-platform.md` §6 "Android" is a checklist a human walks through on a physical arm64 device. It cannot be automated on this machine.
 
-The one-time toolchain setup, kept here because §2's table is a summary and this is the working form. `ANDROID_HOME` and `ANDROID_SDK_ROOT` are already set as of M6; the Rust targets are not:
+**The build half ran on 2026-10-10 and is repeatable.** `ANDROID_HOME` and `ANDROID_SDK_ROOT` are set; the Rust targets are installed. The commands:
 
 ```powershell
-rustup target add aarch64-linux-android
-rustup target add armv7-linux-androideabi
-adb devices
+rustup target add aarch64-linux-android armv7-linux-androideabi
+npx tauri android init
+npx tauri android build --apk --target aarch64 --target armv7
 ```
+
+The Gradle project is tracked in git, so `android init` is a one-time step per clone, not a prerequisite that silently regenerates an uncorrected manifest.
 
 Verify each, rather than trusting the exit code alone:
 
 ```powershell
 rustup target list --installed    # aarch64-linux-android, armv7-linux-androideabi
-sdkmanager --list_installed       # platform-tools, platforms;android-34, ndk;27.2.12479018
-adb devices                       # a device id, status "device"
+sdkmanager --list_installed       # platform-tools, platforms;android-33..37.0, ndk;27.2.12479018
+adb devices                       # a device id, status "device"   <- still empty
 adb shell getprop ro.product.cpu.abi   # arm64-v8a
 ```
 
-**Building needs none of the device half.** `npx tauri android init` followed by an APK build produces a real artefact from the real Rust backend cross-compiled for Android, and that artefact can be measured against the 20 MB budget and its manifest inspected for the `INTERNET` permission. What it cannot do is run. Until `adb devices` lists a device, no **runtime** Android claim is verifiable and none should be made — a build is not a test.
+**And the two claims that must be read off the artefact, not off the source.** A manifest that is correct on disk and correct in the APK are not the same statement, which is the same lesson as §2: read it where it is true.
+
+```powershell
+$apk = "src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk"
+& "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.1.0\aapt2.exe" dump permissions $apk
+& "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.1.0\aapt2.exe" dump badging $apk
+& "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.1.0\aapt2.exe" dump xmltree --file AndroidManifest.xml $apk
+```
+
+The first must not list `INTERNET`; the second must report `native-code` as `arm64-v8a` and `armeabi-v7a` only, and `minSdkVersion:'26'`; the third must carry `windowSoftInputMode=0x10`. `(Get-Item $apk).Length` is the size check — 15,364,194 bytes, **14.65 MiB** against the 20 MB budget.
+
+**What it still cannot do is run.** Until `adb devices` lists a device, no **runtime** Android claim is verifiable and none is made — a build is not a test.
 
 ### 3.5a What a build proves and what only a device does
 
@@ -113,17 +128,18 @@ The distinction matters because "it builds" reads like "it works", and on Androi
 
 | Checkable without a device | Needs a device or emulator |
 |---|---|
-| `tauri android init` scaffolds the Gradle project | `adjustResize`: the on-screen keyboard must never cover the editor or the status bar (`06-platform.md` §4.3) |
-| Both Rust ABIs cross-compile and link | The **real** SQLite backend running on device: migrations, FTS5, WAL on the device filesystem. Everything so far ran against the mock backend in the browser and against SQLite on Windows |
-| APK size against the 20 MB budget | The back button walking the view stack, via the Tauri handler rather than `popstate` (§4.4) |
-| The manifest requests no `INTERNET` permission | `Pause`/`Resume` flushing the autosave (§4.5) |
-| `adjustResize` present in the generated manifest — declared, not observed | A current stable System WebView. The oldest supported WebView was dropped as a test target at M6 (`06-platform.md` §1) |
-| Frontend layout at 360 × 640 in Chromium — already covered by the level-2 captures | Long-press opening the context menu; real 44 px touch targets; no hover states |
-| | Rotation preserving the open note and the editor scroll position |
-| | Airplane mode changing nothing, because nothing is online |
-| | Cold start reaching an editable caret on the device |
+| ~~`tauri android init` scaffolds the Gradle project~~ **done at M7** | `adjustResize`: the on-screen keyboard must never cover the editor or the status bar (`06-platform.md` §4.3). **Observed on device at M7 — the viewport shrinks and the editor is never covered, portrait and landscape** |
+| ~~Both Rust ABIs cross-compile and link~~ **done at M7** | ~~The **real** SQLite backend running on device: migrations, FTS5, WAL on the device filesystem~~ **done at M7** — `chayote.db` + `-wal` + `-shm` on the device filesystem, FTS5 search with `bm25` and `snippet()` returning marked results, and the row surviving a `force-stop` |
+| ~~APK size against the 20 MB budget~~ **done at M7 — 14.65 MiB** | ~~The back button walking the view stack~~ **confirmed broken at M7**, and §4.4's prescribed mechanism does not exist in Tauri 2.12. See `06-platform.md` §4.4; needs an ADR |
+| ~~The manifest requests no `INTERNET` permission~~ **done at M7** | `Pause`/`Resume` flushing the autosave (§4.5). **Observed on device at M7** — typing inside the debounce and backgrounding lost nothing |
+| ~~`adjustResize` present in the manifest — declared, not observed~~ **done at M7, `aapt2`** | A current stable System WebView. The oldest supported WebView was dropped as a test target at M6 (`06-platform.md` §1). **Tested at M7 on WebView 153.0.8010.57** |
+| ~~The back button walking the view stack~~ **done at M7 via ADR-020**, and observed on the device | Long-press opening the context menu. **Not yet measured** — it needs a human thumb, and `adb shell input` cannot produce a long press the WebView recognises |
+| ~~Window insets keep the app clear of the system bars~~ **found broken on device at M7 and fixed** | ~~44 px touch targets~~ **done at M7** — the editor's status bar slots were ~20 px and are 44 px, asserted as geometry in `e2e/mobile.spec.ts`. Playwright cannot see the insets, since Chromium reports zero |
+| Frontend layout at 360 × 640 in Chromium — now also covered by `e2e/mobile.spec.ts`, which asserts the mobile row's shape and that nothing wraps | Airplane mode changing nothing, because nothing is online. **Not yet exercised** — it needs a permission this shell does not have |
+| | Rotation preserving the open note and the editor scroll position. **Layout verified at M7**; scroll position not measured |
+| | Cold start reaching an editable caret on the device. **Verified at M7** |
 
-The second column is the reason M7 exists as a milestone rather than a build step. The first column is a real gate and worth running before anyone is asked to plug in a phone.
+The second column is the reason M7 exists as a milestone rather than a build step. The first column is a real gate and worth running before anyone is asked to plug in a phone. **Struck-through rows ran, not stopped mattering** — every one of those rows is a regression risk, and §3.5 gives the commands that catch it. The three that remain were not skipped for difficulty: two need a human or a permission this shell does not have, and the third is a spec problem rather than a build problem.
 
 ## 4. Visual regression against the prototype
 

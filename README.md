@@ -20,10 +20,10 @@ They change together — see ADR-016.
 | Bundle identifier | **`com.chayote.app`** |
 | Database filename | `chayote.db` |
 | Licence | MIT (`LICENSE`) |
-| Current milestone | **M6** — shipped 2026-10-10 |
-| Next milestone | **M7** — Android: blocked on a **device**, not on tooling, see §7 |
+| Current milestone | **M7** — build half shipped 2026-10-10; runtime half blocked |
+| Next milestone | **M7 runtime** — Android on a device, see §7 |
 | Git repository | **Initialised**, `main` buildable, work on topic branches |
-| Android SDK | **Installed** — `%LOCALAPPDATA%\Android\Sdk`, NDK 27, licences accepted. `ANDROID_HOME` set. Rust Android targets still to add |
+| Android SDK | **Installed and building** — `%LOCALAPPDATA%\Android\Sdk`, NDK 27, licences accepted. `ANDROID_HOME` set, Rust Android targets installed. Release APK 14.65 MiB |
 
 ---
 
@@ -64,16 +64,16 @@ Three documents carry the weight and are worth more attention than the rest: `02
 | Specification | **Complete**, 11 documents |
 | UI prototype | **Complete and approved** — `prototype/index.html` |
 | Application code | **M0–M6 complete** — scaffold, tokens, icon layer, IPC seam, SQLite data layer, editor with autosave, UI shell with sidebar and virtualised note list, organisation: folders, tags, pinning, trash, search, and themes, settings and the full keyboard map |
-| Current milestone | **M7** — Android: **blocked** on the missing Android SDK |
+| Current milestone | **M7** — Android: build half shipped, runtime half **blocked** on a device |
 | Frozen decisions | 18. ADR-019 was added at M6: the accent is per-theme |
 
-**M6 shipped on 2026-10-10; M7 is next.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08, M3 on 2026-10-09, M4, M5 and M6 on 2026-10-10. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 36 Rust tests, 384 TypeScript tests, and 136 Playwright tests cover the data layer, the editor, the shell, organisation, search and themes, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The sidebar's folder tree is keyboard-navigable and draggable, folders and tags are created, renamed and deleted in place, notes can be pinned, filed, tagged, trashed and restored, the editor's status bar changes a note's folder and tags, `Ctrl+F` finds notes by title or body with the matching words marked and `Esc` restoring the list, and the settings dialog themes the app per theme with an accent that is verified for contrast in both. The whole app is operable from the keyboard alone, checked as one continuous flow in `e2e/keyboard.spec.ts`.
+**M6 shipped on 2026-10-10; M7's build half shipped the same day.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08, M3 on 2026-10-09, M4, M5 and M6 on 2026-10-10. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 36 Rust tests, 384 TypeScript tests, and 136 Playwright tests cover the data layer, the editor, the shell, organisation, search and themes, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The sidebar's folder tree is keyboard-navigable and draggable, folders and tags are created, renamed and deleted in place, notes can be pinned, filed, tagged, trashed and restored, the editor's status bar changes a note's folder and tags, `Ctrl+F` finds notes by title or body with the matching words marked and `Esc` restoring the list, and the settings dialog themes the app per theme with an accent that is verified for contrast in both. The whole app is operable from the keyboard alone, checked as one continuous flow in `e2e/keyboard.spec.ts`.
 
 **M6 found four silent defects that had shipped since M3**, all recorded in `docs/08-roadmap.md` §2: the dark theme's accent was unreachable because `--accent` was written inline on the element carrying `data-theme`; `05-ui-ux.md` §6.6's contrast claim was false as written; `--text-subtle` carried note timestamps at 2.6:1; and four emoji sat in the specification's own diagrams. The first is ADR-019. The lesson worth carrying: **a number in a document is only worth what asserts it**, and none of these four looked wrong.
 
-**M7 is outstanding, and what it waits on is a device.** The Android SDK was installed all along — three documents said otherwise until M6 checked the filesystem — and `ANDROID_HOME` is now set, so an APK can be built and measured today without anyone plugging anything in. The runtime half needs a physical arm64 handset; see §7. Nothing in M0–M6 or M8 depends on it.
+**M7's build half is done; what waits is a device.** An APK now cross-compiles for both arm ABIs, measures 14.65 MiB against the 20 MB budget, and carries no `INTERNET` permission — read out of the built artefact, not off the source file. The runtime half needs a physical arm64 handset; see §7. Nothing in M0–M6 or M8 depends on it.
 
-**One criterion is outstanding.** The p95 latency half of M5's "Done when" — under 50 ms on a seeded 50 MB corpus — is deliberately not covered by a test. Seeding that corpus is the slowest thing in the project, and it is recorded as outstanding in `docs/08-roadmap.md` §2 rather than claimed. Everything else in M5 is verified by a command.
+**One criterion is outstanding, and one more was found at M7.** The p95 latency half of M5's "Done when" — under 50 ms on a seeded 50 MB corpus — is deliberately not covered by a test. Seeding that corpus is the slowest thing in the project, and it is recorded as outstanding in `docs/08-roadmap.md` §2 rather than claimed. Everything else in M5 is verified by a command. The second is smaller and was fixed: `e2e/keyboard.spec.ts` had been failing about two runs in three on `main`, because it typed into the editor without the settle step `10-conventions.md` §10 requires of a code-split editor. It was not caused by M7 and was not caught earlier because nothing had re-run that spec on `main`.
 
 ---
 
@@ -244,23 +244,26 @@ The authoritative layout is `docs/10-conventions.md` §1. This is a summary.
 
 ## 7. Manual steps outstanding
 
-**Connect an Android device.** One step, and it is the only thing M7 waits on.
+**The runtime half of M7 has now been run on a physical device.** An Infinix X6836,
+Android 13, System WebView 153, arm64-v8a, with a debug-signed APK. What that verified
+is in `docs/11-verification.md` §3.5a: the real SQLite backend including migrations,
+FTS5 and WAL on the device filesystem, derivation, survival of a hard `force-stop`, the
+`Pause` flush, `Resume`, rotation, and `adjustResize` observed rather than merely
+declared. It also found a defect the browser could not — the app drew under the system
+status and navigation bars — which is fixed. **The back button is now built too**
+— ADR-020 is the decision it needed, since Tauri 2.12 has no back-button event
+JavaScript can reach — **and the mobile editor's cramped status bar is fixed**: the
+user pointed at it and the prototype already solved it, so below 768 px the row
+carries folder, tags, an abbreviated word count and the save state, while the pin
+and the delete action live in the "three dots" overflow menu that finally works.
 
-The toolchain is already here. The SDK, NDK 27, build-tools 34–36 and the
-accepted licences are installed at `%LOCALAPPDATA%\Android\Sdk`, JDK 21 is
-present, and `ANDROID_HOME` and `ANDROID_SDK_ROOT` are set as of M6. This file,
-`docs/08-roadmap.md` and `docs/11-verification.md` §2 all said the SDK was
-absent until that was checked against the filesystem — the correction is in
-`11-verification.md` §2 rather than quietly made.
+**What is still outstanding:**
 
-What remains is `rustup target add aarch64-linux-android armv7-linux-androideabi`,
-which needs no privileges, and a **physical arm64 handset** with USB debugging
-enabled. `adb devices` currently lists nothing.
+- **Long-press and airplane mode** — need a human thumb or a permission this shell does not have. Recorded as unmeasured in `§3.5a` rather than folded into "verified on device".
+- **The Android 15+ `adjustResize` question.** This device is Android 13, so it could
+  not settle whether `targetSdk 37` plus `enableEdgeToEdge()` makes the attribute inert
+  on a newer phone. Recorded as unmeasured rather than folded into "verified on device".
 
-An APK can be built and measured without the handset, and that half is worth
-doing first. What only the handset can prove is listed in
-`docs/11-verification.md` §3.5a: `adjustResize` under the on-screen keyboard, the
-back-button stack, `Pause`/`Resume` flushing, the oldest supported System
-WebView, long-press and 44 px touch targets, rotation, airplane mode, and the
-real SQLite backend running on the device. Commands and verification steps are
-in `docs/11-verification.md` §3.5. M0–M6 and M8 are unaffected.
+The toolchain is here and the build is repeatable: `docs/11-verification.md` §3.5 has
+the commands, including the `aapt2` checks that read the manifest off the APK rather
+than off the source file. M0–M6 and M8 are unaffected.

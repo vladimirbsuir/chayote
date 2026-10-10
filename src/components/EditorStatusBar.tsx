@@ -7,7 +7,10 @@ type EditorStatusBarProps = {
   saveState: SaveState;
   /** `05-ui-ux.md` §6.3a: the pin control in the editor. The same `Ctrl/Cmd+D` is
       bound on the window in `EditorPane`, so this is the discoverable half of a
-      shortcut rather than the only way to reach it. */
+      shortcut rather than the only way to reach it.
+
+      Not rendered on mobile — the pin moves to the editor's overflow menu there,
+      which is where §2.4 puts a note action that will not fit in the row. */
   isPinned: boolean;
   onTogglePin: () => void;
   /** `04-editor.md` §9: "Folder | Note's folder name, click to change" and "Tags |
@@ -21,6 +24,8 @@ type EditorStatusBarProps = {
   tagNames: string[];
   onPickFolder: (anchor: HTMLElement) => void;
   onEditTags: (anchor: HTMLElement) => void;
+  /** `05-ui-ux.md` §2.4 and the prototype's Android editor view. */
+  variant?: 'desktop' | 'mobile';
 };
 
 /* `04-editor.md` §9 — a single 28 px row, nothing else. §5.2 fixes the four
@@ -30,7 +35,14 @@ type EditorStatusBarProps = {
    M2 shipped title, word count, and save state. §9 also lists folder and tags;
    those arrive with M4's data in the same commit as the editors that populate
    them, so this row never shows a control that does nothing. The pin is here
-   already because pinning *is* M4 and the data exists. */
+   already because pinning *is* M4 and the data exists.
+
+   **The mobile variant is not a subset chosen by taste — it is what the prototype
+   already draws.** `prototype/index.html` §3's Android editor view shows folder,
+   tags, `342 w` and Saved, and no title, because the title is in the bar above it,
+   and no pin, because §2.4 gives the editor its own bar for actions. Rendering all
+   six on a 360 px screen truncated every one of them to a letter or an ellipsis;
+   M7 measured it on a device. `05-ui-ux.md` §9's row is the *desktop* row. */
 
 const LABEL: Record<SaveState, string> = {
   saved: 'Saved',
@@ -56,10 +68,16 @@ export function EditorStatusBar({
   tagNames,
   onPickFolder,
   onEditTags,
+  variant = 'desktop',
 }: EditorStatusBarProps) {
+  const mobile = variant === 'mobile';
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[12px] text-[var(--text-muted)]">
-      <span className="truncate">{title}</span>
+    <div
+      className={`flex shrink-0 items-center gap-3 border-t border-[var(--border)] bg-[var(--surface-raised)] text-[12px] text-[var(--text-muted)] ${
+        mobile ? 'h-11 gap-2 px-1' : 'h-7 px-3'
+      }`}
+    >
+      {mobile ? null : <span className="truncate">{title}</span>}
 
       <SlotButton
         testId="status-folder"
@@ -67,6 +85,7 @@ export function EditorStatusBar({
         emptyLabel="No folder"
         icon={<Folder className="icon i-16" aria-hidden="true" />}
         onClick={onPickFolder}
+        mobile={mobile}
       />
 
       <SlotButton
@@ -84,27 +103,33 @@ export function EditorStatusBar({
         emptyLabel="Add tags"
         icon={<Hash className="icon i-16" aria-hidden="true" />}
         onClick={onEditTags}
+        mobile={mobile}
       />
 
-      <button
-        type="button"
-        aria-pressed={isPinned}
-        aria-label={isPinned ? 'Unpin note' : 'Pin note'}
-        title={isPinned ? 'Unpin (Ctrl+D)' : 'Pin (Ctrl+D)'}
-        data-testid="editor-pin-toggle"
-        onClick={onTogglePin}
-        className={`grid h-[20px] w-[20px] flex-none place-items-center rounded transition-colors ${
-          isPinned
-            ? 'text-[var(--accent)]'
-            : 'text-[var(--text-subtle)] hover:text-[var(--text)]'
-        }`}
-      >
-        <Pin className="icon i-16" aria-hidden="true" />
-      </button>
+      {mobile ? null : (
+        <button
+          type="button"
+          aria-pressed={isPinned}
+          aria-label={isPinned ? 'Unpin note' : 'Pin note'}
+          title={isPinned ? 'Unpin (Ctrl+D)' : 'Pin (Ctrl+D)'}
+          data-testid="editor-pin-toggle"
+          onClick={onTogglePin}
+          className={`grid h-[20px] w-[20px] flex-none place-items-center rounded transition-colors ${
+            isPinned
+              ? 'text-[var(--accent)]'
+              : 'text-[var(--text-subtle)] hover:text-[var(--text)]'
+          }`}
+        >
+          <Pin className="icon i-16" aria-hidden="true" />
+        </button>
+      )}
 
       <div className="ml-auto flex items-center gap-3">
         <span data-testid="word-count">
-          {wordCount} {wordCount === 1 ? 'word' : 'words'}
+          {/* The prototype writes `342 w` on Android and `342 words` on the desktop.
+              At 360 px the full word costs a wrapped second line, which pushed the
+              row past its height and clipped the save state. */}
+          {mobile ? `${wordCount} w` : `${wordCount} ${wordCount === 1 ? 'word' : 'words'}`}
         </span>
         <span
           aria-live="polite"
@@ -136,12 +161,17 @@ function SlotButton({
   emptyLabel,
   icon,
   onClick,
+  mobile = false,
 }: {
   testId: string;
   label: string;
   emptyLabel: string;
   icon: React.ReactNode;
   onClick: (anchor: HTMLElement) => void;
+  /** `05-ui-ux.md` §9: touch targets are at least 44 x 44 px on Android. The 28 px
+      desktop row cannot hold one, so the mobile bar is 44 px tall and the slot fills
+      it. M7 found the desktop-sized targets by measuring them on the device. */
+  mobile?: boolean;
 }): React.ReactElement {
   const empty = label === emptyLabel;
   return (
@@ -152,9 +182,9 @@ function SlotButton({
       onClick={(event) => {
         onClick(event.currentTarget);
       }}
-      className={`flex min-w-0 items-center gap-[5px] rounded px-1 transition-colors hover:bg-[var(--surface-sunken)] ${
-        empty ? 'text-[var(--text-subtle)]' : ''
-      }`}
+      className={`flex min-w-0 items-center gap-[5px] rounded transition-colors hover:bg-[var(--surface-sunken)] ${
+        mobile ? 'h-11 max-w-[45%] px-2' : 'px-1'
+      } ${empty ? 'text-[var(--text-subtle)]' : ''}`}
     >
       {icon}
       <span className="truncate">{label}</span>

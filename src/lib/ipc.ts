@@ -110,4 +110,44 @@ export const windowApi = {
   ready: (): Promise<void> => invoke('window_ready', {}),
 };
 
+/** The global the Android activity calls. It lives here rather than in a component
+    because R6 makes this file the only place that talks to the platform, and a
+    `window` property assigned anywhere else would be a second path to it. */
+type BackBridge = { __chayoteHandleBack__?: () => boolean };
+
+/** Install the handler the Android back button asks, returning whether it consumed
+    the press.
+
+    `06-platform.md` §4.4: back walks the view stack and at the root it is the
+    platform's job. Returning `false` at the root is what lets `MainActivity.kt`
+    hand the press back to Tauri, whose default backgrounds or finishes the task —
+    the app never decides when to exit.
+
+    Why Kotlin and not an event: Tauri 2.12 has no JavaScript-reachable back
+    button. `AppPlugin.hasListener` reads a Java-only map that `listen()` from JS
+    never populates, `Plugin.trigger` sends only to Java channels, and
+    `WryActivity.handleBackNavigation` installs `goBack`-or-finish rather than
+    reaching the web layer. §4.4 records the evidence.
+
+    Rejects a handler that throws rather than letting a broken one eat the back
+    button: the press would then do nothing at all, which is the failure this
+    whole path exists to remove. */
+export function installBackHandler(handler: () => boolean): () => void {
+  if (!isTauri) return () => {};
+  const bridge = window as Window & BackBridge;
+  const wrapper = (): boolean => {
+    try {
+      return handler();
+    } catch {
+      return false;
+    }
+  };
+  bridge.__chayoteHandleBack__ = wrapper;
+  return () => {
+    if (bridge.__chayoteHandleBack__ === wrapper) {
+      delete bridge.__chayoteHandleBack__;
+    }
+  };
+}
+
 export { isTauri };
