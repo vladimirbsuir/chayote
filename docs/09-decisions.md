@@ -26,6 +26,7 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 016 | The prototype is a permanent visual reference, not a disposable mockup | Accepted |
 | 017 | README.md is the agent onboarding document | Accepted |
 | 018 | The frontend runs without Tauri, so the UI is testable in a browser | Accepted |
+| 019 | The accent is per-theme; custom accents are used verbatim | Accepted |
 
 ---
 
@@ -475,3 +476,32 @@ export const ipc = isTauri ? tauriAdapter : mockAdapter
 | Test only React logic, never layout | Layout bugs are exactly what a visual test catches and what unit tests miss. |
 | Screenshot the native window only | Requires a display, cannot run headless in CI, and is far slower than a browser test. |
 | Stub IPC in tests only, not in dev | Duplicates the adapter and leaves `npm run dev` broken in a browser, so the mock would rot untested. |
+
+---
+
+## ADR-019 - The accent is per-theme; a custom accent is used verbatim
+
+**Status:** Accepted · **Date:** 2026-10-10
+
+**Context.** M6 found a defect that had been present since M3. `applyAccent` wrote `--accent` as an inline custom property on `document.documentElement` — the same element that carries `data-theme` — so the value it wrote beat the `[data-theme='dark']` block whatever its specificity. The dark theme's accent was unreachable, and every user, on the default settings, saw the light accent on a dark surface. `05-ui-ux.md` §3.1 and `prototype/index.html` both defined a dark accent, so the code was wrong rather than the documents.
+
+Fixing the cascade exposed the question it had been hiding. The accent is used as *text* on the active folder and tag rows, so it needs 4.5:1 against the surface behind it. Measuring the six presets settled it: **no single value holds 4.5:1 against both themes.** In the light theme alone, Default was 4.25 against `--surface-raised` and Violet was 4.23 — so the sentence in §6.6 claiming the presets each held 4.5:1 against both surfaces was false as written, before dark was considered at all. In the dark theme the same six ranged from 4.27 down to 2.71.
+
+**Decision.** Each preset carries a value per theme, in `--accent-preset-1` … `--accent-preset-6`, redefined by the `[data-theme='dark']` block. `--accent` resolves from preset 1 and nothing writes it inline unless the user has chosen a colour of their own. Each value is its hue at the lightness that clears 4.5:1 against its own theme's `--surface-raised`, adjusted in HSL so hue and saturation are unchanged.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| One accent value in both themes | Fails 4.5:1 in one of them. Every option here is a way of not having to choose; the measurement is the reason this one is gone. |
+| Derive the dark value from the hue at runtime | Correct for arbitrary custom colours, and it puts colour maths plus a second rendering of the same colour in the app, to serve a control that is by definition off the preset list. The dialog instead shows a custom colour's measured ratio and warns below 4.5:1. |
+| Keep the single value and exempt the accent from the contrast rule | Makes active-row text 2.7:1 for Magenta in dark. §10 says colour is never the only signal, and here the colour is also the only label. |
+| Curate twelve values and stop there, leaving custom unaddressed | Leaves the one input that can fail the bar unexplained. The warning is what makes "used verbatim" an honest default rather than a gap. |
+
+**Consequences.**
+
+- Four of the six light values are the reviewed palette unchanged; Default and Violet move. The prototype was updated in the same commit (ADR-016).
+- The dark default moves from `#6f9bff` to `#4881ef`, because the old value was chosen for feel rather than measured against the raised surface, and the six now share one rule.
+- A stored accent equal to any current *or retired* preset value reads back as "the default", so a settings file written before M6 does not silently become a custom accent and reintroduce the bug.
+- `src/styles/tokens.test.ts` asserts the ratio over both token tables. That test is what makes the §6.6 table a fact rather than a claim, and it is the automated contrast check M6's "Done when" requires.
+- The rule is one sentence and one number, which is the point: the previous rule was one sentence and one wrong number.

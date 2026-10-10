@@ -11,6 +11,7 @@ import { useTrashActions } from './hooks/useTrashActions';
 import { UndoToast } from './components/UndoToast';
 import { useUndoToast } from './components/useUndoToast';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { SettingsDialog } from './components/SettingsDialog';
 import {
   openNote as setOpenNote,
   select as setSelection,
@@ -25,6 +26,7 @@ import {
   useSettingsStore,
 } from './stores/settings';
 import { TopBar } from './components/TopBar';
+import { nextTheme } from './lib/theme';
 import { Sidebar } from './components/Sidebar';
 import { DesktopLayout, MobileLayout, TabletLayout } from './layout/DesktopLayout';
 import { useBreakpoint } from './layout/useBreakpoint';
@@ -72,6 +74,7 @@ function Shell() {
   const openNoteId = useSelectionStore((state) => state.openNoteId);
 
   const theme = useSettingsStore((state) => resolveTheme(state.theme, systemDark));
+  const themeSetting = useSettingsStore((state) => state.theme);
   const accent = useSettingsStore((state) => state.accent);
   const sidebarWidth = useSettingsStore((state) => state.sidebarWidth);
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
@@ -148,8 +151,10 @@ function Shell() {
   const [confirm, setConfirm] = useState<
     | { kind: 'destroy'; id: Uuid; title: string }
     | { kind: 'empty' }
+    | { kind: 'reset-settings' }
     | null
   >(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const now = useNow();
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
@@ -343,6 +348,28 @@ function Shell() {
         }
         return;
       }
+      /* §7: `Move focus: sidebar -> editor` is `Ctrl/Cmd+Enter`, and the same key
+         inside the editor toggles a task item (§7's other row). ProseMirror's
+         own binding runs first but does not stop the event bubbling, so the
+         target is what tells the two apart — without this check, every task
+         toggle would also steal focus into the editor. */
+      if (key === 'enter' && (event.ctrlKey || event.metaKey)) {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('[data-testid="note-editor"]') !== null) return;
+        event.preventDefault();
+        document.querySelector<HTMLElement>('[data-testid="note-editor"]')?.focus();
+        return;
+      }
+      /* §7: `Toggle theme` is `Ctrl/Cmd+Shift+L`. Light, dark, system, in that
+         order — the same cycle as the top-bar button, because a shortcut that
+         did something different from the control beside it would be worse than
+         having neither. `Shift+L` alone is left alone: browsers use it for
+         nothing, but the modifier is part of the binding either way. */
+      if (key === 'l' && event.shiftKey) {
+        event.preventDefault();
+        useSettingsStore.getState().setTheme(nextTheme(themeSetting));
+        return;
+      }
       /* §7: `Delete note` is `Ctrl/Cmd+Backspace`. Not plain Backspace — in a WebView
          that navigates back, and in the editor that deletes a character. */
       if (key === 'backspace') {
@@ -355,7 +382,52 @@ function Shell() {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [createNote, deleteOpenNote, tablet]);
+  }, [createNote, deleteOpenNote, tablet, themeSetting]);
+
+  /* §7: `Esc` dismisses the search field (in `TopBar`), a dialog (in
+     `useDialogFocus`), and the sidebar — the last one being the tablet drawer.
+     Bound at the window and gated on nothing else being open, because `Esc` is
+     the *cheapest* way out of every surface in the app and the surfaces nest:
+     a dialog opened from the drawer must close the dialog first, and one
+     opened from the overflow menu must close that. Testing the two flags is
+     what stops a single `Esc` from closing three things at once. */
+/* `Esc` has to close exactly one thing, and the surfaces nest: the search
+     field, a dialog, the overflow menu and the tablet drawer all dismiss on it.
+
+     Two guards, because they cover different cases. `defaultPrevented` catches
+     the one where a surface *above* this one consumed the same key event — React
+     flushes a discrete event's re-render before native propagation reaches
+     window, so by the time this listener runs the overlay is already closed and
+     any captured state would read as "nothing was open". The ref catches the
+     one where an overlay is open but focus is outside it, so nothing consumed
+     the key at all.
+
+     Without both, a single `Esc` closes the settings dialog and the drawer
+     behind it, and the user who pressed it once to dismiss a dialog finds the
+     sidebar has gone too. */
+const overlayOpen = settingsOpen || confirm !== null;
+/* Written in an effect rather than during render: a ref assigned in the render
+   body is a write during render, which concurrent React may discard or replay.
+   The read side is the important half — it has to be current when the key event
+   reaches window, and an effect runs before any user event can. */
+const overlayOpenRef = useRef(overlayOpen);
+useEffect(() => {
+  overlayOpenRef.current = overlayOpen;
+}, [overlayOpen]);
+
+useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      if (event.defaultPrevented || overlayOpenRef.current) return;
+      event.preventDefault();
+      setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [drawerOpen]);
 
   /* Leaving the editor on a small screen pops the view stack (§2.4), which is
      what the Android back button does natively in M7. */
@@ -463,8 +535,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
             void createNote();
           }}
           onToggleTheme={() => {
-            useSettingsStore.getState().setTheme(theme === 'dark' ? 'light' : 'dark');
+            useSettingsStore.getState().setTheme(nextTheme(themeSetting));
           }}
+          theme={theme}
           onToggleSidebar={() => {
             if (tablet) {
               setDrawerOpen((open) => !open);
@@ -475,7 +548,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
           /* Only the tablet drawer needs a visible control; desktop collapses
              through `Ctrl/Cmd+\` and has no button for it in the prototype. */
           showSidebarToggle={tablet}
-          onOpenOverflow={NOOP}
+          onOpenOverflow={() => {
+            setSettingsOpen(true);
+          }}
         />
       )}
 
@@ -494,8 +569,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
                 }}
                 onToggleSidebar={NOOP}
                 onToggleTheme={() => {
-                  useSettingsStore.getState().setTheme(theme === 'dark' ? 'light' : 'dark');
+                  useSettingsStore.getState().setTheme(nextTheme(themeSetting));
                 }}
+                theme={theme}
                 onOpenOverflow={NOOP}
               />
               {sidebar}
@@ -528,6 +604,44 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
           <UndoToast toast={undoToast} />
         </div>
       )}
+
+      {settingsOpen ? (
+        <SettingsDialog
+          theme={themeSetting}
+          effective={theme}
+          accent={accent}
+          defaultFolderId={defaultFolderId}
+          folders={folders ?? []}
+          onThemeChange={(next) => {
+            useSettingsStore.getState().setTheme(next);
+          }}
+          onAccentChange={(next) => {
+            useSettingsStore.getState().setAccent(next);
+          }}
+          onDefaultFolderChange={(next) => {
+            useSettingsStore.getState().setDefaultFolderId(next);
+          }}
+          onClose={() => {
+            setSettingsOpen(false);
+          }}
+          confirmReset={
+            /* Rendered as a sibling of the settings dialog, not inside it, so the
+               two focus traps are not nested — see the note in SettingsDialog. */
+            <ConfirmDialog
+              title="Reset all settings?"
+              body="Theme, accent colour, sidebar width and default folder return to their defaults. Your notes are not touched."
+              confirmLabel="Reset settings"
+              onCancel={() => {
+                setConfirm(null);
+              }}
+              onConfirm={() => {
+                setConfirm(null);
+                useSettingsStore.getState().reset();
+              }}
+            />
+          }
+        />
+      ) : null}
 
       {confirm?.kind === 'destroy' ? (
         <ConfirmDialog

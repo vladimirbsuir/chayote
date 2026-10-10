@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
+import { useDialogFocus } from './useDialogFocus';
 
 /* Destructive confirmation only — permanent delete, empty trash, deleting a
    folder that has children (`05-ui-ux.md` §4). Never for save or navigation:
    those must not stop to ask a question the user did not initiate.
 
-   `05-ui-ux.md` §10 sets three obligations and all three are about focus:
-   opening moves focus in and traps it, `Esc` closes, and closing restores focus
-   to whatever opened it. The trigger element is captured on open for exactly the
-   last one — a dialog that unmounts the thing that opened it has nowhere to
-   return to, which is the usual way this goes wrong. */
+   The three focus obligations of `05-ui-ux.md` §10 live in `useDialogFocus`,
+   shared with `SettingsDialog`. Two copies of a focus trap is how one of them
+   ends up missing its `Esc`, and §6.3 records the same shape of mistake for the
+   folder delete. */
 
 type ConfirmDialogProps = {
   title: string;
@@ -24,9 +23,6 @@ type ConfirmDialogProps = {
   children?: ReactNode;
 };
 
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 export function ConfirmDialog({
   title,
   body,
@@ -37,55 +33,7 @@ export function ConfirmDialog({
   onCancel,
   children,
 }: ConfirmDialogProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<Element | null>(null);
-
-  /* Capture the trigger before the dialog renders, because opening a modal moves
-     focus and the element that had it is the only way back. */
-  useEffect(() => {
-    triggerRef.current = document.activeElement;
-    const first = panelRef.current?.querySelector<HTMLElement>(FOCUSABLE);
-    first?.focus();
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (triggerRef.current instanceof HTMLElement) triggerRef.current.focus();
-    },
-    [],
-  );
-
-  const onKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>): void => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCancel();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-
-      /* A modal has to keep focus inside itself, or `Tab` walks behind it into
-         the editor — where the next keystroke would type into a note the user
-         thinks is not being edited. Wrapping at both ends is the whole trap: it
-         works whatever the tab order inside the panel happens to be, and it does
-         not need the panel's contents to be known here. */
-      const focusable = Array.from(
-        panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
-      );
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (first === undefined || last === undefined) return;
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    },
-    [onCancel],
-  );
+  const { panelRef, onKeyDown } = useDialogFocus(onCancel);
 
   const accent = tone === 'danger' ? 'text-[var(--danger)]' : 'text-[var(--warning)]';
 

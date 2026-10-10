@@ -2,15 +2,16 @@
 
 **Status:** Frozen. Last updated 2026-10-10.
 
-**Current position: M6, not started.** M0 through M5 shipped between 2026-10-07
-and 2026-10-10: the frontend scaffold, the data layer behind repository traits,
-the editor with autosave and paste sanitisation, the UI shell with the sidebar,
-the virtualised note list and the three responsive layouts, the whole of
-organisation — folders, tags, pinning and trash — and search. Work proceeds in
-order; a milestone is not "mostly done".
+**Current position: M6 shipped; M7 is next and is blocked.** M0 through M6
+shipped between 2026-10-07 and 2026-10-10: the frontend scaffold, the data layer
+behind repository traits, the editor with autosave and paste sanitisation, the UI
+shell with the sidebar, the virtualised note list and the three responsive
+layouts, the whole of organisation — folders, tags, pinning and trash — search,
+and themes, settings and the full keyboard map. Work proceeds in order; a
+milestone is not "mostly done".
 
-**M6 is blocked by nothing.** It needs no Android SDK: everything in it runs in
-the browser and on desktop. M7 is the milestone the SDK gates, and nothing else.
+**M7 is the only thing blocked, and it is blocked by the Android SDK alone.**
+M6 needed none of it.
 
 ---
 
@@ -179,6 +180,77 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 - `prefers-reduced-motion` honoured.
 - **Done when:** the app is fully operable from the keyboard, and both themes pass an automated contrast check.
 
+  **Shipped 2026-10-10**, branch `m6-themes-settings`, eight commits. Both halves
+  of "Done when" are covered by a command. 384 TS tests and 136 Playwright tests.
+
+  **The milestone did not start as written.** The bullet list assumes the themes,
+  the settings store and the OS listener are missing. Themes and the store
+  landed in M0 and M3 as groundwork — the tokens, the Tauri store with its
+  `localStorage` fallback, the 300 ms debounce, `resolveTheme` and the
+  `prefers-color-scheme` listener were all already there. What was genuinely
+  absent was `SettingsDialog`, `ThemeToggle`, the entry point to reach them, four
+  bindings from §7, required test 12, and any contrast assertion at all. The
+  empty states, the `prefers-reduced-motion` block, the focus ring and the
+  `aria-live` regions were also already in place from M2 and M3.
+
+  **Four defects, all silent, all shipped since M3.** Two were found by reading
+  the specification against the tree before writing anything, and two by tests:
+
+  - **The dark theme's accent was unreachable.** `applyAccent` wrote `--accent`
+    as an *inline* custom property on `document.documentElement` — the same
+    element carrying `data-theme` — so the value it wrote beat the dark block
+    whatever its specificity. Every user, on the default settings, saw the light
+    accent on a dark surface, in the app that `tokens.css` and the prototype both
+    gave one. **ADR-019.**
+  - **`05-ui-ux.md` §6.6's contrast claim was false as written.** It said each
+    preset holds 4.5:1 against both surfaces; in the light theme alone Default
+    was 4.25 against `--surface-raised` and Violet was 4.23, and the six ranged
+    from 4.27 down to 2.71 in the dark. No single hex holds it in both themes,
+    so each preset now carries one value per theme. The document is corrected
+    and the claim is asserted.
+  - **`--text-subtle` sat below the body-text bar in both themes** — 2.60:1
+    light, 3.33:1 dark — and it is not decorative: it carries note timestamps
+    and the "Untitled" title. Lifting it alone would have put it within 0.04:1
+    of `--text-muted`, so muted deepens to 7:1 and the ladder is four steps.
+  - **Four emoji in the specification's own diagrams**, which ADR-015 bans in
+    absolute terms: a pushpin in `04-editor.md` §9 and three ballot boxes in
+    `05-ui-ux.md` §2. Found by writing required test 12, which now scans
+    `src/` and `docs/`.
+
+  Five things shipped differently from the plan, each recorded where it belongs:
+
+  - **`SettingsDialog` has no Cancel.** Every field applies as it changes, as the
+    top-bar theme button always did, so there is no unsubmitted state for Cancel
+    to discard — it would be a button that closes the dialog without doing
+    anything, which §9 rejects for the desktop sidebar toggle in the same terms.
+    The prototype drew Cancel and Done; Done is what survives that, and the
+    prototype now matches.
+  - **The accent is stored as a choice, not a colour** — `{kind:'preset',index}`
+    or `{kind:'custom',hex}`. Mapping all six presets onto "the theme default"
+    was the bug I hit first: picking Teal left the default blue in place. An
+    index lets `applyAccent` write `var(--accent-preset-N)` inline, which the
+    dark theme resolves to its own value; a hex would pin it in both themes
+    again. `--accent-soft` is derived by `color-mix`, which `ConfirmDialog`
+    already used, so this adds nothing to the WebView baseline.
+  - **The custom accent's contrast is measured and shown.** It is the one thing
+    that can fall under 4.5:1 and it is used verbatim in both themes, so the
+    dialog reads out the ratio against the current theme's raised surface. The
+    only place in the app that computes a ratio.
+  - **The theme control is a radiogroup, not the tablist the prototype drew.**
+    Nothing in it moves between panels, and a radiogroup is what three exclusive
+    choices are. One tab stop, moved with arrow keys.
+  - **Level-2 screenshots cover all six viewport-and-theme combinations**, plus
+    the settings dialog and the tag editor. M0 had captured four, and the two
+    dark variants are exactly the gap M6 opened. Looking at the output found a
+    seventh defect: with no accent stored, no swatch carried the selection ring
+    while the readout said "Default accent".
+
+  **Two things the tests recorded as correct-by-design that are easy to get
+  wrong again:** `Tab` is trapped inside the editor (§7 binds it to insert two
+  spaces so it never cycles focus rings), and `Escape` closes exactly one surface
+  — the drawer needs both `defaultPrevented` and a live ref to know whether an
+  overlay above it already consumed the key.
+
 ### M7 — Android
 
 **Blocked until the Android SDK is installed.** Commands in `docs/11-verification.md` §3.5. Everything else in the roadmap is unaffected.
@@ -261,7 +333,7 @@ Each of these was resolved conservatively. Revisit the moment implementation pro
 | Q3 | `is_pinned` versus `is_favorite` | **Answered** — `is_pinned` only. `is_favorite` removed from the schema | — | Resolved |
 | Q4 | Timestamp style in the note list | **Answered** — relative only, no tooltip, per `05-ui-ux.md` §6.5a. The default in this table had contradicted itself; §6.5a now settles it | — | Resolved |
 | Q5 | Remember collapsed folder-tree state per folder | **Answered** — persisted per folder in settings, shipped at M4 | — | Resolved |
-| Q6 | Accent palette: one configurable colour, or presets plus custom | **Open** | Six presets plus a custom colour picker | M6 |
+| Q6 | Accent palette: one configurable colour, or presets plus custom | **Answered** — six presets plus a custom colour picker, **each preset carrying a value per theme**; shipped at M6 under ADR-019 | — | Resolved |
 | Q7 | Should pinning be visible as a dedicated filter, or only as an ordering? | **Answered** — both, per `05-ui-ux.md` §5 and §6.3a. The filter ships in M4 with the rest of the pinning work; the ordering already does | — | Resolved |
 | Q8 | Repository directory rename from `notes` to `chayote` | **Answered** — done, the directory is `D:\Projects\chayote` | — | Resolved |
 
@@ -281,6 +353,6 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | M3 | **Done** | 2026-10-09. `Sidebar`, `NoteCard`, a measured virtualised `NoteList`, `stores/selection.ts` + `stores/settings.ts`, `relativeTime`, three layouts, resizable sidebar, `Ctrl+N`/`Ctrl+F`/`Ctrl+\`. 98 TS tests + 49 Playwright tests. Four deviations recorded in §2 |
 | M4 | **Done** | 2026-10-10. Branch `m4-organisation`, six commits. The folder tree keyboard pattern of `05-ui-ux.md` §10.1 (one tab stop, roving tabindex); inline create/rename/delete with the descendant-count confirmation and the per-row overflow menu; drag to re-parent and reorder with the three-band drop target and the pre-write cycle refusal; the pin toggle with `Ctrl+D`, which added one IPC command, `notes_set_pinned`; the trash actions with their undo toast; and the status bar's folder and tag slots with their two popovers. Q5 closed. 36 Rust tests, 303 TS, 95 Playwright. Two things worth carrying forward: the autosave needed an exception to §5.1's unchanged-document skip that has to survive the debounce, a note-switch flush *and* the retry timer — the retry is unreachable from the UI, so it is unit-tested; and creating a tag flushes before refetching, because `tags_list` hides a tag whose count is zero and the new tag is genuinely not in the library until the note carrying it is saved |
 | M5 | **Done** | 2026-10-10. Branch `m5-search`, four commits. The `useSearch` hook — 150 ms debounce, the ≥2-character minimum, the active selection as scope, the previous page kept while the next one loads, and paging via `nextOffset`; results replacing the list with `Esc` restoring it; one `NoteCard` for both with `NoteRow` carrying an optional snippet; a snippet allowlist holding `mark` and nothing else; the "No results for “query”" state and a polite live count; the mobile list view's own field; and a mock backend that answers with real prefix matching, the 8.0/1.0 weighting, and `<mark>` snippets rather than substrings and an opening excerpt. Four deviations from the plan recorded in §2. 36 Rust tests, 338 TS, 107 Playwright. The p95 half of "Done when" is **outstanding** and deliberately not covered |
-| M6 | Not started | Q6 has a default. Screenshot review of the full UI starts here |
+| M6 | **Done** | 2026-10-10. Branch `m6-themes-settings`, eight commits. `SettingsDialog` and `ThemeToggle`, the top-bar overflow menu that reaches them, the three-state theme cycle on the button and on `Ctrl/Cmd+Shift+L`, `Ctrl/Cmd+Enter` for sidebar→editor and `Esc` for the tablet drawer; `useDialogFocus` shared with `ConfirmDialog`; required test 12 over the icon inventory, with the inventory read out of `05-ui-ux.md` and an emoji scan over `src/` and `docs/`; the automated contrast check M6's "Done when" names, over both token tables; and level-2 screenshots at all six viewport-and-theme combinations. Q6 closed. 384 TS tests, 136 Playwright. **Four silent defects found, all shipped since M3**: the dark theme's accent was unreachable because `applyAccent` wrote `--accent` inline on the element carrying `data-theme` (ADR-019); §6.6's contrast claim was false as written and no preset holds 4.5:1 in both themes, so each preset now has a value per theme; `--text-subtle` sat at 2.60:1 light and 3.33:1 dark on note timestamps, and the ladder is now four steps with muted at 7:1; and four emoji sat in the specification's own diagrams. Five deviations from the plan recorded in §2 |
 | M7 | Not started | **Blocked** — needs Android SDK, `docs/11-verification.md` §3.5 |
 | M8 | Not started | |

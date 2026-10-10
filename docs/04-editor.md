@@ -352,7 +352,7 @@ A single 28 px row at the bottom of the editor pane:
 
 ```
 [left]                                     [right]
-Untitled · Work · #work +2 · 📌   342 words    Saved
+Untitled · Work · #work +2 · [pin]   342 words    Saved
 ```
 
 | Element | Source |
