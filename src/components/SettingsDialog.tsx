@@ -145,12 +145,14 @@ export function SettingsDialog({
               {ACCENT_PRESETS.map((preset, offset) => {
                 const value = presetValue(preset, effective === 'dark');
                 const index = offset + 1;
-                /* `accent === null` is the *first* preset, not "any preset".
-                   Mapping all six onto null would make Green, Violet and the
-                   rest indistinguishable from Default, and picking Teal would
-                   leave the blue in place. */
+                /* `null` is the *first* preset, the theme's own default — not "no choice". With
+                   it excluded, no swatch carried the ring while the readout said
+                   "Default accent", and §10 is explicit that the ring must not be
+                   the only signal for a state that is in fact selected. */
                 const selected =
-                  accent !== null && accent.kind === 'preset' && accent.index === index;
+                  accent === null
+                    ? index === 1
+                    : accent.kind === 'preset' && accent.index === index;
                 return (
                   <button
                     key={preset.name}
@@ -159,7 +161,12 @@ export function SettingsDialog({
                     aria-checked={selected}
                     aria-label={preset.name}
                     title={preset.name}
-                    tabIndex={selected ? 0 : -1}
+                    /* One tab stop across the seven radios, so the picker costs one `Tab` rather
+                   than seven — the same reasoning §10.1 records for the folder
+                   tree. The first swatch carries it when the default is in use. */
+                tabIndex={
+                  selected ? 0 : accent === null && index === 1 ? 0 : -1
+                }
                     onClick={() => {
                       onAccentChange({ kind: 'preset', index });
                     }}
@@ -180,7 +187,7 @@ export function SettingsDialog({
                 aria-label="Custom colour"
                 title="Custom colour"
                 tabIndex={
-                  accent !== null && accent.kind === 'custom' ? 0 : accent === null ? 0 : -1
+                  accent !== null && accent.kind === 'custom' ? 0 : accent === null ? -1 : -1
                 }
                 onClick={() => {
                   onAccentChange({ kind: 'custom', hex: custom });

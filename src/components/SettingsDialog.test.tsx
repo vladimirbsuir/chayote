@@ -101,6 +101,35 @@ it('a preset click names that preset, and the first one is the theme default', (
     );
   });
 
+  it('marks the first preset selected when no accent is stored', () => {
+    /* Caught by looking at `screenshots/settings-dark.png`, which is what level 2
+       of `11-verification.md` §4 is for. `null` is the first preset — the theme's
+       own default — and the readout says so, but no swatch carried the ring. */
+    open({ accent: null });
+    expect(screen.getByRole('radio', { name: 'Default' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    for (const name of ['Green', 'Violet', 'Rust', 'Magenta', 'Teal', 'Custom colour']) {
+      expect(screen.getByRole('radio', { name }).getAttribute('aria-checked'), name).toBe(
+        'false',
+      );
+    }
+  });
+
+  it('is one tab stop across all seven accent choices', () => {
+    /* Six presets, a custom swatch and a colour input in a 28 px row: seven tab
+       stops to get past would be the same mistake §10.1 records for the folder
+       tree. Scoped to the accent group — the dialog has two radiogroups and the
+       theme one legitimately has its own tab stop. */
+    open({ accent: null });
+    const group = screen.getByRole('radiogroup', { name: 'Accent colour' });
+    const stops = Array.from(group.querySelectorAll('[role="radio"]')).filter(
+      (node) => node.getAttribute('tabindex') === '0',
+    );
+    expect(stops).toHaveLength(1);
+    expect(stops[0]?.getAttribute('aria-label')).toBe('Default');
+  });
+
   it('a custom click carries the hex, not a preset index', () => {
     const { onAccentChange } = open({ accent: null });
     fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
