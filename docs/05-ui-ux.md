@@ -24,8 +24,8 @@ The concrete consequence: no decoration, no gradients, no shadows for depth, no 
 │    ▸ [folder] Work          │   Discussed the launch date with the    │
 │       [folder] Projects     │   team. Action items below.              │
 │       [folder] Personal     │                                         │
-│    ▸ [folder] Reading       │   ☐ Draft the announcement              │
-│  ──────────────────────    │   ☐ Prepare the demo build              │
+│    ▸ [folder] Reading       │   [ ] Draft the announcement  │
+│  ──────────────────────    │   [ ] Prepare the demo build  │
 │  [hash] Tags            [+] │                                         │
 │    [hash] work      14       │                                         │
 │    [hash] ideas      3       │                                         │
@@ -77,7 +77,7 @@ Single pane. One view visible at a time; navigation pushes a view onto an in-app
                       │ [folder] Folders      │   │                      │
                       │ 12 notes              │   │  Discussed the…      │
                       │ [note list]           │   │                      │
-                      └──────────────────────┘   │  ☐ Draft…            │
+                      └──────────────────────┘   │  [ ] Draft…            │
                                                    │                      │
                                                    │  Personal #work     │
                                                    │  342 w  Saved       │
