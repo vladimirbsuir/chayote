@@ -58,7 +58,7 @@ The sidebar is three stacked regions, not three columns. Filters, then structure
 | Folders | max 40 % of pane, scroll | Tree | Collapsible, drag to re-parent and reorder |
 | Tags | max 25 % of pane, scroll | Flat list with counts | Collapsible |
 | List header | 32 px | Active selection name + count | |
-| Note list | remainder | Virtualised cards | Click to open, right-click for menu |
+| Note list | remainder | Virtualised cards | Click to open, right-click for menu, long-press for menu on touch |
 
 ### 2.3 Tablet (768–1023 px)
 
@@ -297,7 +297,7 @@ Delete moves the note to trash with an **undo toast** for 6 seconds offering "Un
 
 **A deleted note's row is menu-keyed, not a boolean.** Opening a menu remembers which note it is for and where; when the note's id, timestamp or available actions change, the key stops matching and the menu is simply not rendered. A boolean would need an effect to close it, and an effect repairs state one render late — showing the wrong note's actions for a frame, in a menu whose whole purpose is destructive actions.
 
-**The note row menu is portalled and positioned against the viewport.** The note list is virtualised, and every row is a transformed, absolutely positioned element — which creates a stacking context, so a menu rendered inside a row cannot be lifted above the rows after it by `z-index`, and the scroll container's `overflow` clips it as well. Measured in the click handler rather than in an effect, because the geometry is available at the click. It opens upward when there is no room below, which is the common case for the last card and not only for the last card.
+**The note row menu is portalled and positioned against the viewport.** The note list is virtualised, and every row is a transformed, absolutely positioned element — which creates a stacking context, so a menu rendered inside a row cannot be lifted above the rows after it by `z-index`, and the scroll container's `overflow` clips it as well. Measured in the handler that opens it rather than in an effect, because the geometry is available at the event. It opens upward when there is no room below, which is the common case for the last card and not only for the last card. It opens three ways — the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch — the same three as the folder menu below. A hold fires `contextmenu` on the device; the row is not selectable, because a hold over selectable text becomes a selection gesture and no `contextmenu` fires at all. The row eats the click a release synthesises rather than opening the note under the menu — on this WebView a prevented hold synthesises nothing and the menu simply stays open, and the guard is for engines that do.
 
 **The folder row menu is portalled the same way.** The tree scrolls inside its own `overflow` container, and the in-row menu was clipped by it — the long-press menu on a phone arrived as a sliver showing only Rename. Same contract: measured by the opener, flipped upward with no room below, closed by `Esc` and outside press.
 

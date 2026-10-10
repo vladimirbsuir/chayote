@@ -69,14 +69,24 @@ export function NoteRowMenu({
     [note.id],
   );
 
+  /* Outside press closes, on `click` and `auxclick` rather than `mousedown` —
+     deliberately. The press that opens the menu from a touch hold is still down
+     when the menu mounts, and its release synthesises a `mousedown`: closing on
+     `mousedown` would shut the menu in the user's face before the hold is over.
+     The release's `click` is swallowed separately by the row (it would open the
+     note under the menu), and only then does this close. `auxclick` keeps a
+     second right-click working: without it, right-clicking another row would
+     leave two menus up, since the right button's release never fires `click`. */
   useEffect(() => {
-    const onPointerDown = (event: MouseEvent): void => {
+    const onOutsidePress = (event: MouseEvent): void => {
       if (menuRef.current?.contains(event.target as Node)) return;
       onClose();
     };
-    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('click', onOutsidePress);
+    document.addEventListener('auxclick', onOutsidePress);
     return () => {
-      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('click', onOutsidePress);
+      document.removeEventListener('auxclick', onOutsidePress);
     };
   }, [onClose]);
 

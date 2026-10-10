@@ -222,6 +222,52 @@ test.describe('mobile touch', () => {
     isMobile: true,
   });
 
+  test('a trashed note restores from the row menu after the toast is gone', async ({
+    page,
+  }) => {
+    /* The gap this file keeps finding: on touch the note rows had no menu at
+       all — the button is `pointer:fine`-only and a hold selected text — so
+       once the undo toast expired a trashed note was stuck. The row answers
+       `contextmenu` like the folder rows, which is what a hold fires on the
+       device (proven with `input swipe x y x y 900`); the right-click here
+       reaches the same `openMenu` measurement. The toast is dismissed first so
+       this pins the stuck state, not the undo path. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    const card = page.getByTestId('note-card').first();
+    const noteId = await card.getAttribute('data-note-id');
+    await card.click({ button: 'right' });
+    await page.getByTestId('note-menu-delete').click();
+    await page.getByTestId('undo-toast-dismiss').click();
+
+    await page.getByTestId('filter-trash').click();
+    const trashed = page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`);
+    await expect(trashed).toBeVisible();
+    await trashed.click({ button: 'right' });
+
+    const menu = page.getByTestId('note-menu');
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox, 'note menu has no box').not.toBeNull();
+    if (menuBox === null) return;
+    expect(menuBox.x, 'menu starts off-screen').toBeGreaterThanOrEqual(0);
+    expect(menuBox.y, 'menu starts off-screen').toBeGreaterThanOrEqual(0);
+    expect(menuBox.x + menuBox.width, 'menu overflows the viewport').toBeLessThanOrEqual(
+      MOBILE.width,
+    );
+    expect(menuBox.y + menuBox.height, 'menu overflows the viewport').toBeLessThanOrEqual(
+      MOBILE.height,
+    );
+
+    await page.getByTestId('note-menu-restore').click();
+    await page.getByTestId('filter-all').click();
+    await expect(
+      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`),
+    ).toBeVisible();
+  });
+
   test('the folder menu opens fully inside the viewport', async ({ page }) => {
     /* The defect this file keeps finding: the in-row menu arrived clipped to a
        sliver by the tree's scroll container, and only a phone showed it. The

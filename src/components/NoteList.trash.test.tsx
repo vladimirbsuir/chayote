@@ -170,7 +170,7 @@ describe('note row actions', () => {
     render(<List onDelete={noop} />);
     openMenuFor('n-1');
 
-    fireEvent.mouseDown(document.body);
+    fireEvent.click(document.body);
 
     expect(screen.queryByTestId('note-menu')).toBeNull();
   });
@@ -211,6 +211,70 @@ describe('note row actions', () => {
     openMenuFor('n-1');
 
     expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('opens the menu from a right-click, the path a touch long-press takes', () => {
+    /* On the device a hold fires `contextmenu` — the WebView recognises the
+       adb swipe-hold, and the folder rows already open their menu this way. The
+       note rows answered it with a text selection, which is the gap: the menu
+       button is `pointer:fine`-only, so on touch there was no other path. */
+    render(<List onRestore={noop} onDestroy={noop} />);
+
+    fireEvent.contextMenu(screen.getByTestId('note-card'));
+
+    const labels = screen.getAllByRole('menuitem').map((item) => item.textContent);
+    expect(labels).toHaveLength(2);
+    expect(labels[0]).toContain('Restore');
+    expect(labels[1]).toContain('Delete permanently');
+  });
+
+  it('asks for no menu on right-click when the caller supplies no actions', () => {
+    render(<List />);
+
+    fireEvent.contextMenu(screen.getByTestId('note-card'));
+
+    expect(screen.queryByTestId('note-menu')).toBeNull();
+  });
+
+  it('does not open the note on the click that ends a long-press, but does after', () => {
+    /* The release after the hold synthesises a click. Without the guard the row
+       opens the note under the menu it just opened; with it, exactly that one
+       click is eaten — and as an outside click it also dismisses the menu — so
+       the next real click opens as usual. */
+    const onOpen = vi.fn();
+    render(
+      <NoteList
+        notes={[note()]}
+        openNoteId={null}
+        now={NOW}
+        folderNames={new Map()}
+        showFolder
+        onOpen={onOpen}
+        onDeleteNote={noop}
+        empty={EMPTY_STATE}
+      />,
+    );
+
+    const card = screen.getByTestId('note-card');
+    fireEvent.contextMenu(card);
+    expect(screen.getByTestId('note-menu')).toBeDefined();
+
+    fireEvent.click(card);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('note-menu')).toBeNull();
+
+    fireEvent.click(card);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith('n-1');
+  });
+
+  it('opens the menu from the ContextMenu key, per the §7 shortcut table', () => {
+    render(<List onDelete={noop} />);
+
+    fireEvent.keyDown(screen.getByTestId('note-card'), { key: 'ContextMenu' });
+
+    expect(screen.getByTestId('note-menu')).toBeDefined();
+    expect(screen.getByTestId('note-menu-delete')).toBeDefined();
   });
 });
 

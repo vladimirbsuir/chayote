@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { Folder, Hash, MoreHorizontal, Pin } from 'lucide-react';
 import { NoteRowMenu } from './NoteRowMenu';
 import { sanitizeSnippet } from '../lib/sanitize';
@@ -89,11 +89,23 @@ export const NoteCard = memo(function NoteCard({
   const menuStamp = `${note.id}:${note.updatedAt}:${String(hasRowActions)}`;
   const openMenuFor = menuFor !== null && menuFor.key === menuStamp ? menuFor : null;
 
-  /* Measured here, in the click handler, and handed to the menu as a plain value.
+  /* A press that opened the menu via long-press is still a press: the release
+     after the hold synthesises a click, and a click opens the note — covering
+     the menu the user just asked for. The flag eats exactly that one. It is set
+     where the menu opens from `contextmenu` and cleared wherever the menu
+     closes, so a right-click followed by `Esc` leaves the next real click alone. */
+  const suppressOpenRef = useRef(false);
+  const closeMenu = (): void => {
+    suppressOpenRef.current = false;
+    setMenuFor(null);
+  };
+
+  /* Measured here, in the handler that opens the menu — the button click, a
+     `contextmenu`, or the `ContextMenu` key — and handed to the menu as a plain value.
 
      Measuring inside the menu would need an effect, and an effect that measures the
      DOM and then sets state is a second render for something already known at the
-     moment of the click. A click is an event; the geometry is available there.
+     moment of the event. A click is an event; the geometry is available there.
 
      The list is a scroll container, so a menu opening downward is clipped at the
      bottom edge and one opening upward is covered at the top — and both happen
@@ -101,12 +113,12 @@ export const NoteCard = memo(function NoteCard({
      act on. Measured against the viewport rather than computed from the row's index,
      because the list is virtualised: the same index sits at a different height in a
      scrolled list, in a shorter window, and on a phone. */
-  const openMenu = (button: HTMLElement): void => {
+  const openMenu = (anchor: HTMLElement): void => {
     if (openMenuFor !== null) {
-      setMenuFor(null);
+      closeMenu();
       return;
     }
-    const rect = button.getBoundingClientRect();
+    const rect = anchor.getBoundingClientRect();
     const up = rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight && rect.top > MENU_ESTIMATED_HEIGHT;
     setMenuFor({
       key: menuStamp,
@@ -125,6 +137,13 @@ export const NoteCard = memo(function NoteCard({
       data-testid="note-card"
       data-note-id={note.id}
       onClick={() => {
+        /* A press that opened the menu via long-press ends here too: the release
+           after the hold synthesises a click, and opening the note under a menu
+           the user just asked for would cover it. */
+        if (suppressOpenRef.current) {
+          suppressOpenRef.current = false;
+          return;
+        }
         onOpen(note.id);
       }}
       onKeyDown={(event) => {
@@ -132,8 +151,33 @@ export const NoteCard = memo(function NoteCard({
           event.preventDefault();
           onOpen(note.id);
         }
+        /* §7: `ContextMenu` opens the focused row's menu — the application key
+           on a Windows keyboard, and the standard way to ask for a menu. Without
+           this the menu button's `tabIndex={-1}` leaves keyboard users with no
+           path to the row's actions at all. */
+        if (event.key === 'ContextMenu') {
+          if (!hasRowActions) return;
+          event.preventDefault();
+          openMenu(event.currentTarget);
+        }
       }}
-      className={`group relative cursor-pointer rounded-[var(--r-input)] border px-[10px] py-[9px] transition-colors ${
+      /* §2.2 and §9: right-click on desktop, long-press on touch — a hold fires
+         `contextmenu` on the device — and the row's own button, all reach the
+         same menu. `preventDefault` is what stops the hold from becoming a text
+         selection instead. Rows with no actions have no menu to open.
+         The `select-none` + `touch-callout` pair on the row is the other half:
+         on a text-rich card the hold is a selection gesture and no `contextmenu`
+         fires at all — measured on the device, where the hold selected text on
+         the old build and opened nothing on the new one until the row stopped
+         being selectable. Copying happens in the editor, not in the list, so
+         nothing specified is lost. */
+      onContextMenu={(event) => {
+        if (!hasRowActions) return;
+        event.preventDefault();
+        suppressOpenRef.current = true;
+        openMenu(event.currentTarget);
+      }}
+      className={`group relative cursor-pointer rounded-[var(--r-input)] border px-[10px] py-[9px] transition-colors select-none [-webkit-touch-callout:none] ${
         isOpen
           ? 'border-[var(--border)] bg-[var(--surface)]'
           : 'border-transparent hover:bg-[var(--surface)]'
@@ -226,7 +270,7 @@ export const NoteCard = memo(function NoteCard({
           onRestore={onRestore}
           onDestroy={onDestroy}
           onClose={() => {
-            setMenuFor(null);
+            closeMenu();
           }}
         />
       ) : null}
