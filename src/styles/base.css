@@ -56,6 +56,34 @@ body,
   height: 100%;
 }
 
+/* `06-platform.md` §4.3 and §4.4: the window is drawn edge to edge, so the app
+   must keep its own content clear of the system status bar and navigation bar.
+
+   M7 measured this on a device before it existed. Tauri's generated
+   `MainActivity` calls `enableEdgeToEdge()`, so the WebView fills the whole
+   window; with nothing consuming the insets, the mobile top bar was painted
+   *under* the status bar — the note title collided with the clock and the battery,
+   and the editor status bar sat behind the three-button navigation bar.
+
+   `viewport-fit=cover` in index.html is what makes `env()` report the insets at
+   all; without it both values are 0 on Android and this rule silently does
+   nothing. `max()` rather than a fixed value so a desktop browser, which reports 0,
+   is unaffected.
+
+   This is the CSS layer rather than a `WindowInsetsCompat` listener in
+   `MainActivity.kt` on purpose: `gen/android/` is generated code that a Tauri
+   version bump overwrites, and this is a layout concern the prototype already
+   describes. */
+:root {
+  --inset-top: env(safe-area-inset-top, 0px);
+  --inset-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+#root {
+  padding-top: var(--inset-top);
+  padding-bottom: var(--inset-bottom);
+}
+
 body {
   font-family: var(--font);
   background: var(--surface);
