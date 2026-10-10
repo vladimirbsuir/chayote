@@ -115,6 +115,25 @@ test.describe('mobile editor', () => {
     await expect(page.getByText('No note open')).toHaveCount(0);
   });
 
+  test('leaving the editor clears the open marker — the list shows no selection', async ({
+    page,
+  }) => {
+    /* Found on a phone: backing out of a note left its row highlighted, which on
+       desktop is the open marker beside a visible editor but on a phone — where
+       the editor is gone — reads as a stuck selection. Leaving closes the note
+       with the view, through the same funnel for the bar back affordance and the
+       system back button. */
+    await openEditor(page);
+    await expect(page.getByTestId('note-card')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Back to list' }).click();
+
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await expect(page.locator('[data-testid="note-card"][aria-selected="true"]')).toHaveCount(
+      0,
+    );
+  });
+
   test('a pin made in the editor reaches the Pinned filter', async ({ page }) => {
     /* The regression M7 found on the device: `EditorPane` called `notesApi.setPinned`
        directly, so it updated its own state and left every `['notes']` cache stale —
@@ -290,6 +309,80 @@ test.describe('mobile touch', () => {
     await hold(1);
 
     await expect(page.getByTestId('note-menu')).toHaveCount(1);
+  });
+
+  test('the row menu pins and unpins, the touch path to the pin', async ({ page }) => {
+    /* On touch there is no hover, so the row menu is the only path to the pin
+       outside the editor. Right-click reaches the same `openMenu` a hold does.
+       Proven by the label flipping: the menu re-reads the note, so the opposite
+       verb means the write landed and the list refreshed. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    const noteId = await page.getByTestId('note-card').first().getAttribute('data-note-id');
+    const row = (): ReturnType<typeof page.locator> =>
+      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`);
+    const menuLabel = async (): Promise<string> => {
+      await row().click({ button: 'right' });
+      const label = (await page.getByTestId('note-menu-pin').textContent()) ?? '';
+      await page.keyboard.press('Escape');
+      return label;
+    };
+
+    const first = await menuLabel();
+    expect(first).toMatch(/Pin note|Unpin note/);
+
+    await row().click({ button: 'right' });
+    await page.getByTestId('note-menu-pin').click();
+    await expect(page.getByTestId('note-menu')).toHaveCount(0);
+
+    expect(await menuLabel()).not.toBe(first);
+  });
+
+  test('tapping empty editor space puts the caret at the end', async ({ page }) => {
+    /* Found on a phone: tapping the empty area under a short note did nothing —
+       no caret, no keyboard — while tapping text worked. The editable element
+       was only as tall as its content, so the tap landed outside it. It now
+       fills the pane (taps below the text resolve natively), and taps in the
+       wrapper's own padding fall back to the document end. `touchscreen` drives
+       this because only a touch tap synthesises the path a finger takes. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await page.getByTestId('note-card').first().click();
+    const box = await page.getByRole('textbox', { name: 'Note content' }).boundingBox();
+    expect(box, 'editor has no box').not.toBeNull();
+    if (box === null) return;
+
+    const caret = async (): Promise<{ collapsed: boolean; inside: boolean }> =>
+      page.evaluate(() => {
+        const selection = document.getSelection();
+        const anchor = selection?.anchorNode ?? null;
+        return {
+          collapsed: selection?.isCollapsed ?? false,
+          inside:
+            anchor instanceof Node &&
+            document.querySelector('.ProseMirror')?.contains(anchor) === true,
+        };
+      });
+    const blur = async (): Promise<void> => {
+      await page.evaluate(() => {
+        (document.activeElement as HTMLElement | null)?.blur();
+      });
+    };
+
+    /* Below the text, inside the editable element's empty floor. */
+    await blur();
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height - 100);
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeFocused();
+    expect(await caret()).toEqual({ collapsed: true, inside: true });
+
+    /* The wrapper's own left padding, outside the editable element entirely. */
+    await blur();
+    await page.touchscreen.tap(box.x - 20, box.y + box.height / 2);
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeFocused();
+    expect(await caret()).toEqual({ collapsed: true, inside: true });
   });
 
   test('the folder menu opens fully inside the viewport', async ({ page }) => {

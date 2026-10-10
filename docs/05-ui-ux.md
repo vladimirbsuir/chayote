@@ -84,7 +84,7 @@ Single pane. One view visible at a time; navigation pushes a view onto an in-app
                                                    └──────────────────────┘
 ```
 
-Back behaviour: the Android system back button pops the view stack. At the root it moves the task to the background. The list → editor transition is a horizontal slide matching the platform convention.
+Back behaviour: the Android system back button pops the view stack. At the root it moves the task to the background. The list → editor transition is a horizontal slide matching the platform convention. Leaving the editor closes the note with the view: the list shows no open marker, because on a single pane there is no open note once the editor is gone — a marker there reads as a stuck selection.
 
 The editor view has its own top bar because it needs a back affordance, the note title, and a delete action. It does not reuse the desktop top bar.
 
@@ -93,6 +93,8 @@ The editor view has its own top bar because it needs a back affordance, the note
 So below 768 px the row carries **folder, tags, `342 w`, and Saved** — what `prototype/index.html` §3 already drew. The title is absent because the bar above it carries the title, and the pin is absent because §2.4 gives the editor its own bar for actions and the pin goes in that bar's overflow menu, beside the delete action. §9's row is unchanged.
 
 The row is also **44 px tall on mobile rather than 28**, because §9 requires 44 × 44 px touch targets on Android and a 28 px row cannot contain one. The bar grows rather than the target overflowing a row too short to hold it, which would look wrong to someone who can see exactly where the tap lands.
+
+**Tapping empty space under short content puts the caret at the end of the document.** The editable element fills the pane, so the tap lands inside it and resolves natively; taps in the surrounding padding fall back to the same place. Tapping text puts the caret exactly there, as everywhere. Found on a phone, where the dead area under a short note simply swallowed the tap.
 
 ### 2.5 Editor measure
 
@@ -293,7 +295,7 @@ The new note's folder is resolved in this order:
 
 Delete moves the note to trash with an **undo toast** for 6 seconds offering "Undo". The soft delete is already persisted; undo simply restores. Permanent delete and empty trash require `ConfirmDialog`.
 
-**The actions a note row offers are the selection's, not the shell's.** A live list offers exactly one item — *Move to trash*. The trash offers *Restore* and *Delete permanently*, and never *Move to trash* again. Emptiness drives the whole thing: a live note cannot have a "delete permanently" control on it, and a trashed note cannot be moved to the trash a second time. This is the one mistake in this section worth being pedantic about.
+**The actions a note row offers are the selection's, not the shell's.** A live list offers *Pin note*/*Unpin note* and *Move to trash*. The trash offers *Restore* and *Delete permanently*, and never *Move to trash* again. Emptiness drives the whole thing: a live note cannot have a "delete permanently" control on it, and a trashed note cannot be moved to the trash a second time. This is the one mistake in this section worth being pedantic about. The pin duplicates the row's hover control deliberately: on touch there is no hover, so without it a phone could only pin from inside the editor.
 
 **A deleted note's row is menu-keyed, not a boolean.** Opening a menu remembers which note it is for and where; when the note's id, timestamp or available actions change, the key stops matching and the menu is simply not rendered. A boolean would need an effect to close it, and an effect repairs state one render late — showing the wrong note's actions for a frame, in a menu whose whole purpose is destructive actions. **One menu is open at a time, and choosing an item closes it.** The state lives in the list, not the row — per-card state let two holds open two menus at once — and the close happens in the item press, because a permanent delete opens its confirmation before the note changes and the menu would sit under its own dialog.
 

@@ -7,6 +7,11 @@
   outline: none;
   white-space: pre-wrap;
   word-break: break-word;
+  /* At least as tall as the scroll container, so a tap below short content lands
+     inside the editable element and ProseMirror puts the caret at the end —
+     found on a phone, where tapping the empty area under a note did nothing at
+     all. Grows with the document past that, so long notes are untouched. */
+  min-height: 100%;
 }
 
 .note-editor h1 {

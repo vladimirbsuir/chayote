@@ -65,8 +65,8 @@ type NoteListProps = {
   onTogglePin?: (id: Uuid) => void;
   /** The note with a pin write in flight, so its control can be disabled. */
   pinPendingId?: Uuid | null;
-  /** §6.2: delete from a live list; restore and permanent delete from the trash.
-      All three go through the row's overflow menu, so a card stays a card. */
+  /** §6.2: pin and delete from a live list; restore and permanent delete from the
+      trash. All go through the row's overflow menu, so a card stays a card. */
   onDeleteNote?: (id: Uuid) => void;
   onRestoreNote?: (id: Uuid) => void;
   onDestroyNote?: (id: Uuid) => void;
@@ -94,7 +94,10 @@ export function NoteList({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const hasRowActions =
-    onDeleteNote !== undefined || onRestoreNote !== undefined || onDestroyNote !== undefined;
+    onTogglePin !== undefined ||
+    onDeleteNote !== undefined ||
+    onRestoreNote !== undefined ||
+    onDestroyNote !== undefined;
   const [menu, setMenu] = useState<MenuState | null>(null);
 
   /* Measured in the handler that opens it and handed to the menu as a plain value —
@@ -226,6 +229,8 @@ export function NoteList({
         <NoteRowMenu
           note={validMenu.note}
           placement={validMenu.placement}
+          pinned={validMenu.note.isPinned}
+          onTogglePin={onTogglePin}
           onDelete={onDeleteNote}
           onRestore={onRestoreNote}
           onDestroy={onDestroyNote}

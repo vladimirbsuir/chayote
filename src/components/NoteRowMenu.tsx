@@ -1,15 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { RotateCw, Trash } from 'lucide-react';
+import { Pin, RotateCw, Trash } from 'lucide-react';
 import type { NoteSummary } from '../types/ipc';
 
-/* The note row's overflow menu: `05-ui-ux.md` §6.2. Delete in a live list; restore
-   and permanent delete in the trash.
+/* The note row's overflow menu: `05-ui-ux.md` §6.2. Pin and delete in a live
+   list; restore and permanent delete in the trash.
 
-   Both icons are from the `05-ui-ux.md` §3.3 inventory — `rotate-cw` is listed for
-   "Retry a failed save, reset settings", and a restore is the same gesture in the
-   opposite direction; `trash` is listed for "permanent delete". No new icons, so no
-   inventory change, which is the point of the inventory being closed.
+   All three icons are from the `05-ui-ux.md` §3.3 inventory — `pin` is listed
+   for the row's own pin control, `rotate-cw` for "Retry a failed save, reset
+   settings" (a restore is the same gesture in the opposite direction), and
+   `trash` for "permanent delete". No new icons, so no inventory change, which
+   is the point of the inventory being closed. The pin duplicates the row's
+   hover control deliberately: on touch there is no hover, so without it a
+   phone could only pin from inside the editor.
 
    **Permanent delete is the only item that asks first**, and it is deliberately not
    the same dialog as the folder's: there is no count to name, because one note is
@@ -17,15 +20,19 @@ import type { NoteSummary } from '../types/ipc';
    trash a `ConfirmDialog` and gives soft delete an undo toast; a row that offered
    both a toast and a dialog for the same press would be asking twice. */
 
-export type NoteRowAction = 'delete' | 'restore' | 'destroy';
+export type NoteRowAction = 'pin' | 'delete' | 'restore' | 'destroy';
 
 type NoteRowMenuProps = {
   note: NoteSummary;
   /** Viewport coordinates, measured by the card in the click handler. A plain value
-      rather than an anchor element so the menu does not have to measure anything —
-      an effect that measures the DOM and then sets state is a second render for a
-      value that was already available when the click arrived. */
+     rather than an anchor element so the menu does not have to measure anything —
+     an effect that measures the DOM and then sets state is a second render for a
+     value that was already available when the click arrived. */
   placement: { top: number; left: number };
+  /** Whether the note is currently pinned, naming the pin item. Absent with the
+     handler in the trash, where a deleted note's pin is not actionable. */
+  pinned?: boolean;
+  onTogglePin?: (id: string) => void;
   onDelete?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDestroy?: (id: string) => void;
@@ -35,6 +42,8 @@ type NoteRowMenuProps = {
 export function NoteRowMenu({
   note,
   placement,
+  pinned,
+  onTogglePin,
   onDelete,
   onRestore,
   onDestroy,
@@ -45,7 +54,7 @@ export function NoteRowMenu({
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const title = titleOf(note);
 
-  const items = buildItems(onDelete, onRestore, onDestroy);
+  const items = buildItems(pinned ?? false, onTogglePin, onDelete, onRestore, onDestroy);
 
   /* Rendered through a portal and positioned against the viewport, which is the only
      way this menu is clickable at all.
@@ -160,13 +169,26 @@ type Item = {
 /** Built from whichever callbacks the caller supplied rather than from a `trashed`
     flag. A card offers the actions its selection can actually perform, so there is
     never a control that would delete something permanently by accident — and the
-    caller cannot get the two out of step, because there is only one source. */
+    caller cannot get the two out of step, because there is only one source. The pin
+    leads: it is non-destructive and, on touch without hover, the only path to it
+    outside the editor. */
 function buildItems(
+  pinned: boolean,
+  onTogglePin: ((id: string) => void) | undefined,
   onDelete: ((id: string) => void) | undefined,
   onRestore: ((id: string) => void) | undefined,
   onDestroy: ((id: string) => void) | undefined,
 ): Item[] {
   const items: Item[] = [];
+  if (onTogglePin !== undefined) {
+    items.push({
+      action: 'pin',
+      label: pinned ? 'Unpin note' : 'Pin note',
+      icon: Pin,
+      danger: false,
+      run: onTogglePin,
+    });
+  }
   if (onDelete !== undefined) {
     items.push({
       action: 'delete',

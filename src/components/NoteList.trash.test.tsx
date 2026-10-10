@@ -46,6 +46,7 @@ const noop = (): void => {};
 
 function List(props: {
   notes?: NoteSummary[];
+  onPin?: (id: string) => void;
   onDelete?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDestroy?: (id: string) => void;
@@ -58,6 +59,7 @@ function List(props: {
       folderNames={new Map()}
       showFolder
       onOpen={noop}
+      onTogglePin={props.onPin}
       onDeleteNote={props.onDelete}
       onRestoreNote={props.onRestore}
       onDestroyNote={props.onDestroy}
@@ -88,15 +90,16 @@ describe('note row actions', () => {
     expect(screen.queryByTestId('note-menu')).toBeNull();
   });
 
-  it('offers exactly one item — move to trash — in a live list', () => {
+  it('offers pin and move to trash, and nothing else, in a live list', () => {
     const onDelete = vi.fn();
-    render(<List onDelete={onDelete} />);
+    render(<List onPin={noop} onDelete={onDelete} />);
 
     openMenuFor('n-1');
 
     const items = screen.getAllByRole('menuitem');
-    expect(items).toHaveLength(1);
-    expect(items[0]?.textContent).toContain('Move to trash');
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toContain('Pin note');
+    expect(items[1]?.textContent).toContain('Move to trash');
   });
 
   it('offers restore and permanent delete, and no soft delete, in the trash', () => {
@@ -110,6 +113,27 @@ describe('note row actions', () => {
     expect(labels[1]).toContain('Delete permanently');
     /* §6.2: a note already in the trash cannot be moved to the trash again. */
     expect(labels.some((label) => label.includes('Move to trash'))).toBe(false);
+    /* The pin of a deleted note is not actionable anywhere, menu included. */
+    expect(screen.queryByTestId('note-menu-pin')).toBeNull();
+  });
+
+  it('names the pin item for the state it will leave, like the editor menu', () => {
+    render(<List notes={[note({ isPinned: true })]} onPin={noop} onDelete={noop} />);
+
+    openMenuFor('n-1');
+
+    expect(screen.getByTestId('note-menu-pin').textContent).toContain('Unpin note');
+  });
+
+  it('pins through the menu for the note the row is about', () => {
+    const onPin = vi.fn();
+    render(<List onPin={onPin} onDelete={noop} />);
+
+    openMenuFor('n-1');
+    fireEvent.click(screen.getByTestId('note-menu-pin'));
+
+    expect(onPin).toHaveBeenCalledWith('n-1');
+    expect(screen.queryByTestId('note-menu')).toBeNull();
   });
 
   it('calls the handler it was given, for the note the row is about', () => {

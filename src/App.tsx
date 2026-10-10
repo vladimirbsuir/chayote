@@ -442,6 +442,25 @@ const confirmRef = useRef(confirm);
   useEffect(() => {
     stackRef.current = stack;
   }, [stack]);
+
+  /* Leaving the editor on a small screen pops the view stack (§2.4) — and closes
+     the note with it. On desktop the open note stays open beside the list, so its
+     row keeps the marker; on mobile the editor is gone, and a marker on a note
+     that is not open anywhere reads as a stuck selection. Found on a phone: the
+     row stayed highlighted all the way back on the list.
+
+     One funnel for both exits — the editor's back affordance and the system back
+     button below — so the two cannot disagree about what "back" leaves behind.
+     The bridge reads it through a ref for the same reason it reads the stack
+     through one. */
+  const leaveEditor = useCallback(() => {
+    setStack(popView);
+    if (mobile) setOpenNote(null);
+  }, [mobile]);
+  const leaveEditorRef = useRef(leaveEditor);
+  useEffect(() => {
+    leaveEditorRef.current = leaveEditor;
+  }, [leaveEditor]);
   useEffect(() =>
     installBackHandler(() => {
       if (confirmRef.current !== null) {
@@ -453,7 +472,7 @@ const confirmRef = useRef(confirm);
         return true;
       }
       if (!canPop(stackRef.current)) return false;
-      setStack(popView);
+      leaveEditorRef.current();
       return true;
     }),
   );
@@ -471,12 +490,6 @@ const confirmRef = useRef(confirm);
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [drawerOpen]);
-
-  /* Leaving the editor on a small screen pops the view stack (§2.4), which is
-     what the Android back button does natively in M7. */
-  const closeEditor = useCallback(() => {
-    setStack(popView);
-  }, []);
 
   const sidebar = (
     <Sidebar
@@ -562,7 +575,7 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
         <EditorPane
           noteId={openNoteId}
           selectionKey={selectionKey(selection)}
-          onClose={mobile ? closeEditor : undefined}
+          onClose={mobile ? leaveEditor : undefined}
           /* Only where there is no note row to carry it: §2.4 gives the mobile editor
              bar its delete action, and on desktop the row menu already owns the verb.
              The trash selection is excluded for §6.2's reason — a live row must not
