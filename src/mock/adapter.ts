@@ -10,6 +10,7 @@ import type { Uuid } from '../types/note';
 import { EMPTY_DOC } from '../types/note';
 import type { MockDatabase, MockFolder, MockNote } from './derive';
 import { deriveTitle, plainTextOf, toNote, toSummary, toTree } from './derive';
+import { matchesTokens, rankFor, snippetFor, toSearchTokens } from './search';
 import { buildDatabase, uuidFrom } from './generate';
 import { cycleDetected, notFound, validation } from './errors';
 import { EMPTY_NOTE, FIXTURE_NOTES, FIXTURE_NOW, FIXTURE_TRASH } from './fixtures';
@@ -40,14 +41,6 @@ function sortNotes(notes: MockNote[], filter: Selection): MockNote[] {
   return [...notes].sort(
     (a, b) => Number(b.isPinned) - Number(a.isPinned) || b.updatedAt - a.updatedAt,
   );
-}
-
-function toFtsMatch(input: string): string[] | null {
-  const tokens = input
-    .split(/\s+/)
-    .map((token) => token.replace(/[^\p{L}\p{N}_]/gu, ''))
-    .filter((token) => token.length > 0);
-  return tokens.length === 0 ? null : tokens;
 }
 
 function foldCase(value: string): string {
@@ -267,39 +260,46 @@ notes_move: ({ id, folderId }) => {
     },
 
     search_query: ({ input }) => {
-      const scoped = sortNotes(
-        liveNotes().filter((note) => matchesFilter(note, input.filter)),
-        input.filter,
-      );
-      const tokens = toFtsMatch(input.query);
+      const scoped = liveNotes().filter((note) => matchesFilter(note, input.filter));
+      const tokens = toSearchTokens(input.query);
 
+      /* Sanitisation yielding nothing is not an error: `03-data-model.md` §3.6
+         falls back to the active filter ordered by recency, and the Rust service
+         does the same. Ordered after sorting rather than before, so the fallback
+         list is the one the user would have seen without the field. */
       if (tokens === null) {
-        const fallback = scoped.slice(0, input.limit).map((note) => ({
-          ...toSummary(note, state),
-          rank: 0,
-          snippet: toSummary(note, state).excerpt,
-        }));
-        return { hits: fallback, total: scoped.length, nextOffset: null };
+        const ordered = sortNotes(scoped, input.filter);
+        return {
+          hits: ordered.slice(input.offset, input.offset + input.limit).map((note) => {
+            const summary = toSummary(note, state);
+            return { ...summary, rank: 0, snippet: summary.excerpt };
+          }),
+          total: ordered.length,
+          nextOffset: null,
+        };
       }
 
       const hits = scoped
         .map((note) => {
           const summary = toSummary(note, state);
-          const haystack = foldCase(`${summary.title} ${plainTextOf(note.doc)}`);
-          const titleHay = foldCase(summary.title);
-          const matched = tokens.filter((token) => haystack.includes(foldCase(token)));
-          if (matched.length !== tokens.length) return null;
-          const titleHits = tokens.filter((token) => titleHay.includes(foldCase(token))).length;
-          return { summary, rank: -(titleHits * 8 + (matched.length - titleHits)) };
+          const body = plainTextOf(note.doc);
+          /* The title is indexed beside the body, so a match in either counts.
+             `matchesTokens` over both is what the JOIN in `03-data-model.md`
+             §3.6 does; testing them separately would let a note match on a title
+             and a different one on a body, which is not the same query. */
+          if (!matchesTokens(`${summary.title} ${body}`, tokens)) return null;
+          const rank = rankFor(summary.title, body, tokens);
+          if (rank === null) return null;
+          return { summary, rank, snippet: snippetFor(note.doc, tokens) };
         })
-        .filter(
-          (hit): hit is { summary: ReturnType<typeof toSummary>; rank: number } => hit !== null,
-        )
+        .filter((hit): hit is NonNullable<typeof hit> => hit !== null)
+        /* bm25, not the pinned/updated order of the normal list — `05-ui-ux.md`
+           §6.5, and the reason a search and a folder listing disagree. */
         .sort((a, b) => a.rank - b.rank);
 
       const page = hits.slice(input.offset, input.offset + input.limit);
       return {
-        hits: page.map(({ summary, rank }) => ({ ...summary, rank, snippet: summary.excerpt })),
+        hits: page.map(({ summary, rank, snippet }) => ({ ...summary, rank, snippet })),
         total: hits.length,
         nextOffset: input.offset + page.length < hits.length ? input.offset + page.length : null,
       };
