@@ -33,7 +33,11 @@ export type SidebarSearch = {
 
 type SidebarProps = {
   selection: Selection;
-  width: number;
+  /** Desktop/tablet pane width in px. Null in the mobile list view, where the
+      sidebar is the whole column (`05-ui-ux.md` §2.4) rather than a sized pane
+      with a divider — a fixed width there leaves a dead strip and a stray
+      border at the viewport edge. */
+  width: number | null;
   folders: FolderNode[] | undefined;
   tags: TagWithCount[] | undefined;
   notes: NoteRow[] | undefined;
@@ -135,8 +139,10 @@ export function Sidebar({
     <aside
       aria-label="Sidebar"
       data-testid="sidebar"
-      style={{ width }}
-      className="flex flex-none flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--surface-raised)]"
+      style={width === null ? undefined : { width }}
+      className={`flex flex-col overflow-hidden bg-[var(--surface-raised)] ${
+        width === null ? 'min-h-0 flex-1' : 'flex-none border-r border-[var(--border)]'
+      }`}
     >
       <Filters selection={selection} onSelect={onSelect} />
 

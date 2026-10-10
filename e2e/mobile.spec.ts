@@ -123,3 +123,23 @@ test.describe('mobile editor', () => {
     }
   });
 });
+
+test.describe('mobile list', () => {
+  test('the sidebar fills the viewport with no dead strip at the edge', async ({ page }) => {
+    /* Found on a phone: the list below the search field ended early with a
+       vertical divider floating off the right edge. The mobile list reuses the
+       desktop sidebar, which carried its fixed pane width into a full-width
+       column — and a divider against nothing. Like the status-bar tests above,
+       the defect is only visible in geometry. */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    const box = await page.getByTestId('sidebar').boundingBox();
+    expect(box, 'sidebar has no box').not.toBeNull();
+    if (box === null) return;
+    expect(box.x, 'sidebar does not start at the viewport edge').toBe(0);
+    expect(box.width, 'sidebar does not fill the viewport').toBe(MOBILE.width);
+  });
+});

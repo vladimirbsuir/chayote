@@ -309,6 +309,29 @@ describe('Sidebar while searching', () => {
     const marked = screen.getByTestId('sidebar').querySelector('[data-testid="note-snippet"] mark');
     expect(marked?.textContent).toBe('roadmap');
   });
+
+  it('fills the column with no divider when the width is null (mobile list view)', () => {
+    /* Found on a phone: the desktop width ended the list early with a stray
+       border at the viewport edge (`05-ui-ux.md` §2.4 draws no divider there).
+       jsdom computes no layout, so this asserts the classes and the style the
+       layout comes from rather than any geometry; `e2e/mobile.spec.ts` measures
+       the real box at 360 px. */
+    renderSidebar({ width: null });
+
+    const sidebar = screen.getByTestId('sidebar');
+    expect(sidebar.style.width).toBe('');
+    expect(sidebar.className).toContain('flex-1');
+    expect(sidebar.className).not.toContain('border-r');
+    expect(sidebar.className).not.toContain('flex-none');
+  });
+
+  it('keeps the sized pane with its divider on desktop', () => {
+    renderSidebar({ width: 320 });
+
+    const sidebar = screen.getByTestId('sidebar');
+    expect(sidebar.style.width).toBe('320px');
+    expect(sidebar.className).toContain('border-r');
+  });
 });
 
 afterEach(() => {
