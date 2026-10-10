@@ -55,6 +55,22 @@ async function activeTestId(page: Page): Promise<string | null> {
   );
 }
 
+/** The second race from `10-conventions.md` §10, which `editor.spec.ts` fixes
+    and this file did not: the editor is code-split, so `[data-testid="note-editor"]`
+    can be visible before ProseMirror has attached and taken the caret. A frame is
+    when its DOM observer runs. Without it `keyboard.type` sends the whole string
+    to `body` and the test fails on an assertion about the note's contents. */
+async function settleEditor(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      }),
+  );
+}
+
 test('a user can create, organise, find, edit, trash and restore without a mouse', async ({
   page,
 }) => {
@@ -67,6 +83,7 @@ test('a user can create, organise, find, edit, trash and restore without a mouse
   await expect(page.locator('[data-testid="note-editor"]')).toBeVisible();
 
   /* --- edit: the caret is in the editor, so keystrokes land in the note -- */
+  await settleEditor(page);
   await page.keyboard.type('Keyboard only shopping list');
   await expect(page.locator('[data-testid="note-editor"]')).toContainText(
     'Keyboard only shopping list',
