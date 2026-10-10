@@ -1,6 +1,5 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useRef } from 'react';
 import { Folder, Hash, MoreHorizontal, Pin } from 'lucide-react';
-import { NoteRowMenu } from './NoteRowMenu';
 import { sanitizeSnippet } from '../lib/sanitize';
 import type { NoteRow } from '../types/ipc';
 
@@ -13,21 +12,6 @@ import type { NoteRow } from '../types/ipc';
    13 px excerpt clamped to two lines, 12 px meta row. */
 
 const UNTITLED = 'Untitled';
-
-/** The menu's own metrics, from the prototype's popover: 168 px is the narrowest that
-    fits "Delete permanently" at 13 px with its icon, and 120 px is its height with
-    three items. Used only to decide which way it opens — enough to know whether there
-    is room below, without laying it out first. */
-const MENU_WIDTH = 168;
-const MENU_ESTIMATED_HEIGHT = 120;
-
-/** Which note's menu is open, and where. Keyed rather than a boolean, so a row whose
-    note, timestamp or available actions change simply stops matching — no effect
-    needed to close a menu whose row has gone or moved. */
-type MenuState = {
-  key: string;
-  placement: { top: number; left: number };
-};
 
 type NoteCardProps = {
   note: NoteRow;
@@ -52,6 +36,14 @@ type NoteCardProps = {
   onDelete?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDestroy?: (id: string) => void;
+  /** Whether this row's menu is the list's open one. The state lives in the list —
+      per-card state lets two holds open two menus at once — so this is a read-only
+      flag for the toggle below. */
+  menuOpen: boolean;
+  /** Open this row's menu, measured from the anchor. Always opens; the card
+      decides open versus close. */
+  onOpenMenu: (id: string, anchor: HTMLElement) => void;
+  onCloseMenu: () => void;
 };
 
 /* `memo` is not premature here: this is the component that renders once per
@@ -70,24 +62,12 @@ export const NoteCard = memo(function NoteCard({
   onDelete,
   onRestore,
   onDestroy,
+  menuOpen,
+  onOpenMenu,
+  onCloseMenu,
 }: NoteCardProps) {
   const untitled = note.title.length === 0;
   const hasRowActions = onDelete !== undefined || onRestore !== undefined || onDestroy !== undefined;
-
-  /* Which note's menu is open, held by id rather than as a boolean.
-    A boolean has to be reset in an effect whenever the row changes underneath it —
-     when the note is deleted, pinned, or its actions change with the selection — and
-     an effect that repairs state after the render in which it went stale shows the
-     wrong menu for a frame, with actions aimed at a note that is no longer there.
-     Keying it by id makes that impossible: the menu is open only for the note it was
-     opened for, and anything else renders none.
-
-     `updatedAt` is part of the key because a note whose content changed has re-sorted
-     under the pointer, and a menu left open over a list that has moved is a set of
-     actions aimed at a row the user is no longer looking at. */
-  const [menuFor, setMenuFor] = useState<MenuState | null>(null);
-  const menuStamp = `${note.id}:${note.updatedAt}:${String(hasRowActions)}`;
-  const openMenuFor = menuFor !== null && menuFor.key === menuStamp ? menuFor : null;
 
   /* A press that opened the menu via long-press is still a press: the release
      after the hold synthesises a click, and a click opens the note — covering
@@ -95,38 +75,20 @@ export const NoteCard = memo(function NoteCard({
      where the menu opens from `contextmenu` and cleared wherever the menu
      closes, so a right-click followed by `Esc` leaves the next real click alone. */
   const suppressOpenRef = useRef(false);
-  const closeMenu = (): void => {
+  const handleMenuClose = (): void => {
     suppressOpenRef.current = false;
-    setMenuFor(null);
+    onCloseMenu();
   };
 
-  /* Measured here, in the handler that opens the menu — the button click, a
-     `contextmenu`, or the `ContextMenu` key — and handed to the menu as a plain value.
-
-     Measuring inside the menu would need an effect, and an effect that measures the
-     DOM and then sets state is a second render for something already known at the
-     moment of the event. A click is an event; the geometry is available there.
-
-     The list is a scroll container, so a menu opening downward is clipped at the
-     bottom edge and one opening upward is covered at the top — and both happen
-     routinely, because the first and last cards are the two a user is most likely to
-     act on. Measured against the viewport rather than computed from the row's index,
-     because the list is virtualised: the same index sits at a different height in a
-     scrolled list, in a shorter window, and on a phone. */
-  const openMenu = (anchor: HTMLElement): void => {
-    if (openMenuFor !== null) {
-      closeMenu();
+  /* The card decides open versus close — the list only sets — so a second press
+     on the same row closes through `onCloseMenu` and a press on another row
+     replaces. */
+  const toggleMenu = (anchor: HTMLElement): void => {
+    if (menuOpen) {
+      handleMenuClose();
       return;
     }
-    const rect = anchor.getBoundingClientRect();
-    const up = rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight && rect.top > MENU_ESTIMATED_HEIGHT;
-    setMenuFor({
-      key: menuStamp,
-      placement: {
-        top: up ? rect.top - 4 : rect.bottom + 4,
-        left: Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8),
-      },
-    });
+    onOpenMenu(note.id, anchor);
   };
 
   return (
@@ -158,7 +120,7 @@ export const NoteCard = memo(function NoteCard({
         if (event.key === 'ContextMenu') {
           if (!hasRowActions) return;
           event.preventDefault();
-          openMenu(event.currentTarget);
+          toggleMenu(event.currentTarget);
         }
       }}
       /* §2.2 and §9: right-click on desktop, long-press on touch — a hold fires
@@ -174,8 +136,10 @@ export const NoteCard = memo(function NoteCard({
       onContextMenu={(event) => {
         if (!hasRowActions) return;
         event.preventDefault();
-        suppressOpenRef.current = true;
-        openMenu(event.currentTarget);
+        /* Only a fresh open can precede a release click: when this row's menu is
+           already up the press closes it, and no click follows that. */
+        if (!menuOpen) suppressOpenRef.current = true;
+        toggleMenu(event.currentTarget);
       }}
       className={`group relative cursor-pointer rounded-[var(--r-input)] border px-[10px] py-[9px] transition-colors select-none [-webkit-touch-callout:none] ${
         isOpen
@@ -240,18 +204,18 @@ export const NoteCard = memo(function NoteCard({
               tabIndex={-1}
               aria-label={`${titleOf(note)} actions`}
               aria-haspopup="menu"
-              aria-expanded={openMenuFor !== null}
+              aria-expanded={menuOpen}
               title={`${titleOf(note)} actions`}
               data-testid="note-menu-button"
               data-note-id={note.id}
               onClick={(event) => {
                 event.stopPropagation();
-                openMenu(event.currentTarget);
+                toggleMenu(event.currentTarget);
               }}
               onKeyDown={(event) => {
                 if (event.key === 'ContextMenu') {
                   event.preventDefault();
-                  openMenu(event.currentTarget);
+                  toggleMenu(event.currentTarget);
                 }
               }}
               className="grid h-[20px] w-[20px] place-items-center rounded text-[var(--text-subtle)] transition-colors hover:bg-[var(--surface-sunken)] hover:text-[var(--text)]"
@@ -261,19 +225,6 @@ export const NoteCard = memo(function NoteCard({
           </span>
         ) : null}
       </div>
-
-      {openMenuFor !== null ? (
-        <NoteRowMenu
-          note={note}
-          placement={openMenuFor.placement}
-          onDelete={onDelete}
-          onRestore={onRestore}
-          onDestroy={onDestroy}
-          onClose={() => {
-            closeMenu();
-          }}
-        />
-      ) : null}
     </div>
   );
 });

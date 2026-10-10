@@ -1,10 +1,11 @@
-import { useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ReactNode } from 'react';
 import type { NoteRow } from '../types/ipc';
 import type { Uuid } from '../types/note';
 import { relativeTime } from '../lib/relativeTime';
 import { NoteCard } from './NoteCard';
+import { NoteRowMenu } from './NoteRowMenu';
 import { EmptyState } from './EmptyState';
 
 /* The virtualised note list (`02-architecture.md` §8: 10 000 notes at 60 fps,
@@ -23,6 +24,28 @@ import { EmptyState } from './EmptyState';
 
 const ESTIMATED_CARD_HEIGHT = 96;
 const OVERSCAN = 6;
+
+/** The menu's own metrics, from the prototype's popover: 168 px is the narrowest that
+    fits "Delete permanently" at 13 px with its icon, and 120 px is its height with
+    three items. Used only to decide which way it opens — enough to know whether there
+    is room below, without laying it out first. */
+const MENU_WIDTH = 168;
+const MENU_ESTIMATED_HEIGHT = 120;
+
+/** One open row menu for the whole list, held here rather than in the cards:
+    per-card state lets two holds open two menus at once — found on a phone, where
+    long-pressing a second row left the first menu up. The folder tree holds its
+    single menu the same way. Keyed by id, timestamp and available actions, so a
+    re-sorting list cannot leave one open over the wrong note. */
+type MenuState = {
+  id: string;
+  key: string;
+  placement: { top: number; left: number };
+};
+
+function menuKey(note: NoteRow, hasRowActions: boolean): string {
+  return `${note.id}:${note.updatedAt}:${String(hasRowActions)}`;
+}
 
 type NoteListProps = {
   /** `NoteSummary` in a selection, `SearchHit` while searching — the second is
@@ -69,6 +92,54 @@ export function NoteList({
   empty,
 }: NoteListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const hasRowActions =
+    onDeleteNote !== undefined || onRestoreNote !== undefined || onDestroyNote !== undefined;
+  const [menu, setMenu] = useState<MenuState | null>(null);
+
+  /* Measured in the handler that opens it and handed to the menu as a plain value —
+     the `NoteCard` contract, moved up with the state. A plain value rather than an
+     anchor element so the menu does not have to measure anything: an effect that
+     measures the DOM and then sets state is a second render for a value that was
+     already available when the event arrived.
+
+     Always sets, never toggles: the card decides open versus close (it knows
+     whether its own menu is up), so a second press on the same row closes through
+     `onCloseMenu` and a press on another row replaces. */
+  const openMenu = useCallback(
+    (id: Uuid, anchor: HTMLElement): void => {
+      const note = notes.find((candidate) => candidate.id === id);
+      if (note === undefined) return;
+      const rect = anchor.getBoundingClientRect();
+      const up =
+        rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight &&
+        rect.top > MENU_ESTIMATED_HEIGHT;
+      setMenu({
+        id,
+        key: menuKey(note, hasRowActions),
+        placement: {
+          top: up ? rect.top - 4 : rect.bottom + 4,
+          left: Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8),
+        },
+      });
+    },
+    [hasRowActions, notes],
+  );
+  const closeMenu = useCallback((): void => {
+    setMenu(null);
+  }, []);
+
+  /* Valid only while its note is still what it was: a pin, delete or restore
+     re-sorts the list under the menu, and the key stops matching rather than
+     needing an effect to close it. */
+  const menuNote =
+    menu === null ? undefined : notes.find((candidate) => candidate.id === menu.id);
+  const validMenu =
+    menu !== null &&
+    menuNote !== undefined &&
+    menu.key === menuKey(menuNote, hasRowActions)
+      ? { note: menuNote, placement: menu.placement }
+      : null;
 
   /* The React Compiler skips memoising a component that calls `useVirtualizer`,
      because the instance is rebuilt on every render and its accessors would
@@ -143,11 +214,24 @@ export function NoteList({
                 onDelete={onDeleteNote}
                 onRestore={onRestoreNote}
                 onDestroy={onDestroyNote}
+                menuOpen={validMenu?.note.id === note.id}
+                onOpenMenu={openMenu}
+                onCloseMenu={closeMenu}
               />
             </div>
           );
         })}
       </div>
+      {validMenu === null ? null : (
+        <NoteRowMenu
+          note={validMenu.note}
+          placement={validMenu.placement}
+          onDelete={onDeleteNote}
+          onRestore={onRestoreNote}
+          onDestroy={onDestroyNote}
+          onClose={closeMenu}
+        />
+      )}
     </div>
   );
 }

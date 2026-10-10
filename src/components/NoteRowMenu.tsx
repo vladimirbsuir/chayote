@@ -128,7 +128,13 @@ export function NoteRowMenu({
           tabIndex={-1}
           data-testid={`note-menu-${item.action}`}
           onClick={() => {
+            /* Choosing closes: the menu's job is done, and the note has not
+               changed yet — without this a permanent delete leaves the menu
+               sitting under its own confirmation dialog. The data-change
+               keying closes it a moment later for the other actions; closing
+               here as well is what makes all three behave the same. */
             item.run(note.id);
+            onClose();
           }}
           className={`flex w-full items-center gap-2 px-3 py-[6px] text-left text-[13px] hover:bg-[var(--surface-sunken)] ${
             item.danger ? 'text-[var(--danger)]' : 'text-[var(--text)]'

@@ -268,6 +268,30 @@ test.describe('mobile touch', () => {
     ).toBeVisible();
   });
 
+  test('only one row menu is open at a time', async ({ page }) => {
+    /* Found on a phone: long-pressing a second row left the first menu up, so
+       two portalled menus overlapped. The state lives in the list — opening for
+       another row replaces. Dispatched, not right-clicked: a right-click sends
+       a `mousedown` first and the old menu closes on that, which is exactly what
+       a touch hold does not do — and what hid this on desktop. */
+    const hold = (index: number): Promise<void> =>
+      page
+        .getByTestId('note-card')
+        .nth(index)
+        .evaluate((row) => {
+          row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+        });
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await hold(0);
+    await expect(page.getByTestId('note-menu')).toBeVisible();
+    await hold(1);
+
+    await expect(page.getByTestId('note-menu')).toHaveCount(1);
+  });
+
   test('the folder menu opens fully inside the viewport', async ({ page }) => {
     /* The defect this file keeps finding: the in-row menu arrived clipped to a
        sliver by the tree's scroll container, and only a phone showed it. The

@@ -276,6 +276,46 @@ describe('note row actions', () => {
     expect(screen.getByTestId('note-menu')).toBeDefined();
     expect(screen.getByTestId('note-menu-delete')).toBeDefined();
   });
+
+  it('keeps only one menu open: a second row replaces the first', () => {
+    /* Found on a phone: long-pressing a second row left the first menu up, so
+       two portalled menus overlapped. The state lives in the list now, and
+       opening for another row replaces rather than adds. */
+    render(
+      <List
+        notes={[note({ id: 'n-1', title: 'First' }), note({ id: 'n-2', title: 'Second' })]}
+        onDelete={noop}
+      />,
+    );
+
+    const cards = screen.getAllByTestId('note-card');
+    const first = cards[0];
+    const second = cards[1];
+    if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement)) {
+      throw new Error('expected two cards');
+    }
+    fireEvent.contextMenu(first);
+    expect(screen.getByRole('menu', { name: 'First actions' })).toBeDefined();
+
+    fireEvent.contextMenu(second);
+
+    expect(screen.getAllByRole('menu')).toHaveLength(1);
+    expect(screen.getByRole('menu', { name: 'Second actions' })).toBeDefined();
+  });
+
+  it('closes the menu when an action runs, before anything else changes', () => {
+    /* Found on a phone: permanent delete opens a confirmation, and the menu
+       stayed up under its own dialog — the note has not changed yet, so the
+       data-change keying cannot close it. Choosing closes, for all three items. */
+    const onDestroy = vi.fn();
+    render(<List onRestore={noop} onDestroy={onDestroy} />);
+
+    fireEvent.contextMenu(screen.getByTestId('note-card'));
+    fireEvent.click(screen.getByTestId('note-menu-destroy'));
+
+    expect(onDestroy).toHaveBeenCalledWith('n-1');
+    expect(screen.queryByTestId('note-menu')).toBeNull();
+  });
 });
 
 describe('trash actions against the backend', () => {
