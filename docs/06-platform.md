@@ -105,6 +105,10 @@ Code signing is out of scope for v1. Document the platform-specific unsigned-lau
 
 `npx tauri android init` scaffolds the Gradle project. Release builds are APKs signed with a keystore that is **not** in the repository. Store distribution (AAB, Play) is out of scope for v1.
 
+**The generator's defaults do not match this table, and M7 changed all three.** `android init` emits `minSdk 24`, and this project builds at 26. The generated project is **tracked in git** (`src-tauri/gen/android/`), because these corrections live in it and an untracked `gen/` meant a fresh clone reproduced the uncorrected configuration — the same class of failure `11-verification.md` §2 records, where three documents agreed and were all wrong. Build output, `jniLibs`, `local.properties`, and keystores stay ignored.
+
+As built at M7: **minSdk 26, compile/target SDK 37**, NDK `27.2.12479018`, Gradle 9.6.1, AGP 9.3.1, Kotlin 2.2.10, JDK 21. Both arm ABIs cross-compile and link; `aarch64-linux-android` and `armv7-linux-androideabi` are installed, and `android init` additionally installs the two x86 targets for the emulator, which are not shipped.
+
 ### 4.2 Manifest and permissions
 
 The manifest requests the minimum. No `INTERNET` permission until the sync phase — that makes the offline guarantee enforceable by the platform, not just by convention.
@@ -115,7 +119,24 @@ The manifest requests the minimum. No `INTERNET` permission until the sync phase
 | `WRITE_EXTERNAL_STORAGE` | No | Attachments only (v1.2) |
 | `VIBRATE` | No | |
 
-`android:windowSoftInputMode="adjustResize"` is **required**, not optional: without it the on-screen keyboard covers the editor and the app is unusable.
+`android:windowSoftInputMode="adjustResize"` is **required**, not optional: without it the on-screen keyboard covers the editor and the app is unusable. `android init` does not add it; it is set in `app/src/main/AndroidManifest.xml`.
+
+**`INTERNET` is declared in `app/src/debug/AndroidManifest.xml`, not the main one.** The generator adds it unconditionally because `tauri android dev` serves the WebView from a local dev server and needs a socket; a release build loads the bundled assets and does not. Splitting it by build type is what makes the guarantee real rather than aspirational — a permission in a debug-only manifest cannot reach a release APK.
+
+The one permission a release APK *does* carry is `com.chayote.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, injected by `androidx.core` at `protectionLevel="signature"`. It is not a capability and grants the app nothing it does not already have.
+
+**Verified at M7 against the built APK, not against the source file** — `aapt2 dump permissions` and `aapt2 dump xmltree`, since a manifest that is correct on disk and correct in the artefact are not the same claim:
+
+| Property | Observed |
+|----------|----------|
+| `INTERNET` | **absent** |
+| `usesCleartextTraffic` | `false` in release (`true` in debug, for the dev server) |
+| `minSdkVersion` / `targetSdkVersion` | `26` / `37` |
+| `windowSoftInputMode` | `0x10` — `adjustResize` |
+| `native-code` | `arm64-v8a`, `armeabi-v7a` |
+| Size | **14.65 MiB** against the 20 MB budget in `02-architecture.md` §8 |
+
+13.11 MiB of that is the two `.so` files; the frontend is embedded in them rather than shipped as loose assets, which is why the APK contains no `.js`, `.css`, or `.woff` entries. The cyrillic subsets of Inter are present.
 
 ### 4.3 Keyboard and viewport
 
