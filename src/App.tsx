@@ -406,8 +406,14 @@ function Shell() {
      behind it, and the user who pressed it once to dismiss a dialog finds the
      sidebar has gone too. */
 const overlayOpen = settingsOpen || confirm !== null;
+/* Written in an effect rather than during render: a ref assigned in the render
+   body is a write during render, which concurrent React may discard or replay.
+   The read side is the important half — it has to be current when the key event
+   reaches window, and an effect runs before any user event can. */
 const overlayOpenRef = useRef(overlayOpen);
-overlayOpenRef.current = overlayOpen;
+useEffect(() => {
+  overlayOpenRef.current = overlayOpen;
+}, [overlayOpen]);
 
 useEffect(() => {
     if (!drawerOpen) return;

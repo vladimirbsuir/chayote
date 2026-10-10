@@ -54,7 +54,12 @@ test.describe('the remaining §7 shortcuts', () => {
        to the driver before ProseMirror has processed it, and the shortcut would
        then be evaluated against the previous selection. */
     await page.evaluate(
-      () => new Promise((resolve) => requestAnimationFrame(() => resolve(null))),
+      () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => {
+            resolve(null);
+          });
+        }),
     );
 
     await page.keyboard.press('Control+Enter');
