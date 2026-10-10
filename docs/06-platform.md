@@ -85,6 +85,8 @@ Only within the app: folder re-parenting, reordering, and the tag list. External
 | Target | Format |
 |--------|--------|
 | Windows | NSIS `.exe` installer, and a portable `.exe` |
+
+The portable `.exe` is the unbundled release binary (`npx tauri build --no-bundle`, `src-tauri/target/release/chayote.exe`), not a bundle target: Tauri 2 has no portable target, and the M8 portable deliverable is that binary, verified to launch and create `chayote.db` on Windows.
 | macOS | `.app` and `.dmg`. No notarisation in v1 — unsigned builds warn on first launch |
 | Linux | `.deb` and `.AppImage` |
 

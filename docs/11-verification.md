@@ -28,15 +28,15 @@ Measured on the development machine, 2026-10-07. Re-measured at the end of M0, a
 | Chromium for Playwright | **Yes** | `npx playwright install chromium` must have been run for the installed `@playwright/test` revision; a version bump requires running it again |
 | Screen capture of a native window | **Yes** — `System.Drawing` available | Enables capturing the actual Tauri window |
 | JDK 21 (Temurin) | Yes | AGP 8.x requires 17 or newer |
-| Android SDK | **Yes** | `%LOCALAPPDATA%\Android\Sdk`. platforms android-33…37.0, build-tools 34.0.0…36.1.0, NDK 24.0.8215888 / 27.1.12297006 / **27.2.12479018**, `cmdline-tools` latest, **licences already accepted** |
+| Android SDK | **Yes** | `%LOCALAPPDATA%\Android\Sdk`. platforms android-33…37.0, build-tools 34.0.0…36.1.0, NDK 24.0.8215888 / **27.2.12479018**, `cmdline-tools` latest, **licences already accepted** |
 | `platform-tools` / `adb` | **Yes** — 1.0.41 | |
 | `ANDROID_HOME` / `ANDROID_SDK_ROOT` | **Yes**, set to the SDK path | Was empty until M6; both are read by Gradle and by Tauri |
 | Rust Android targets | **Yes** — installed at M7 on 2026-10-10 | `aarch64-linux-android`, `armv7-linux-androideabi`, plus `i686` and `x86_64` which `android init` adds for the emulator |
-| A connected device or emulator | **No** | `adb devices` listed nothing through M6. **The build half ran at M7 without one**; the runtime half below still needs it |
+| A connected device or emulator | **Yes, since the M7 run** | Infinix X6836 (Android 13, arm64-v8a), attached over USB for the §3.5a runtime checks and still attached. Through M6 `adb devices` listed nothing |
 
 **This table was wrong from M1 until M6.** Every version of it said the Android SDK was absent, and so did `README.md` §7 and `docs/08-roadmap.md` §2. The SDK had been installed the whole time — it simply was not on `PATH` and the environment variables were empty, and nobody checked the filesystem before writing it down. The correction is recorded here rather than quietly fixed, because the failure is the point: **a capability table written from assumption is a table that lies**, and three documents agreed with each other and were all wrong.
 
-**Consequence:** M0–M6 and M8 are fully agent-verifiable. **M7 is buildable without a device** — the toolchain is present and an APK can be produced and inspected — but **it cannot be verified** without one. What that leaves unverifiable is listed in §3.5.
+**Consequence:** M0–M6 and M8 are fully agent-verifiable. **M7 was buildable without a device** — the toolchain is present and an APK can be produced and inspected — but its runtime half needed one, and got it: all but the three unmeasured items in §3.5a are now verified on hardware.
 
 **The build half of M7 ran on 2026-10-10 and passed.** `tauri android init`, both arm ABIs cross-compiling and linking, a 14.65 MiB release APK against the 20 MB budget, and a manifest checked with `aapt2` for a missing `INTERNET` permission and a present `adjustResize`. Details and the commands are in §3.5. The runtime half remains unverified, and no Android *runtime* claim is made anywhere in this repository until a device is attached.
 
@@ -86,7 +86,7 @@ npm run tauri dev
 
 Use this sparingly — it is slower than Playwright, needs a display, and cannot be run headless. It is the check for window-level behaviour: theme switching through the real IPC path, `adjustResize` on Android, window close flushing an autosave, native clipboard.
 
-### 3.5 Android — the build half is automated; the runtime half is manual and blocked on a device
+### 3.5 Android — the build half is automated; the runtime half is manual, run on hardware at M7
 
 `06-platform.md` §6 "Android" is a checklist a human walks through on a physical arm64 device. It cannot be automated on this machine.
 
@@ -120,7 +120,7 @@ $apk = "src-tauri\gen\android\app\build\outputs\apk\universal\release\app-univer
 
 The first must not list `INTERNET`; the second must report `native-code` as `arm64-v8a` and `armeabi-v7a` only, and `minSdkVersion:'26'`; the third must carry `windowSoftInputMode=0x10`. `(Get-Item $apk).Length` is the size check — 15,364,194 bytes, **14.65 MiB** against the 20 MB budget.
 
-**What it still cannot do is run.** Until `adb devices` lists a device, no **runtime** Android claim is verifiable and none is made — a build is not a test.
+**Running it needed a device, and since the M7 run there has been one.** Every **runtime** Android claim below stood unverified until the Infinix attached; §3.5a records what the device proved. A build is not a test, and neither is a run on an emulator the project does not keep.
 
 ### 3.5a What a build proves and what only a device does
 

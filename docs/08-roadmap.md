@@ -264,13 +264,12 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 
 ### M7 — Android
 
-**The build half is done and verified; the runtime half is blocked on a device.**
-`tauri android init` has run, both arm ABIs cross-compile and link, the release APK
+**M7 shipped, build and runtime.** `tauri android init` has run, both arm ABIs cross-compile and link, the release APK
 measures **14.65 MiB** against the 20 MB budget, and the manifest was read out of the
 built artefact with `aapt2`. `docs/11-verification.md` §3.5 has the commands.
 
-**Blocked on a device.** `adb devices` lists nothing, and the runtime half of this
-milestone needs a physical arm64 handset: `adjustResize` against the on-screen
+**The runtime half waited on a device, then got one.** Through M6 `adb devices` listed nothing; the Infinix X6836 attached for the M7 run covered the whole runtime half of this
+milestone on a physical arm64 handset: `adjustResize` against the on-screen
 keyboard, the back-button stack, `Pause`/`Resume` flushing, a stable System WebView,
 long-press and 44 px touch targets, rotation, airplane mode, and the **real** SQLite
 backend running on device. Everything so far ran against the mock backend in a

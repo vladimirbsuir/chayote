@@ -7,18 +7,18 @@ account, and stores your notes in a single SQLite file on your device.
 
 Two downloads are published for every release:
 
-| File | What it is |
-|------|------------|
-| `Chayote_*_x64-setup.exe` | NSIS installer. Installs Chayote for the current user. |
-| `Chayote_*.exe` (portable) | The app itself. Runs from anywhere, writes nothing outside the data locations below. |
+| File                      | What it is                                                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `Chayote_*_x64-setup.exe` | NSIS installer. Installs Chayote for the current user.                                                                          |
+| `chayote.exe` (portable)  | The app itself. Runs from anywhere, writes nothing outside the data locations below. Produced by `npx tauri build --no-bundle`. |
 
 The installer is **unsigned** in v1. Windows SmartScreen will warn that the
 publisher is unknown. Click `More info`, then `Run anyway`.
 
 ## macOS
 
-| File | What it is |
-|------|------------|
+| File            | What it is                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------ |
 | `Chayote_*.dmg` | Disk image. Open it and drag Chayote into Applications. A bare `.app` is published alongside it. |
 
 The build is **unsigned and unnotarised** in v1. On first launch, macOS will
@@ -27,15 +27,15 @@ choose `Open` again in the dialog. You only do this once.
 
 ## Linux
 
-| File | What it is |
-|------|------------|
-| `Chayote_*.deb` | Install with `sudo dpkg -i Chayote_*.deb` (or `sudo apt install ./Chayote_*.deb`). |
-| `Chayote_*.AppImage` | Make it executable once — `chmod +x Chayote_*.AppImage` — then run it. |
+| File                 | What it is                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| `Chayote_*.deb`      | Install with `sudo dpkg -i Chayote_*.deb` (or `sudo apt install ./Chayote_*.deb`). |
+| `Chayote_*.AppImage` | Make it executable once — `chmod +x Chayote_*.AppImage` — then run it.             |
 
 ## Android
 
-| File | What it is |
-|------|------------|
+| File                        | What it is                                                                |
+| --------------------------- | ------------------------------------------------------------------------- |
 | `app-universal-release.apk` | Debug-signed APK for `arm64-v8a` and `armeabi-v7a`. Android 8.0 or newer. |
 
 Android does not allow installing APKs from outside the store by default.
@@ -55,10 +55,10 @@ nothing changes.
 
 ## Your data
 
-| Store | Desktop | Android |
-|-------|---------|---------|
-| Notes database | `chayote.db` inside the app data directory | `chayote.db` inside the app files directory |
-| Settings | `settings.json` inside the app config directory | `settings.json` inside the app files directory |
+| Store          | Desktop                                         | Android                                        |
+| -------------- | ----------------------------------------------- | ---------------------------------------------- |
+| Notes database | `chayote.db` inside the app data directory      | `chayote.db` inside the app files directory    |
+| Settings       | `settings.json` inside the app config directory | `settings.json` inside the app files directory |
 
 The exact directory is chosen by the OS (for example
 `%APPDATA%\com.chayote.app` on Windows, `~/.local/share/com.chayote.app` on
