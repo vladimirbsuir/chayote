@@ -2,20 +2,27 @@
 
 **Status:** Frozen. Last updated 2026-10-10.
 
-**Current position: M6 shipped; M7 is half done.** M0 through M6
+**Current position: M7 shipped; M8 is in progress.** M0 through M7
 shipped between 2026-10-07 and 2026-10-10: the frontend scaffold, the data layer
 behind repository traits, the editor with autosave and paste sanitisation, the UI
 shell with the sidebar, the virtualised note list and the three responsive
 layouts, the whole of organisation — folders, tags, pinning and trash — search,
-and themes, settings and the full keyboard map. Work proceeds in order; a
+themes, settings and the full keyboard map, and Android through the on-device
+run in `11-verification.md` §3.5a. Work proceeds in order; a
 milestone is not "mostly done".
 
-**M7's build half shipped on 2026-10-10; its runtime half waits on a device.**
-The Android SDK was installed all along — three documents said otherwise until M6
-checked the filesystem — and `ANDROID_HOME` is set. An APK now builds, links for
-both arm ABIs, measures 14.65 MiB against the 20 MB budget, and carries no
-`INTERNET` permission. What cannot be done without a phone is the entire runtime
-half of the milestone, listed in `11-verification.md` §3.5a.
+**M8 so far, on branch `m8-packaging`.** The Chayote icon set is drawn and
+generated (accent square with a fruit glyph, desktop and Android launcher
+icons); `INSTALL.md` carries the end-user install, unsigned-launch,
+data-location and uninstall steps; `.github/workflows/release.yml` builds the
+Windows, macOS and Linux bundles on clean runners. Verified locally on
+Windows: `Chayote_0.1.0_x64-setup.exe` (3.20 MiB, NSIS) and the portable
+`chayote.exe` (7.17 MiB, both far under the 30 MB desktop budget), the
+portable build launches to a responding `Chayote` window and creates
+`chayote.db` with the full schema. Gates clean: 36 Rust, 388 TS, 141
+Playwright. Still open: a clean-machine install, the macOS and Linux
+artefacts (the release workflow is written but unrun), and the three items
+M7 left unmeasured (long-press, airplane mode, Android 15+ `adjustResize`).
 
 ---
 
@@ -429,4 +436,4 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | M5 | **Done** | 2026-10-10. Branch `m5-search`, four commits. The `useSearch` hook — 150 ms debounce, the ≥2-character minimum, the active selection as scope, the previous page kept while the next one loads, and paging via `nextOffset`; results replacing the list with `Esc` restoring it; one `NoteCard` for both with `NoteRow` carrying an optional snippet; a snippet allowlist holding `mark` and nothing else; the "No results for “query”" state and a polite live count; the mobile list view's own field; and a mock backend that answers with real prefix matching, the 8.0/1.0 weighting, and `<mark>` snippets rather than substrings and an opening excerpt. Four deviations from the plan recorded in §2. 36 Rust tests, 338 TS, 107 Playwright. The p95 half of "Done when" is **outstanding** and deliberately not covered |
 | M6 | **Done** | 2026-10-10. Branch `m6-themes-settings`, eight commits. `SettingsDialog` and `ThemeToggle`, the top-bar overflow menu that reaches them, the three-state theme cycle on the button and on `Ctrl/Cmd+Shift+L`, `Ctrl/Cmd+Enter` for sidebar→editor and `Esc` for the tablet drawer; `useDialogFocus` shared with `ConfirmDialog`; required test 12 over the icon inventory, with the inventory read out of `05-ui-ux.md` and an emoji scan over `src/` and `docs/`; the automated contrast check M6's "Done when" names, over both token tables; and level-2 screenshots at all six viewport-and-theme combinations. Q6 closed. 384 TS tests, 136 Playwright. **Four silent defects found, all shipped since M3**: the dark theme's accent was unreachable because `applyAccent` wrote `--accent` inline on the element carrying `data-theme` (ADR-019); §6.6's contrast claim was false as written and no preset holds 4.5:1 in both themes, so each preset now has a value per theme; `--text-subtle` sat at 2.60:1 light and 3.33:1 dark on note timestamps, and the ladder is now four steps with muted at 7:1; and four emoji sat in the specification's own diagrams. Five deviations from the plan recorded in §2 |
 | M7 | **Done** | Branch `m7-android`. `tauri android init` against NDK 27.2.12479018 / Gradle 9.6.1 / AGP 9.3.1; both arm ABIs cross-compile and link; **release APK 14.65 MiB against the 20 MB budget**, `native-code` `arm64-v8a` + `armeabi-v7a` only. Manifest read out of the artefact with `aapt2`: **no `INTERNET`**, `usesCleartextTraffic=false`, `windowSoftInputMode=0x10`. Three generator defaults contradicted `06-platform.md` §4 and were corrected; `src-tauri/gen/android/` is now tracked. **On an Infinix X6836 (Android 13, WebView 153, arm64-v8a) with a debug-signed APK: the real SQLite backend, migrations, FTS5 with `bm25` and `snippet()`, WAL on the device filesystem, derivation, survival of a hard `force-stop`, `Pause` flush, `Resume` reload, rotation, and `adjustResize` observed working. The back button was built via ADR-020** — Kotlin from `MainActivity.onWebViewCreate`, asking the web layer whether it consumed the press; verified on device, pops in the editor and hands the press back at the root. **The mobile editor was wrong in four ways, all found by looking at the device** — the three-dot button had no handler (now `EditorOverflowMenu` with Pin/Unpin and Move to trash); the status bar rendered the desktop row at 360 px (now folder, tags, `342 w`, Saved per the prototype); the slots were ~20 px against §9's 44 px (the mobile bar is 44 px); and **a pin made in the editor never reached the list cache** (wrong since M4 on desktop too, both paths now go through `useTogglePin`). **Still outstanding:** long-press, airplane mode, and the Android 15+ `adjustResize` question — the device is Android 13 and cannot settle it. Gates: 36 Rust, 388 TS, 141 Playwright |
-| M8 | Not started | |
+| M8 | **In progress** | Branch `m8-packaging`. Icon set, `INSTALL.md`, release workflow. Windows NSIS (3.20 MiB) + portable (7.17 MiB) verified locally; gates 36 Rust, 388 TS, 141 Playwright. Still open: clean-machine install, macOS/Linux artefacts, M7's three unmeasured items |
