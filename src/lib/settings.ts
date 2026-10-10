@@ -1,16 +1,25 @@
 import type { Selection } from '../types/ipc';
 import type { Uuid } from '../types/note';
+import { parseHex } from './contrast';
 
 export type Theme = 'light' | 'dark' | 'system';
+
+/** Which accent is in use. The distinction that matters is preset versus
+    custom, not the hex: a preset can be written inline as a *reference* to
+    `--accent-preset-N`, which the dark theme then resolves to its own value,
+    while a custom colour is a literal that cannot. Collapsing both onto a hex
+    would make all six presets indistinguishable from "the default" — and would
+    re-break ADR-019, because an inline hex defeats the cascade. */
+export type AccentChoice =
+  | { kind: 'preset'; index: number }
+  | { kind: 'custom'; hex: string }
+  | null;
 
 export type AccentPreset = 1 | 2 | 3 | 4 | 5 | 6;
 
 export type Settings = {
   theme: Theme;
-  /** `null` means the theme's own default accent, resolved by the cascade from
-      `--accent-preset-1`. A hex means a custom colour, which is written inline
-      and therefore cannot follow the theme. */
-  accent: string | null;
+  accent: AccentChoice;
   /** `null` means notes start unfiled; nothing is pre-created. */
   defaultFolderId: Uuid | null;
   sidebarWidth: number;
@@ -65,18 +74,11 @@ export async function loadSettings(): Promise<Settings> {
 
 async function read(): Promise<Settings> {
   const raw = await readRaw();
-  return { ...DEFAULT_SETTINGS, ...normalise(parse(raw)) };
-}
-
-/** A settings file written before the accent became per-theme stores a preset's
-    hex. Left alone it would read as a *custom* accent, be written inline, and
-    defeat the cascade in dark mode — which is the bug this shape removes. A
-    stored value equal to any preset in either theme means "the default". */
-function normalise(value: Partial<Settings>): Partial<Settings> {
-  if (typeof value.accent === 'string' && isPresetAccent(value.accent)) {
-    return { ...value, accent: null };
-  }
-  return value;
+  const stored = parse(raw);
+  /* The accent is the one field whose stored shape has changed, and the only one
+     that can be a bare hex, an object or absent. Parsed here rather than trusted
+     so a file from an earlier build loads as what it meant. */
+  return { ...DEFAULT_SETTINGS, ...stored, accent: parseAccent(stored.accent) };
 }
 
 /// Debounced at 300 ms by the caller (`10-conventions.md` §7).
@@ -149,22 +151,49 @@ export function presetValue(preset: (typeof ACCENT_PRESETS)[number], dark: boole
   return dark ? preset.dark : preset.light;
 }
 
-/** Preset values that have since been replaced. A file written before the accent
-    became per-theme holds one of these, and it cannot be picked any more, so it
-    is the default rather than a custom colour. */
-const RETIRED_PRESETS: ReadonlySet<string> = new Set([
-  '#2f6fed',
-  '#8b5cf6',
-  '#6f9bff',
+/** Preset values that have since been replaced, and which theme they came from.
+    A file written before the accent became per-theme holds one of these as a
+    bare hex. Each maps to the preset it used to be, so a user who had chosen
+    Violet keeps Violet rather than being handed a custom colour the theme can
+    no longer lift. */
+const RETIRED_PRESETS: ReadonlyMap<string, number> = new Map([
+  ['#2f6fed', 1],
+  ['#8b5cf6', 3],
+  ['#6f9bff', 1],
 ]);
 
-/** True when a stored accent is one of the preset values rather than a choice
-    the user made. */
-export function isPresetAccent(accent: string): boolean {
-  return (
-    RETIRED_PRESETS.has(accent) ||
-    ACCENT_PRESETS.some((preset) => preset.light === accent || preset.dark === accent)
-  );
+/** True when a stored accent is one of the current preset values rather than a
+    choice the user made. Kept for the settings test and for `parseAccent`. */
+function isPresetAccent(accent: string): boolean {
+  return ACCENT_PRESETS.some((preset) => preset.light === accent || preset.dark === accent);
+}
+function parseAccent(value: unknown): AccentChoice {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === 'string') {
+    const retired = RETIRED_PRESETS.get(value.toLowerCase());
+    if (retired !== undefined) return { kind: 'preset', index: retired };
+    if (isPresetAccent(value)) return null;
+    return /^#[0-9a-f]{6}$/i.test(value) ? { kind: 'custom', hex: value } : null;
+  }
+
+  if (typeof value === 'object') {
+    const choice = value as { kind?: unknown; index?: unknown; hex?: unknown };
+    if (
+      choice.kind === 'preset' &&
+      typeof choice.index === 'number' &&
+      Number.isInteger(choice.index) &&
+      choice.index >= 1 &&
+      choice.index <= ACCENT_PRESETS.length
+    ) {
+      return { kind: 'preset', index: choice.index };
+    }
+    if (choice.kind === 'custom' && typeof choice.hex === 'string' && parseHex(choice.hex) !== null) {
+      return { kind: 'custom', hex: choice.hex };
+    }
+  }
+
+  return null;
 }
 
 export { STORE_FILE, SETTINGS_KEY };

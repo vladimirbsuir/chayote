@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Settings, Theme } from '../lib/settings';
+import type { AccentChoice, Settings, Theme } from '../lib/settings';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '../lib/settings';
 import { debounce } from '../lib/debounce';
 import type { Debounced } from '../lib/debounce';
@@ -18,7 +18,8 @@ export type SettingsState = Settings & {
       the persisted value would contradict. */
   hydrated: boolean;
   setTheme: (theme: Theme) => void;
-  setAccent: (accent: string | null) => void;
+  setAccent: (accent: AccentChoice) => void;
+  setDefaultFolderId: (id: Uuid | null) => void;
   setSidebarWidth: (width: number) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -70,6 +71,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     setAccent: (accent) => {
       update({ accent });
     },
+    setDefaultFolderId: (defaultFolderId) => {
+      update({ defaultFolderId });
+    },
     setSidebarWidth: (sidebarWidth) => {
       update({ sidebarWidth });
     },
@@ -120,26 +124,32 @@ export function flushSettings(): void {
 }
 
 /** The only tokens a user configures are `--accent` and `--accent-soft`
-    (`05-ui-ux.md` §6.6), and only when they pick a colour of their own.
+    (`05-ui-ux.md` §6.6), and the two are handled differently on purpose.
 
-    With no custom accent nothing is written at all, so `--accent` resolves
-    through the cascade and each theme gets its own value from
-    `--accent-preset-1`. Writing it unconditionally is what made the dark
-    theme's accent unreachable: an inline custom property on
-    `document.documentElement` beats the `[data-theme='dark']` rule on that same
-    element whatever its specificity.
+    A **preset** is written as a reference, `var(--accent-preset-N)`, not as its
+    hex. The reference resolves through the cascade, so the dark theme still
+    picks up its own value for the same preset — which is ADR-019's whole point,
+    and the reason this takes an index rather than a colour. Writing the hex here
+    would put it back to one value in both themes.
 
-    Setting the inline value back to `''` rather than leaving it is what lets a
-    user who had chosen a colour go back to the theme default without a reload. */
-export function applyAccent(accent: string | null, dark: boolean): void {
+    A **custom** colour is a literal, because it is not in either token block and
+    has no second value to switch to. It is used verbatim in both themes, which
+    `05-ui-ux.md` §6.6 states plainly and the settings dialog measures and warns
+    about.
+
+    With no choice at all nothing is written, so `--accent` is whatever the
+    theme block says. `--accent-soft` is derived from `--accent` by `color-mix`
+    in the token file and is never written here. */
+export function applyAccent(choice: AccentChoice): void {
   const root = document.documentElement;
-  if (accent === null) {
+  if (choice === null) {
     root.style.removeProperty('--accent');
-    root.style.removeProperty('--accent-soft');
     return;
   }
-  root.style.setProperty('--accent', accent);
-  root.style.setProperty('--accent-soft', `${accent}${dark ? '29' : '20'}`);
+  root.style.setProperty(
+    '--accent',
+    choice.kind === 'preset' ? `var(--accent-preset-${choice.index})` : choice.hex,
+  );
 }
 
 /** `system` resolves against the OS preference (`05-ui-ux.md` §6.6). */

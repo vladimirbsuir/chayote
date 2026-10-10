@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 
 type IconButtonProps = {
   label: string;
@@ -8,6 +8,14 @@ type IconButtonProps = {
   variant?: 'default' | 'primary' | 'ghost' | 'danger';
   size?: 'desktop' | 'mobile';
   type?: 'button' | 'submit';
+  /* A plain prop rather than `forwardRef`: React 19 passes `ref` to function
+     components as an ordinary one. The top bar's overflow trigger needs it so
+     the menu can hand focus back on `Esc` — a menu that leaves focus on the
+     body strands a keyboard user, and the trigger is the only place to send it. */
+  ref?: Ref<HTMLButtonElement>;
+  /** Set when the button opens a menu or dialog of its own. */
+  expanded?: boolean;
+  hasPopup?: 'menu' | 'listbox' | 'dialog' | 'true' | 'false';
   children: ReactNode;
 };
 
@@ -31,13 +39,19 @@ export function IconButton({
   variant = 'default',
   size = 'desktop',
   type = 'button',
+  ref,
+  expanded,
+  hasPopup,
   children,
 }: IconButtonProps) {
   return (
     <button
       type={type}
+      ref={ref}
       aria-label={label}
       title={label}
+      aria-haspopup={hasPopup === undefined ? undefined : hasPopup}
+      aria-expanded={expanded}
       onClick={onClick}
       disabled={disabled}
       {...(pressed === undefined ? {} : { 'aria-pressed': pressed })}

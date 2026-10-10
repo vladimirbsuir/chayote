@@ -28,7 +28,7 @@ describe('settings store', () => {
     const next: Settings = {
       ...DEFAULT_SETTINGS,
       theme: 'dark',
-      accent: '#0f766e',
+      accent: { kind: 'preset', index: 6 },
       sidebarWidth: 280,
       collapsedFolders: ['f-work', 'f-personal'],
       lastNoteId: 'n-1',
@@ -113,16 +113,41 @@ describe('settings store', () => {
     ]);
   });
 
-  it('reads a stored preset hex as the default, not as a custom accent', async () => {
-    // A file written before the accent became per-theme holds `#2f6fed`. Left
-    // alone it would read as a custom accent, be written inline, and defeat the
-    // cascade in dark mode — which is the bug the `null` default removes.
+  it('reads a stored preset hex as that preset, not as a custom accent', async () => {
+    /* Files written before M6 hold a bare hex. Left as a custom colour it would
+       be written inline and defeat the cascade in dark mode — the bug ADR-019
+       records. Each retired hex maps back to the preset it used to be, so a user
+       who had chosen Violet keeps Violet rather than being handed a colour the
+       dark theme can no longer lift. */
     window.localStorage.setItem(STORE_FILE, JSON.stringify({ accent: '#2f6fed' }));
-    expect((await loadSettings()).accent).toBeNull();
+    expect((await loadSettings()).accent).toEqual({ kind: 'preset', index: 1 });
+
+    window.localStorage.setItem(STORE_FILE, JSON.stringify({ accent: '#8b5cf6' }));
+    resetSettingsCache();
+    expect((await loadSettings()).accent).toEqual({ kind: 'preset', index: 3 });
   });
 
   it('keeps a genuinely custom accent', async () => {
     window.localStorage.setItem(STORE_FILE, JSON.stringify({ accent: '#123456' }));
-    expect((await loadSettings()).accent).toBe('#123456');
+    expect((await loadSettings()).accent).toEqual({ kind: 'custom', hex: '#123456' });
+  });
+
+  it('reads a stored preset object, and falls back on anything malformed', async () => {
+    /* A settings file must never be able to stop the app starting, whatever it
+       contains — so an out-of-range index or a non-hex is the default, not an
+       error. */
+    for (const stored of [
+      { kind: 'preset', index: 0 },
+      { kind: 'preset', index: 99 },
+      { kind: 'preset', index: 2.5 },
+      { kind: 'custom', hex: 'not-a-colour' },
+      { kind: 'nonsense' },
+      'blue',
+      42,
+    ]) {
+      window.localStorage.setItem(STORE_FILE, JSON.stringify({ accent: stored }));
+      resetSettingsCache();
+      expect((await loadSettings()).accent, JSON.stringify(stored)).toBeNull();
+    }
   });
 });

@@ -11,6 +11,7 @@ import { useTrashActions } from './hooks/useTrashActions';
 import { UndoToast } from './components/UndoToast';
 import { useUndoToast } from './components/useUndoToast';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { SettingsDialog } from './components/SettingsDialog';
 import {
   openNote as setOpenNote,
   select as setSelection,
@@ -150,8 +151,10 @@ function Shell() {
   const [confirm, setConfirm] = useState<
     | { kind: 'destroy'; id: Uuid; title: string }
     | { kind: 'empty' }
+    | { kind: 'reset-settings' }
     | null
   >(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const now = useNow();
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
@@ -173,8 +176,8 @@ function Shell() {
   }, [theme]);
 
   useEffect(() => {
-    applyAccent(accent, theme === 'dark');
-  }, [accent, theme]);
+    applyAccent(accent);
+  }, [accent]);
 
   /* One startup pass: tell Rust the first paint has happened — `window_ready`
      exists so the window is shown after this rather than flashing white
@@ -488,7 +491,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
           /* Only the tablet drawer needs a visible control; desktop collapses
              through `Ctrl/Cmd+\` and has no button for it in the prototype. */
           showSidebarToggle={tablet}
-          onOpenOverflow={NOOP}
+          onOpenOverflow={() => {
+            setSettingsOpen(true);
+          }}
         />
       )}
 
@@ -542,6 +547,44 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
           <UndoToast toast={undoToast} />
         </div>
       )}
+
+      {settingsOpen ? (
+        <SettingsDialog
+          theme={themeSetting}
+          effective={theme}
+          accent={accent}
+          defaultFolderId={defaultFolderId}
+          folders={folders ?? []}
+          onThemeChange={(next) => {
+            useSettingsStore.getState().setTheme(next);
+          }}
+          onAccentChange={(next) => {
+            useSettingsStore.getState().setAccent(next);
+          }}
+          onDefaultFolderChange={(next) => {
+            useSettingsStore.getState().setDefaultFolderId(next);
+          }}
+          onClose={() => {
+            setSettingsOpen(false);
+          }}
+          confirmReset={
+            /* Rendered as a sibling of the settings dialog, not inside it, so the
+               two focus traps are not nested — see the note in SettingsDialog. */
+            <ConfirmDialog
+              title="Reset all settings?"
+              body="Theme, accent colour, sidebar width and default folder return to their defaults. Your notes are not touched."
+              confirmLabel="Reset settings"
+              onCancel={() => {
+                setConfirm(null);
+              }}
+              onConfirm={() => {
+                setConfirm(null);
+                useSettingsStore.getState().reset();
+              }}
+            />
+          }
+        />
+      ) : null}
 
       {confirm?.kind === 'destroy' ? (
         <ConfirmDialog

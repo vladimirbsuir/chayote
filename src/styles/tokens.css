@@ -23,7 +23,11 @@
      in the `[data-theme='dark']` block, the same six variables either way. A
      custom accent is the one case that writes inline, and only when one is set. */
   --accent: var(--accent-preset-1);
-  --accent-soft: rgba(39, 105, 236, 0.12);
+  /* Derived from whatever `--accent` resolves to, so a preset picked in the
+     settings dialog brings its soft variant with it for free. `color-mix` is
+     already used by `ConfirmDialog`'s scrim, so this adds nothing to the
+     WebView baseline `06-platform.md` §1 warns about. */
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
   --danger: #c0392b;
   --warning: #b26a00;
   --success: #1f7a4d;
@@ -76,7 +80,7 @@
   --text-muted: #a7a7af;
   --text-subtle: #84848e;
   --accent: var(--accent-preset-1);
-  --accent-soft: rgba(72, 129, 239, 0.16);
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
 
   --accent-preset-1: #4881ef;
   --accent-preset-2: #26975f;

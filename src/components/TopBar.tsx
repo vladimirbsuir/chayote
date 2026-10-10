@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
-import { FilePlus, Menu, MoreHorizontal, Search, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { FilePlus, Menu, MoreHorizontal, Search, Settings as SettingsIcon, X } from 'lucide-react';
 import { IconButton } from './IconButton';
 import { ThemeIcon } from './ThemeToggle';
 
@@ -41,6 +42,36 @@ export function TopBar({
   showSidebarToggle = false,
   onOpenOverflow,
 }: TopBarProps) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  /* The overflow menu is a popover over the bar, so it dismisses the three ways
+     a popover does in the rest of the app (`05-ui-ux.md` §6.2, §6.4): `Esc`, a
+     click outside, and the trigger again. Listening on the document rather than
+     on the bar means a click anywhere in the app closes it, which is what a user
+     who has just changed their mind expects.
+     Closing restores focus to the trigger, because a menu that leaves focus on
+     the body strands a keyboard user — the next `Tab` would restart from the top
+     of the page. */
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent): void => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
   /* §6.5: "Esc clears and restores the previous list". It does not blur — someone
      who dismissed one query to type a different one would lose the caret, and
      moving focus out of the field is a change the key did not ask for. */
@@ -132,9 +163,53 @@ export function TopBar({
       <IconButton label="Change theme" onClick={onToggleTheme}>
         <ThemeIcon effective={theme} className="icon i-20" />
       </IconButton>
-      <IconButton label="More" onClick={onOpenOverflow}>
-        <MoreHorizontal className="icon i-20" aria-hidden="true" />
-      </IconButton>
+      {/* `05-ui-ux.md` §4 gives the top bar an overflow menu and §6.6 puts the
+          settings dialog behind the `settings` icon. The trigger is wrapped
+          rather than followed by an absolutely-positioned sibling so the menu
+          can be dismissed by clicking the trigger again. */}
+      <div className="relative" ref={wrapRef}>
+        <IconButton
+          ref={triggerRef}
+          label="More"
+          hasPopup="menu"
+          expanded={open}
+          onClick={() => {
+            setOpen((wasOpen) => !wasOpen);
+          }}
+        >
+          <MoreHorizontal className="icon i-20" aria-hidden="true" />
+        </IconButton>
+        {open ? (
+          <div
+            role="menu"
+            data-testid="topbar-overflow"
+            className="absolute right-0 top-[36px] z-40 w-[200px] overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-pop)]"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              data-testid="topbar-overflow-settings"
+              onClick={() => {
+                setOpen(false);
+                /* Focus moves to the trigger *before* the settings dialog
+                   mounts. `useDialogFocus` captures `document.activeElement` as
+                   the element to return to on close, and the menu item — which
+                   is what currently has focus — is about to unmount. Returning
+                   focus to a removed element is the "nowhere to return to" case
+                   its own comment warns about, and the symptom is focus landing
+                   on the body, so the next `Tab` restarts at the top of the
+                   page. */
+                triggerRef.current?.focus();
+                onOpenOverflow();
+              }}
+              className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface)]"
+            >
+              <SettingsIcon className="icon i-16 text-[var(--text-muted)]" aria-hidden="true" />
+              Settings
+            </button>
+          </div>
+        ) : null}
+      </div>
     </header>
   );
 }

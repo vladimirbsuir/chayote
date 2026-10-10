@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { seedSettings } from './helpers';
 
 /* ADR-019: the accent follows the theme through the cascade. Before M6,
    `applyAccent` wrote `--accent` inline on the element carrying `data-theme`,
@@ -12,12 +13,7 @@ const THEMES = ['light', 'dark'] as const;
 test.describe('accent follows the theme', () => {
   for (const theme of THEMES) {
     test(`resolves to the ${theme} preset on a rendered element`, async ({ page }) => {
-      await page.addInitScript((value) => {
-        window.localStorage.setItem(
-          'settings.json',
-          JSON.stringify({ theme: value, accent: null }),
-        );
-      }, theme);
+      await seedSettings(page, { theme, accent: null });
       await page.goto('/');
 
       await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();
@@ -44,15 +40,10 @@ test.describe('accent follows the theme', () => {
     });
   }
 
-  test('a custom accent is the one case that writes inline, and clears on reset', async ({
+test('a custom accent is the one case that writes a literal inline', async ({
     page,
   }) => {
-    await page.addInitScript(() => {
-      window.localStorage.setItem(
-        'settings.json',
-        JSON.stringify({ theme: 'light', accent: '#123456' }),
-      );
-    });
+    await seedSettings(page, { theme: 'light', accent: '#123456' });
     await page.goto('/');
     await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();
 
@@ -60,5 +51,27 @@ test.describe('accent follows the theme', () => {
       document.documentElement.style.getPropertyValue('--accent'),
     );
     expect(inline).toBe('#123456');
+  });
+
+  test('a chosen preset writes a variable reference, not a hex', async ({ page }) => {
+    /* The distinction is the whole of ADR-019: `var(--accent-preset-6)` resolves
+       through the cascade to whichever value the dark theme gives that preset,
+       while `#0f766e` is a literal that would fix the accent in both themes. */
+    await seedSettings(page, { theme: 'light', accent: { kind: 'preset', index: 6 } });
+    await page.goto('/');
+    await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();
+
+    const light = await page.evaluate(() => ({
+      inline: document.documentElement.style.getPropertyValue('--accent'),
+      computed: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+    }));
+    expect(light.inline).toBe('var(--accent-preset-6)');
+    expect(light.computed).toBe('#0f766e');
+
+    await page.getByRole('button', { name: 'Change theme' }).click();
+    const dark = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+    );
+    expect(dark).toBe('#13948a');
   });
 });

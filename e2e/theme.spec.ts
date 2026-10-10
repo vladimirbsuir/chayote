@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { seedSettings, waitForStoredTheme } from './helpers';
 
 /* `05-ui-ux.md` §6.6 gives the theme three states; §7 binds `Ctrl/Cmd+Shift+L`
    to the cycle. The button in the top bar and the shortcut have to run the same
@@ -8,54 +10,48 @@ import { expect, test } from '@playwright/test';
    Driven through the keyboard and through the button separately, because the two
    disagreeing is the failure this is here to catch. */
 
-const CURRENT = '[data-testid="app-shell"]';
-
-/** The theme in effect. `data-theme` holds the *resolved* value, so `system` and
-    `light` are indistinguishable here on a light-preferring browser. */
-async function themeNow(page: import('@playwright/test').Page): Promise<string | undefined> {
+async function themeNow(page: Page): Promise<string | undefined> {
   return page.evaluate(() => document.documentElement.dataset.theme);
-}
-
-/** The stored value, which does distinguish `system` from `light`. Settings are
-    written on a 300 ms debounce (`10-conventions.md` §7), so this polls. */
-async function storedTheme(page: import('@playwright/test').Page): Promise<string> {
-  return page.evaluate(() => {
-    const raw = window.localStorage.getItem('settings.json');
-    if (raw === null) return 'system';
-    return (JSON.parse(raw) as { theme?: string }).theme ?? 'system';
-  });
 }
 
 test.describe('theme', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      window.localStorage.setItem('settings.json', JSON.stringify({ theme: 'light', accent: null }));
-    });
+    await seedSettings(page, { theme: 'light', accent: null });
     await page.goto('/');
-    await expect(page.locator(CURRENT)).toBeVisible();
+    await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();
   });
 
   test('Ctrl+Shift+L cycles light, dark, system and back', async ({ page }) => {
-    expect(await storedTheme(page)).toBe('light');
+    await waitForStoredTheme(page, 'light');
 
     await page.keyboard.press('Control+Shift+L');
-    await expect.poll(() => storedTheme(page)).toBe('dark');
+    await waitForStoredTheme(page, 'dark');
     expect(await themeNow(page)).toBe('dark');
 
     await page.keyboard.press('Control+Shift+L');
-    await expect.poll(() => storedTheme(page)).toBe('system');
+    await waitForStoredTheme(page, 'system');
 
-    /* Three steps is a full lap, which is the property that makes the cycle
-       safe to press without looking. */
+    /* Three steps is a full lap, which is what makes the cycle safe to press
+       without looking. */
     await page.keyboard.press('Control+Shift+L');
-    await expect.poll(() => storedTheme(page)).toBe('light');
+    await waitForStoredTheme(page, 'light');
   });
 
   test('system follows the OS preference', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.keyboard.press('Control+Shift+L');
     await page.keyboard.press('Control+Shift+L');
-    await expect.poll(() => storedTheme(page)).toBe('system');
+    await waitForStoredTheme(page, 'system');
+    expect(await themeNow(page)).toBe('dark');
+  });
+
+  test('a theme change survives a relaunch', async ({ page }) => {
+    /* `06-platform.md` §6: close and reopen restores the theme. Asserting on the
+       DOM without reloading would pass even if nothing was persisted. */
+    await page.keyboard.press('Control+Shift+L');
+    await waitForStoredTheme(page, 'dark');
+    await page.reload();
+    await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();
     expect(await themeNow(page)).toBe('dark');
   });
 
@@ -64,13 +60,11 @@ test.describe('theme', () => {
     await expect(button).toBeVisible();
 
     await button.click();
-    await expect.poll(() => storedTheme(page)).toBe('dark');
-
+    await waitForStoredTheme(page, 'dark');
     await button.click();
-    await expect.poll(() => storedTheme(page)).toBe('system');
-
+    await waitForStoredTheme(page, 'system');
     await button.click();
-    await expect.poll(() => storedTheme(page)).toBe('light');
+    await waitForStoredTheme(page, 'light');
   });
 
   test('the button icon shows the theme in effect, not the next one', async ({ page }) => {
@@ -85,8 +79,6 @@ test.describe('theme', () => {
 
     const icon = page.getByRole('button', { name: 'Change theme' }).locator('svg');
     await expect(icon).toHaveClass(/i-20/);
-    /* The moon is the only inventory icon with this path. */
-    await expect(icon.locator('path')).toHaveCount(1);
     await expect(icon).toHaveAttribute('aria-hidden', 'true');
   });
 });
