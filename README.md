@@ -20,9 +20,9 @@ They change together — see ADR-016.
 | Bundle identifier | **`com.chayote.app`** |
 | Database filename | `chayote.db` |
 | Licence | MIT (`LICENSE`) |
-| Current milestone | **M5** — Search, not started |
+| Current milestone | **M6** — Themes, settings, keyboard, polish: not started |
 | Git repository | **Initialised**, `main` buildable, work on topic branches |
-| Android SDK | **Missing** — blocks M7 only, see `docs/11-verification.md` §2 |
+| Android SDK | **Missing** — blocks M7 only, and M6 needs none of it |
 
 ---
 

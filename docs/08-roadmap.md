@@ -2,12 +2,15 @@
 
 **Status:** Frozen. Last updated 2026-10-10.
 
-**Current position: M5, shipped. M0 through M4 shipped between 2026-10-07 and
-2026-10-10: the frontend scaffold, the data layer behind repository traits, the
-editor with autosave and paste sanitisation, the UI shell with the sidebar, the
-virtualised note list and the three responsive layouts, the whole of
+**Current position: M6, not started.** M0 through M5 shipped between 2026-10-07
+and 2026-10-10: the frontend scaffold, the data layer behind repository traits,
+the editor with autosave and paste sanitisation, the UI shell with the sidebar,
+the virtualised note list and the three responsive layouts, the whole of
 organisation — folders, tags, pinning and trash — and search. Work proceeds in
-order; a milestone is not "mostly done". M6 is next.
+order; a milestone is not "mostly done".
+
+**M6 is blocked by nothing.** It needs no Android SDK: everything in it runs in
+the browser and on desktop. M7 is the milestone the SDK gates, and nothing else.
 
 ---
 
