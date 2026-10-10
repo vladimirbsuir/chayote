@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Pin, Inbox } from 'lucide-react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NoteList } from './NoteList';
 import { buildDatabase } from '../mock/generate';
@@ -10,6 +11,15 @@ import { notesApi } from '../lib/ipc';
 import type { NoteSummary } from '../types/ipc';
 
 const SEEDED_NOTES = 10_000;
+
+/* The empty state is a prop because §8 gives six situations their own copy and
+   their own glyph, and the list has no way to tell which one it is in. Only the
+   copy matters here, so one shared stand-in keeps these tests about the list. */
+const EMPTY_STATE = {
+  title: 'Nothing here',
+  body: 'No notes in this view.',
+  icon: <Inbox className="icon i-20" aria-hidden="true" />,
+};
 
 function client(): QueryClient {
   return new QueryClient({
@@ -41,7 +51,7 @@ describe('NoteList', () => {
           folderNames={new Map()}
           showFolder
           onOpen={() => {}}
-          empty={{ title: 'Nothing here', body: 'No notes in this view.' }}
+          empty={EMPTY_STATE}
         />
       </QueryClientProvider>,
     );
@@ -67,7 +77,7 @@ describe('NoteList', () => {
           folderNames={new Map()}
           showFolder
           onOpen={() => {}}
-          empty={{ title: 'Nothing here', body: 'No notes in this view.' }}
+          empty={EMPTY_STATE}
         />
       </QueryClientProvider>,
     );
@@ -104,7 +114,7 @@ describe('NoteList', () => {
           folderNames={new Map()}
           showFolder
           onOpen={() => {}}
-          empty={{ title: 'Nothing here', body: 'No notes in this view.' }}
+          empty={EMPTY_STATE}
         />
       </QueryClientProvider>,
     );
@@ -127,7 +137,11 @@ describe('NoteList', () => {
           folderNames={new Map()}
           showFolder
           onOpen={() => {}}
-          empty={{ title: 'Nothing pinned', body: 'Pin a note with Ctrl+D.' }}
+          empty={{
+            title: 'Nothing pinned',
+            body: 'Pin a note with Ctrl+D.',
+            icon: <Pin className="icon i-20" aria-hidden="true" />,
+          }}
         />
       </QueryClientProvider>,
     );
@@ -148,7 +162,7 @@ describe('NoteList', () => {
           folderNames={new Map()}
           showFolder
           onOpen={() => {}}
-          empty={{ title: 'Nothing here', body: 'No notes in this view.' }}
+          empty={EMPTY_STATE}
         />
       </QueryClientProvider>,
     );

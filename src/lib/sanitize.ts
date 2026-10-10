@@ -122,10 +122,41 @@ export function textToParagraphs(text: string): string {
 
 /** True when the sanitised markup would leave something visible in the document. */
 export function hasVisibleContent(html: string): boolean {
-  if (html.length === 0) return false
-  if (/<(?:hr|br)\s*\/?>/i.test(html)) return true
-  return bodyOf(html).textContent.trim().length > 0
+  if (html.length === 0) return false;
+  if (/<(?:hr|br)\s*\/?>/i.test(html)) return true;
+  return bodyOf(html).textContent.trim().length > 0;
 }
+
+/**
+ * A search snippet, and only a search snippet.
+ *
+ * `SearchService` builds it with FTS5's `snippet()`, which wraps matches in the
+ * `<mark>` tags passed to it — `03-data-model.md` §3.6. Everything else in the
+ * string is `plain_text`, which is derived from a note the user typed into, so a
+ * note containing `<script>` produces a snippet containing `<script>`. FTS5 does
+ * not escape what it reads, and the snippet is the one place in the app where a
+ * backend's HTML reaches the DOM.
+ *
+ * This is a separate allowlist from the paste one above, deliberately. That list
+ * is the intersection of the document schema and §4.1 and is broad enough for a
+ * pasted document; this one is the exact tag the backend is allowed to emit, so
+ * adding a node to the editor can never widen what search markup may contain. An
+ * empty `ALLOWED_ATTR` means `mark` may carry nothing at all — the backend emits
+ * none, and a class on a highlight would be a value chosen by the note's content.
+ */
+export function sanitizeSnippet(html: string): string {
+  if (html.length === 0) return '';
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: SNIPPET_TAGS,
+    ALLOWED_ATTR: SNIPPET_ATTR,
+    KEEP_CONTENT: true,
+    RETURN_DOM: false,
+    WHOLE_DOCUMENT: false,
+  });
+}
+
+const SNIPPET_TAGS = ['mark'];
+const SNIPPET_ATTR: string[] = [];
 
 /**
  * §4.1 rule 6 — table cells become paragraphs in reading order. The table

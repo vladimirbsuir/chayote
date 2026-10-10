@@ -37,6 +37,10 @@ export type SearchState = {
       rather than the selection. The shell branches on this, not on the raw text,
       so the list and the field cannot disagree about whether a search is running. */
   active: boolean;
+  /** The query these results are for: trimmed, and past the debounce. The list
+      header names this rather than the field's text, because naming the newer of
+      the two describes something that is not on screen. */
+  applied: string;
   hits: SearchHit[];
   /** Every match in the scope, which is not `hits.length` once pages are added. */
   total: number;
@@ -95,6 +99,7 @@ export function useSearch(query: string, selection: Selection): SearchState {
 
   return {
     active,
+    applied: trimmed,
     hits: pages === undefined ? NO_HITS : pages.flatMap((entry) => entry.hits),
     total: pages?.[0]?.total ?? 0,
     nextOffset: pages?.at(-1)?.nextOffset ?? null,

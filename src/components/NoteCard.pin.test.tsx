@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, renderHook, screen, waitFor } from '@testing-library/react';
+import { Inbox } from 'lucide-react';
 import { act } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NoteList } from './NoteList';
@@ -12,11 +13,17 @@ import type { NoteSummary } from '../types/ipc';
 
 /* `05-ui-ux.md` §6.3a: "Ctrl/Cmd+D, or the pin control on a note card and in the
    editor. Toggling is optimistic in the UI and reconciled by the command response.
-   Pinned notes sort above every other note in every selection."
+   Pinned notes sort above everything else in every selection."
 
    The card control is exercised through the real hook against the mock backend, so
    the optimistic write, the reconciliation, and the re-sort are all in the path —
    which is the only way the ordering claim can be checked rather than assumed. */
+
+const EMPTY_STATE = {
+  title: 'Nothing here',
+  body: 'No notes in this view.',
+  icon: <Inbox className="icon i-20" aria-hidden="true" />,
+};
 
 function client(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -83,7 +90,7 @@ function List({
       onOpen={noop}
       onTogglePin={onTogglePin ?? undefined}
       pinPendingId={pinPendingId}
-      empty={{ title: 'Nothing here', body: 'No notes in this view.' }}
+      empty={EMPTY_STATE}
     />
   );
 }
@@ -150,7 +157,7 @@ describe('note card pinning', () => {
         showFolder
         onOpen={onOpen}
         onTogglePin={onTogglePin}
-        empty={{ title: 'Nothing here', body: 'No notes in this view.' }}
+        empty={EMPTY_STATE}
       />,
     );
 

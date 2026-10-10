@@ -40,6 +40,15 @@ export type Note = NoteSummary & {
   deletedAt: number | null;
 };
 
+/** A row in the note list: a summary, plus the one thing a search hit carries that
+    a plain list row does not. `SearchHit` is assignable to this, so the same
+    virtualised list renders both without a cast or a second card. The snippet is
+    `plain_text` with the match marked, and it replaces the excerpt rather than
+    sitting under it — the point of a result is the sentence that matched. */
+export type NoteRow = NoteSummary & {
+  snippet?: string | undefined;
+};
+
 export type SaveNoteInput = {
   id: Uuid;
   doc: JsonDoc;

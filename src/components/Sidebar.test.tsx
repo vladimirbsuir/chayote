@@ -48,6 +48,8 @@ function renderSidebar(overrides: Partial<React.ComponentProps<typeof Sidebar>> 
     folders: FOLDERS,
     tags: TAGS,
     notes: [note()],
+    search: null,
+    onClearSearch: () => {},
     isPending: false,
     now: Date.now(),
     folderNames: new Map([['f-work', 'Work']]),
@@ -119,6 +121,8 @@ describe('Sidebar', () => {
         folders={FOLDERS}
         tags={TAGS}
         notes={[note()]}
+        search={null}
+        onClearSearch={() => {}}
         isPending={false}
         now={Date.now()}
         folderNames={new Map([['f-work', 'Work']])}
@@ -151,6 +155,8 @@ describe('Sidebar', () => {
         folders={FOLDERS}
         tags={TAGS}
         notes={[note()]}
+        search={null}
+        onClearSearch={() => {}}
         isPending={false}
         now={Date.now()}
         folderNames={new Map([['f-work', 'Work']])}
@@ -188,6 +194,8 @@ describe('Sidebar', () => {
         folders={FOLDERS}
         tags={TAGS}
         notes={[note()]}
+        search={null}
+        onClearSearch={() => {}}
         isPending={false}
         now={Date.now()}
         folderNames={new Map([['f-work', 'Work']])}

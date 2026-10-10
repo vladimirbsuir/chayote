@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import { foldersApi, notesApi, windowApi } from './lib/ipc';
 import { isInsideSubtree } from './components/folderRows';
 import { useNow, useNotes } from './hooks/useNotes';
+import { useSearch } from './hooks/useSearch';
 import { countByFolder, folderNamesById, useFolders } from './hooks/useFolders';
 import { useTags } from './hooks/useTags';
 import { useTogglePin } from './hooks/useTogglePin';
@@ -30,6 +31,7 @@ import { useBreakpoint } from './layout/useBreakpoint';
 import { currentView, popView, pushView } from './layout/viewStack';
 import type { ViewStack } from './layout/viewStack';
 import type { Uuid } from './types/note';
+import type { NoteSummary } from './types/ipc';
 
 /* ProseMirror and TipTap together are the bulk of the bundle, and none of it is
    needed for first paint. `02-architecture.md` §8 budgets cold launch to first
@@ -57,8 +59,9 @@ function useSystemDark(): boolean {
 }
 
 /** M3 wires the shell to the selection model, the note list, and the three
-    layouts of `05-ui-ux.md` §2. M4 adds the folder writes. Every control below
-    routes through `lib/ipc.ts`, so nothing here touches storage (rule R6). */
+    layouts of `05-ui-ux.md` §2. M4 adds the folder writes. M5 makes the top bar's
+    field real. Every control below routes through `lib/ipc.ts`, so nothing here
+    touches storage (rule R6). */
 function Shell() {
   const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -77,12 +80,29 @@ function Shell() {
 
   const [stack, setStack] = useState<ViewStack>({ stack: ['list'] });
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [search, setSearch] = useState('');
+  /* The raw field text. `useSearch` debounces it and decides whether it is a
+     search at all; the shell holds it because `Ctrl/Cmd+F` and `Esc` both act on
+     the field itself, and a second owner of the value is how those two end up
+     disagreeing with the list. */
+  const [query, setQuery] = useState('');
 
   const mobile = breakpoint === 'mobile';
   const tablet = breakpoint === 'tablet';
 
   const { notes, isPending, refetch } = useNotes(selection);
+  const results = useSearch(query, selection);
+
+  /* `05-ui-ux.md` §6.5: results replace the note list, and the sidebar structure
+     above it stays, so a search can still be scoped by clicking a folder or a
+     tag while the field holds its text. One branch rather than two lists, so the
+     sidebar cannot end up showing a header for one and rows from the other.
+     Declared here rather than with the other derived values because the delete
+     and pin handlers below resolve a row against it. */
+  const listNotes = results.active ? results.hits : (notes ?? EMPTY_NOTES);
+  const searchSummary = results.active
+    ? { query: results.applied, total: results.total }
+    : null;
+
   const { folders } = useFolders();
   const { tags } = useTags();
   const { togglePin, pendingId: pinPendingId } = useTogglePin();
@@ -111,14 +131,14 @@ function Shell() {
      up offering to undo the wrong note. */
   const softDeleteWithToast = useCallback(
     (id: Uuid): void => {
-      const note = notes?.find((candidate) => candidate.id === id);
+      const note = listNotes.find((candidate) => candidate.id === id);
       const title = note === undefined || note.title.length === 0 ? 'Untitled' : note.title;
       trash.softDelete(id);
       showUndoToast(id, title, () => {
         void trash.restore(id);
       });
     },
-    [notes, showUndoToast, trash],
+    [listNotes, showUndoToast, trash],
   );
 
   /* `05-ui-ux.md` §6.2: permanent delete and empty trash confirm; nothing else here
@@ -133,6 +153,9 @@ function Shell() {
   const now = useNow();
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
+  /* The folder chips on the rows are counted from the selection's own notes, not
+     from the search results: a search is scoped *by* a folder, so counting the
+     matches would replace the scope with its own answer. */
   const folderCounts = useMemo(() => countByFolder(notes ?? []), [notes]);
 
   /* ADR-014: first launch is an empty database, so "no notes" is only the
@@ -346,7 +369,19 @@ function Shell() {
       width={sidebarWidth}
       folders={folders}
       tags={tags}
-      notes={notes}
+      notes={listNotes}
+      search={searchSummary}
+      onClearSearch={() => {
+        setQuery('');
+      }}
+      searchFooter={
+        results.nextOffset === null ? null : (
+          <ShowMore
+            pending={results.isFetchingMore}
+            onClick={results.loadMore}
+          />
+        )
+      }
       isPending={isPending}
       now={now}
       folderNames={folderNames}
@@ -363,7 +398,7 @@ function Shell() {
         void createNote();
       }}
       onTogglePin={(id) => {
-        const current = notes?.find((note) => note.id === id);
+        const current = listNotes.find((note) => note.id === id);
         if (current === undefined) return;
         togglePin(id, !current.isPinned);
       }}
@@ -384,7 +419,7 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
       onDestroyNote={
         selection.kind === 'trash'
           ? (id) => {
-              const note = notes?.find((candidate) => candidate.id === id);
+              const note = listNotes.find((candidate) => candidate.id === id);
               const title = note === undefined || note.title.length === 0 ? 'Untitled' : note.title;
               setConfirm({ kind: 'destroy', id, title });
             }
@@ -421,9 +456,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
     <div className="flex h-full flex-col" data-testid="app-shell" data-breakpoint={breakpoint}>
       {mobile ? null : (
         <TopBar
-          searchValue={search}
+          searchValue={query}
           inputRef={searchRef}
-          onSearchChange={setSearch}
+          onSearchChange={setQuery}
           onNewNote={() => {
             void createNote();
           }}
@@ -451,9 +486,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
             <div className="flex min-h-0 flex-1 flex-col bg-[var(--surface-raised)]">
               <TopBar
                 variant="mobile"
-                searchValue={search}
+                searchValue={query}
                 inputRef={searchRef}
-                onSearchChange={setSearch}
+                onSearchChange={setQuery}
                 onNewNote={() => {
                   void createNote();
                 }}
@@ -536,6 +571,31 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
     would be a change to the specified appearance rather than to the implementation.
     Each is annotated at its call site with the milestone that lands it. */
 const NOOP = (): void => {};
+
+/* One shared empty list rather than a fresh `[]` per render, so the sidebar's
+   memoised rows are not handed a new reference on every tick. */
+const EMPTY_NOTES: NoteSummary[] = [];
+
+/** Appends the next page of results. A two-character query can match more notes
+    than one page holds, and a list that stopped at the page boundary while the
+    header counted every match would be claiming to be complete when it is not.
+    Outside the scroll container, so it stays reachable without scrolling past
+    however many results are loaded. */
+function ShowMore({ pending, onClick }: { pending: boolean; onClick: () => void }) {
+  return (
+    <div className="flex flex-none justify-center border-t border-[var(--border)] px-3 py-2">
+      <button
+        type="button"
+        data-testid="show-more-results"
+        disabled={pending}
+        onClick={onClick}
+        className="rounded-[var(--r-input)] border border-[var(--border-strong)] px-4 py-2 text-[13px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--text)] disabled:opacity-50"
+      >
+        {pending ? 'Loading…' : 'Show more'}
+      </button>
+    </div>
+  );
+}
 
 /* `setStack` passes the current value to a reducer, so the second argument is
    pre-bound once at module scope rather than at every call site. */

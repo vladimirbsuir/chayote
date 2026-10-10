@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { FilePlus, Folder, Hash, Pin, Plus, Trash } from 'lucide-react';
-import type { NoteSummary, Selection } from '../types/ipc';
+import { FilePlus, Folder, Hash, Inbox, Pin, Plus, Search, Trash, X } from 'lucide-react';
+import type { NoteRow, Selection } from '../types/ipc';
 import type { FolderNode } from '../types/folder';
 import type { TagWithCount } from '../types/tag';
 import type { Uuid } from '../types/note';
@@ -17,12 +17,31 @@ import { FolderTree } from './FolderTree';
    This component owns no selection state. It reads the selection store and
    writes to it, which keeps the model in one place (§5). */
 
+/** The list region's mode. `null` is the selection's own notes; an object is a
+    running search, and §6.5 puts the structure above the list so a search can
+    still be scoped — only the third region changes. */
+export type SidebarSearch = {
+  /** The query the visible results actually correspond to. Not the raw field
+      text: while a keystroke is still inside the 150 ms debounce the field says
+      "roadmaps" and the results are for "road", and a header naming the newer
+      one would be describing something that is not on screen. */
+  query: string;
+  /** Every match in the scope, which exceeds the loaded pages once a search is
+      long enough to need a second page. */
+  total: number;
+};
+
 type SidebarProps = {
   selection: Selection;
   width: number;
   folders: FolderNode[] | undefined;
   tags: TagWithCount[] | undefined;
-  notes: NoteSummary[] | undefined;
+  notes: NoteRow[] | undefined;
+  /** Non-null while the field holds a real query (§6.5). */
+  search: SidebarSearch | null;
+  onClearSearch: () => void;
+  /** The control that appends the next page, present only when there is one. */
+  searchFooter?: ReactNode;
   isPending: boolean;
   now: number;
   folderNames: Map<string, string>;
@@ -67,6 +86,9 @@ export function Sidebar({
   folders,
   tags,
   notes,
+  search,
+  onClearSearch,
+  searchFooter,
   isPending,
   now,
   folderNames,
@@ -92,8 +114,8 @@ export function Sidebar({
   onFolderError,
 }: SidebarProps) {
   const header = useMemo(
-    () => headerFor(selection, notes ?? EMPTY_NOTES, folderNames),
-    [selection, notes, folderNames],
+    () => headerFor(selection, notes ?? EMPTY_NOTES, folderNames, search),
+    [selection, notes, folderNames, search],
   );
 
   /* Whether the root-level folder create input is open. It lives here because the
@@ -197,7 +219,17 @@ export function Sidebar({
             {header.title}
           </span>
           <div className="flex shrink-0 items-center gap-2 pl-2">
-            <span className="font-normal text-[var(--text-subtle)]" data-testid="list-count">
+            {/* §10: "Search results announce the count via aria-live='polite'".
+                It is always a live region rather than one mounted for a search,
+                because a region that is added to the page already holding the
+                value has nothing to announce — the count would go silent exactly
+                when a screen reader user needs it. A selection switch changes it
+                too, and that is the same kind of fact. */}
+            <span
+              aria-live="polite"
+              className="font-normal text-[var(--text-subtle)]"
+              data-testid="list-count"
+            >
               {header.count}
             </span>
             {/* §6.2: emptying the trash is destructive and irreversible, so it is
@@ -216,25 +248,32 @@ export function Sidebar({
           </div>
         </header>
 
+        {/* ADR-014's first-launch state is a state of the *selection*, so a
+            search with no hits is not one. Reaching it with the field full would
+            claim the device holds no notes, which is the opposite of what the
+            user just saw. */}
         {isPending ? (
           <div className="min-h-0 flex-1" data-testid="list-pending" />
-        ) : firstLaunch ? (
+        ) : firstLaunch && search === null ? (
           <FirstLaunch onNewNote={onNewNote} />
         ) : (
-          <NoteList
-            notes={notes ?? EMPTY_NOTES}
-            openNoteId={openNoteId}
-            now={now}
-            folderNames={folderNames}
-            showFolder={!scoped}
-            onOpen={onOpenNote}
-            onTogglePin={selection.kind === 'trash' ? undefined : onTogglePin}
-            pinPendingId={pinPendingId ?? null}
-            onDeleteNote={onDeleteNote}
-            onRestoreNote={onRestoreNote}
-            onDestroyNote={onDestroyNote}
-            empty={emptyFor(selection, onNewNote)}
-          />
+          <>
+            <NoteList
+              notes={notes ?? EMPTY_NOTES}
+              openNoteId={openNoteId}
+              now={now}
+              folderNames={folderNames}
+              showFolder={!scoped}
+              onOpen={onOpenNote}
+              onTogglePin={selection.kind === 'trash' ? undefined : onTogglePin}
+              pinPendingId={pinPendingId ?? null}
+              onDeleteNote={onDeleteNote}
+              onRestoreNote={onRestoreNote}
+              onDestroyNote={onDestroyNote}
+              empty={emptyFor(selection, search, onNewNote, onClearSearch)}
+            />
+            {searchFooter}
+          </>
         )}
       </section>
     </aside>
@@ -371,9 +410,20 @@ function FirstLaunch({ onNewNote }: { onNewNote: () => void }) {
 
 function headerFor(
   selection: Selection,
-  notes: NoteSummary[],
+  notes: NoteRow[],
   folderNames: Map<string, string>,
+  search: SidebarSearch | null,
 ): { title: string; count: string } {
+  if (search !== null) {
+    /* §6.5: relevance order, not the pinned/updated order of the normal list.
+       A header that said "Work" would be claiming a scope that is not in force
+       — the scope is whatever the sidebar's structure region says, and the
+       search says only which of those notes matched. */
+    return {
+      title: `Results for “${search.query}”`,
+      count: countWithTotal(notes.length, search.total, 'result'),
+    };
+  }
   const count = plural(notes.length, 'note');
   switch (selection.kind) {
     case 'all':
@@ -392,7 +442,7 @@ function headerFor(
   }
 }
 
-function tagNameOf(notes: NoteSummary[], tagId: Uuid): string {
+function tagNameOf(notes: NoteRow[], tagId: Uuid): string {
   for (const note of notes) {
     const tag = note.tags.find((candidate) => candidate.id === tagId);
     if (tag !== undefined) return `: ${tag.name}`;
@@ -400,47 +450,94 @@ function tagNameOf(notes: NoteSummary[], tagId: Uuid): string {
   return '';
 }
 
+/** `3 results`, or `500 of 4,123 results` while more pages remain. The count is
+    the honest one: a header reporting the loaded rows on its own would tell a
+    user searching for a common word that they had found everything. */
+function countWithTotal(loaded: number, total: number, noun: string): string {
+  const label = `${total} ${noun}${total === 1 ? '' : 's'}`;
+  return loaded < total ? `${loaded} of ${label}` : label;
+}
+
 /* Every empty state explains the cause, not just the fact (§8). The copy differs
    per selection because "nothing here" and "nothing pinned" are different
    situations and one generic message would explain neither. */
 function emptyFor(
   selection: Selection,
+  search: SidebarSearch | null,
   onNewNote: () => void,
-): { title: string; body: string; action?: ReactNode } {
+  onClearSearch: () => void,
+): { title: string; body: string; icon: ReactNode; action?: ReactNode } {
+  if (search !== null) {
+    /* §8, and the prototype's fourth state: `search` from the §3.3 inventory, the
+       query in quotes so the user can see which one found nothing, and a cause
+       that tells them what the search does cover rather than only what it did
+       not find. */
+    return {
+      title: `No results for “${search.query}”`,
+      body: 'Search covers titles and the full text of every note in this view.',
+      icon: <Search className="icon i-20" aria-hidden="true" />,
+      action: (
+        <GhostAction
+          label="Clear search"
+          icon={<X className="icon i-16" aria-hidden="true" />}
+          onClick={onClearSearch}
+        />
+      ),
+    };
+  }
   switch (selection.kind) {
     case 'pinned':
       return {
         title: 'Nothing pinned',
         body: 'Pin a note with Ctrl+D to keep it at the top of the list.',
+        icon: <Pin className="icon i-20" aria-hidden="true" />,
         action: <GhostAction label="New note" onClick={onNewNote} />,
       };
     case 'trash':
-      return { title: 'Trash is empty', body: 'Deleted notes stay in the trash until you empty it.' };
+      return {
+        title: 'Trash is empty',
+        body: 'Deleted notes stay in the trash until you empty it.',
+        icon: <Trash className="icon i-20" aria-hidden="true" />,
+      };
     case 'folder':
       return {
         title: 'Nothing here',
         body: 'This folder is empty.',
+        icon: <Folder className="icon i-20" aria-hidden="true" />,
         action: <GhostAction label="New note" onClick={onNewNote} />,
       };
     case 'tag':
-      return { title: 'No notes with this tag', body: 'Add the tag from the editor status bar.' };
+      return {
+        title: 'No notes with this tag',
+        body: 'Add the tag from the editor status bar.',
+        icon: <Hash className="icon i-20" aria-hidden="true" />,
+      };
     case 'all':
       return {
         title: 'Nothing here',
         body: 'No notes in this view.',
+        icon: <Inbox className="icon i-20" aria-hidden="true" />,
         action: <GhostAction label="New note" onClick={onNewNote} />,
       };
   }
 }
 
-function GhostAction({ label, onClick }: { label: string; onClick: () => void }) {
+function GhostAction({
+  label,
+  onClick,
+  icon,
+}: {
+  label: string;
+  onClick: () => void;
+  icon?: ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className="mt-1 flex items-center gap-[6px] rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-[13px] font-medium text-[var(--text-muted)]"
     >
-      <Plus className="icon i-16" aria-hidden="true" />
+      {icon ?? <Plus className="icon i-16" aria-hidden="true" />}
       {label}
     </button>
   );
@@ -452,4 +549,4 @@ function plural(count: number, noun: string): string {
 
 /* One shared empty list rather than a fresh `[]` per render, so passing it to a
    memoised child does not invalidate the memo on every parent render. */
-const EMPTY_NOTES: NoteSummary[] = [];
+const EMPTY_NOTES: NoteRow[] = [];
