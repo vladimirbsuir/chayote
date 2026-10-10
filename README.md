@@ -244,22 +244,25 @@ The authoritative layout is `docs/10-conventions.md` §1. This is a summary.
 
 ## 7. Manual steps outstanding
 
-**Attach an Android device.** One step, and it is the only thing M7's runtime half waits on.
+**The runtime half of M7 has now been run on a physical device.** An Infinix X6836,
+Android 13, System WebView 153, arm64-v8a, with a debug-signed APK. What that verified
+is in `docs/11-verification.md` §3.5a: the real SQLite backend including migrations,
+FTS5 and WAL on the device filesystem, derivation, survival of a hard `force-stop`, the
+`Pause` flush, `Resume`, rotation, and `adjustResize` observed rather than merely
+declared. It also found a defect the browser could not — the app drew under the system
+status and navigation bars — which is fixed.
 
-**The build half is done.** As of M7 the Gradle project is scaffolded and tracked in
-git, both arm ABIs cross-compile and link, and the release APK measures 14.65 MiB
-against the 20 MB budget with no `INTERNET` permission in its manifest. Commands and
-the `aapt2` checks are in `docs/11-verification.md` §3.5.
+**What is still outstanding:**
 
-The toolchain is here. The SDK, NDK 27, build-tools 34–36 and the accepted licences
-are installed at `%LOCALAPPDATA%\Android\Sdk`, JDK 21 is present, `ANDROID_HOME` and
-`ANDROID_SDK_ROOT` are set, and the Rust Android targets are installed. This file,
-`docs/08-roadmap.md` and `docs/11-verification.md` §2 all said the SDK was absent until
-that was checked against the filesystem — the correction is in `11-verification.md` §2
-rather than quietly made.
+- **The back button**, which is the reason this section exists. `06-platform.md` §4.4
+  prescribes a Tauri back-button handler and rejects `popstate`; Tauri 2.12 has no
+  JavaScript-reachable back-button event, and §4.4 now explains that from the source.
+  It needs an ADR before it can be built.
+- **Long-press, 44 px touch targets, and airplane mode** — unmeasured.
+- **The Android 15+ `adjustResize` question.** This device is Android 13, so it could
+  not settle whether `targetSdk 37` plus `enableEdgeToEdge()` makes the attribute inert
+  on a newer phone. Recorded as unmeasured rather than folded into "verified on device".
 
-What only a handset can prove is listed in `docs/11-verification.md` §3.5a: the real
-SQLite backend running on the device, `adjustResize` under the on-screen keyboard, the
-back-button stack, `Pause`/`Resume` flushing, a current stable System WebView,
-long-press and 44 px touch targets, rotation, and airplane mode. Commands and
-verification steps are in `docs/11-verification.md` §3.5. M0–M6 and M8 are unaffected.
+The toolchain is here and the build is repeatable: `docs/11-verification.md` §3.5 has
+the commands, including the `aapt2` checks that read the manifest off the APK rather
+than off the source file. M0–M6 and M8 are unaffected.

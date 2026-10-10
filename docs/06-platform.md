@@ -148,6 +148,20 @@ The one permission a release APK *does* carry is `com.chayote.app.DYNAMIC_RECEIV
 | Window resize | Flush the autosave on the `Focus`/`Pause` lifecycle event |
 | Hardware keyboard | `Ctrl/Cmd` shortcuts from §7 of `05-ui-ux.md` are active |
 
+**Window insets are consumed in CSS, and this was found on a device at M7.** Tauri's
+generated `MainActivity` calls `enableEdgeToEdge()`, so the WebView fills the window
+and the app draws under the status bar and the navigation bar. Measured on a device:
+the mobile top bar sat under the clock and battery with the hamburger clipped at the
+edge, and the editor status bar sat behind the three-button navigation bar — which is
+also why it disappeared entirely while the keyboard was open, contradicting the first
+row of this table.
+
+The fix is `viewport-fit=cover` in `index.html` plus `env(safe-area-inset-*)` padding
+on `#root` in `base.css`, via the `--inset-top` / `--inset-bottom` tokens.
+`viewport-fit=cover` is load-bearing and not decoration: without it both `env()`
+values are `0` on Android and the rule silently does nothing. A desktop browser also
+reports `0`, so the rule is inert there.
+
 ### 4.4 Back navigation
 
 The Android back gesture must not exit the app from the editor.
@@ -158,12 +172,41 @@ The Android back gesture must not exit the app from the editor.
 | List view | Move the task to the background |
 | Any dialog open | Dismiss the dialog |
 
-Implement with a Tauri back-button handler, not by listening for `popstate`. A popstate-based implementation breaks on gesture navigation.
+Implement with a Tauri back-button handler, not by listening for `popstate`. A
+popstate-based implementation breaks on gesture navigation.
+
+**This is the one requirement M7 could not implement as written, and the reason is in
+Tauri's source.** There is no back-button event reachable from JavaScript in Tauri
+2.12:
+
+- `AppPlugin.kt` registers an `OnBackPressedCallback` for the `back-button` event,
+  and **when a listener exists it dispatches instead of taking its default** — which is
+  the behaviour §4.4 wants. But `hasListener()` reads `Plugin.kt`'s private `listeners`
+  map, populated only by the plugin's own `registerListener` command. A JavaScript
+  `listen('back-button', …)` goes through Rust's event system instead and never appears
+  in that map, so the check always fails.
+- `Plugin.trigger()` sends only to those same Java channels, so even a listener that did
+  register would not receive the event.
+- `WryActivity.handleBackNavigation` is the other native hook; `TauriActivity` sets it
+  `false`, and `true` only installs wry's own `goBack`-or-finish callback. It does not
+  reach the web layer either.
+
+Measured on a device with a JavaScript listener in place: the press fell through to
+`webView.goBack()`, the WebView had no history, and **back in the editor did nothing**.
+
+So the mechanism that works is Kotlin — an `OnBackPressedCallback` installed from
+`MainActivity.onWebViewCreate`, which `WryActivity` exposes precisely for this — either
+pushing a WebView history entry or evaluating JavaScript. That is a change to how the
+frontend meets the platform, and it is **not yet decided**; it needs an ADR, because it
+either puts a second path to the platform outside `ipc.ts` (against R6's structure) or
+revises this section's explicit rejection of `popstate`. It is left unimplemented and
+recorded rather than half-built, because a handler that looks like a fix and does
+nothing is worse than the documented gap.
 
 ### 4.5 Lifecycle
 
 | Event | Required behaviour |
-|-------|---------|
+|-------|-------------------|
 | `Pause` (backgrounded) | Flush the autosave synchronously |
 | `Resume` | Refresh the note list if the system may have destroyed the WebView |
 | `LowMemory` | Nothing special; do not force a flush beyond the normal debounce |
@@ -177,7 +220,7 @@ Implement with a Tauri back-button handler, not by listening for `popstate`. A p
 | No global shortcuts | Hardware-keyboard shortcuts work only while the app is focused |
 | No native file dialog until v1.2 | No import/export from Android in v1 |
 | System WebView version varies | Test on a current stable System WebView. The oldest supported WebView is no longer a test target (§1) |
-| SQLite `journal_mode = WAL` is supported | No behaviour difference expected from desktop. **Not yet verified on a device** — M6 ran on desktop only, and the earlier note here claiming it was "verified in M6" was wrong; WAL on the device filesystem is part of what the `06-platform.md` §6 checklist exists to catch |
+| SQLite `journal_mode = WAL` is supported | **Verified on device at M7** — `chayote.db`, `chayote.db-wal` and `chayote.db-shm` are all present in the app's data directory and the WAL grew as writes landed. The same run verified migrations, FTS5 search with `bm25` and `snippet()`, and that the row survived a `force-stop` |
 
 ## 5. Build and verification commands
 

@@ -128,18 +128,17 @@ The distinction matters because "it builds" reads like "it works", and on Androi
 
 | Checkable without a device | Needs a device or emulator |
 |---|---|
-| ~~`tauri android init` scaffolds the Gradle project~~ **done at M7** | `adjustResize`: the on-screen keyboard must never cover the editor or the status bar (`06-platform.md` §4.3). **The attribute is declared and verified in the APK; that it *works* is still unobserved** |
-| ~~Both Rust ABIs cross-compile and link~~ **done at M7** | The **real** SQLite backend running on device: migrations, FTS5, WAL on the device filesystem. Everything so far ran against the mock backend in the browser and against SQLite on Windows |
-| ~~APK size against the 20 MB budget~~ **done at M7 — 14.65 MiB** | The back button walking the view stack, via the Tauri handler rather than `popstate` (§4.4) |
-| ~~The manifest requests no `INTERNET` permission~~ **done at M7** | `Pause`/`Resume` flushing the autosave (§4.5) |
-| ~~`adjustResize` present in the manifest — declared, not observed~~ **done at M7, `aapt2`** | A current stable System WebView. The oldest supported WebView was dropped as a test target at M6 (`06-platform.md` §1) |
-| Frontend layout at 360 × 640 in Chromium — already covered by the level-2 captures | Long-press opening the context menu; real 44 px touch targets; no hover states |
-| | Rotation preserving the open note and the editor scroll position |
-| | Airplane mode changing nothing, because nothing is online |
-| | Cold start reaching an editable caret on the device |
-| | Whether `targetSdk 37` plus `enableEdgeToEdge()` changes what `adjustResize` does. Android 15 deprecated `adjustResize` behaviour in edge-to-edge windows, and the generated `MainActivity` calls `enableEdgeToEdge()`. Declaring the attribute and it having an effect are different claims; this one is unmeasured |
+| ~~`tauri android init` scaffolds the Gradle project~~ **done at M7** | `adjustResize`: the on-screen keyboard must never cover the editor or the status bar (`06-platform.md` §4.3). **Observed on device at M7 — the viewport shrinks and the editor is never covered, portrait and landscape** |
+| ~~Both Rust ABIs cross-compile and link~~ **done at M7** | ~~The **real** SQLite backend running on device: migrations, FTS5, WAL on the device filesystem~~ **done at M7** — `chayote.db` + `-wal` + `-shm` on the device filesystem, FTS5 search with `bm25` and `snippet()` returning marked results, and the row surviving a `force-stop` |
+| ~~APK size against the 20 MB budget~~ **done at M7 — 14.65 MiB** | ~~The back button walking the view stack~~ **confirmed broken at M7**, and §4.4's prescribed mechanism does not exist in Tauri 2.12. See `06-platform.md` §4.4; needs an ADR |
+| ~~The manifest requests no `INTERNET` permission~~ **done at M7** | `Pause`/`Resume` flushing the autosave (§4.5). **Observed on device at M7** — typing inside the debounce and backgrounding lost nothing |
+| ~~`adjustResize` present in the manifest — declared, not observed~~ **done at M7, `aapt2`** | A current stable System WebView. The oldest supported WebView was dropped as a test target at M6 (`06-platform.md` §1). **Tested at M7 on WebView 153.0.8010.57** |
+| ~~Window insets keep the app clear of the system bars~~ **found broken on device at M7 and fixed**; Playwright cannot see it, since Chromium reports zero insets | Long-press opening the context menu; real 44 px touch targets; no hover states. **Not yet measured** |
+| Frontend layout at 360 × 640 in Chromium — already covered by the level-2 captures | Rotation preserving the open note and the editor scroll position. **Layout verified at M7**; scroll position not measured |
+| | Airplane mode changing nothing, because nothing is online. **Not yet exercised** |
+| | Cold start reaching an editable caret on the device. **Verified at M7** |
 
-The second column is the reason M7 exists as a milestone rather than a build step. The first column is a real gate and worth running before anyone is asked to plug in a phone. **At M7 it is struck through because it ran, not because it stopped mattering** — every one of those rows is a regression risk, and §3.5 gives the commands that catch it.
+The second column is the reason M7 exists as a milestone rather than a build step. The first column is a real gate and worth running before anyone is asked to plug in a phone. **Struck-through rows ran, not stopped mattering** — every one of those rows is a regression risk, and §3.5 gives the commands that catch it. The three that remain were not skipped for difficulty: two need a human or a permission this shell does not have, and the third is a spec problem rather than a build problem.
 
 ## 4. Visual regression against the prototype
 
