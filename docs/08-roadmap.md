@@ -2,12 +2,12 @@
 
 **Status:** Frozen. Last updated 2026-10-10.
 
-**Current position: M5, not started.** M0 through M4 shipped between 2026-10-07 and
+**Current position: M5, shipped. M0 through M4 shipped between 2026-10-07 and
 2026-10-10: the frontend scaffold, the data layer behind repository traits, the
 editor with autosave and paste sanitisation, the UI shell with the sidebar, the
-virtualised note list and the three responsive layouts, and the whole of
-organisation — folders, tags, pinning and trash. Work proceeds in order; a milestone
-is not "mostly done".
+virtualised note list and the three responsive layouts, the whole of
+organisation — folders, tags, pinning and trash — and search. Work proceeds in
+order; a milestone is not "mostly done". M6 is next.
 
 ---
 
@@ -143,13 +143,24 @@ M4–M6 are partly parallelisable: M5 and M6 touch disjoint surfaces from M4. Wi
 
 ### M5 — Search
 
-- `notes_fts` migrations and triggers (already created in M1; index integrity verified here).
-- Search service: sanitisation and prefix matching from `03-data-model.md` §3.6.
-- `bm25` ranking, weights 8.0 / 1.0.
-- Search scoped to the active selection.
-- Snippet generation with `<mark>` highlighting, sanitised before rendering.
-- Debounced input at 150 ms; query length ≥ 2; `Esc` clears.
+- `notes_fts` migrations and triggers (already created in M1; index integrity verified here). **Already in place** — required test 6 in `10-conventions.md` §10 has asserted the index across insert, update, soft delete and hard delete since M1, and `SearchService` itself landed in M1 with the service layer.
+- Search service: sanitisation and prefix matching from `03-data-model.md` §3.6. **Already in place** from M1, with required test 7 over FTS operators.
+- `bm25` ranking, weights 8.0 / 1.0. **Already in place**; the mock now reproduces the weighting and the prefix rule (`src/mock/search.ts`).
+- Search scoped to the active selection. **All five selections**, including the trash — recorded in `05-ui-ux.md` §6.5.
+- Snippet generation with `<mark>` highlighting, sanitised before rendering. **A second allowlist**, in `lib/sanitize.ts`, holding `mark` and nothing else.
+- Debounced input at 150 ms; query length ≥ 2; `Esc` clears. 150 ms and the ≥2 gate are in `useSearch`; `Esc` clears the field without blurring it.
 - **Done when:** on a seeded 50 MB corpus, p95 search latency is under 50 ms, and a search for a term present in 10 000 notes returns without a visible loading state.
+
+  **Shipped 2026-10-10**, branch `m5-search`. Four things in the plan shipped differently from what was written above, each recorded where it belongs:
+
+  - **`NoteCard` grew a `snippet`, rather than a second result card.** The prototype draws a search hit as the same note card with `mark` inside the excerpt, and a separate component would have been a second card to keep in step with the pin, the chips and the row menu. `NoteRow` is `NoteSummary` plus an optional snippet, and a `SearchHit` is assignable to it with no cast.
+  - **The snippet replaces the excerpt line instead of sitting under it.** A result is the sentence that matched; printing the note's opening above it as well is the same text twice. The consequence is that a match in the first block repeats the title, because `plain_text` begins with the title block — which is what FTS5 returns too.
+  - **A "Show more" control, because `SearchPage` has `nextOffset` and the header counts every match.** A list that stopped at the page boundary while the header said "4,123 results" would be claiming to be complete. The control is outside the scroll container so it stays reachable.
+  - **The mobile list view got its own field under the bar,** which the plan did not mention and the prototype and §2.4 both show.
+
+  338 TypeScript tests and 107 Playwright tests. Two defects that only a browser found are fixed in `base.css`: Chromium's own cancel button beside the field's `x`, and a second focus ring drawn by the bare input inside the container.
+
+  **Outstanding:** the p95 criterion of "Done when". Seeding a 50 MB corpus is the slowest test in the project and is deliberately **not** covered — measure it in release and record the number here when it is done. The second half of the criterion is covered: `useSearch.test.tsx` asserts that the previous result set stays on screen while the next query is in flight, which is what "without a visible loading state" means.
 
 ### M6 — Themes, settings, polish
 
@@ -266,7 +277,7 @@ The directory is `D:\Projects\chayote`. The rename succeeded after the shells ho
 | M2 | **Done** | 2026-10-08. TipTap 3.31, paste sanitisation, `clipboardTextSerializer`, autosave controller, status bar, task-checkbox node view. 65 TS tests + 22 Playwright tests. Four deviations from the plan recorded in §2. Hard-kill check still outstanding |
 | M3 | **Done** | 2026-10-09. `Sidebar`, `NoteCard`, a measured virtualised `NoteList`, `stores/selection.ts` + `stores/settings.ts`, `relativeTime`, three layouts, resizable sidebar, `Ctrl+N`/`Ctrl+F`/`Ctrl+\`. 98 TS tests + 49 Playwright tests. Four deviations recorded in §2 |
 | M4 | **Done** | 2026-10-10. Branch `m4-organisation`, six commits. The folder tree keyboard pattern of `05-ui-ux.md` §10.1 (one tab stop, roving tabindex); inline create/rename/delete with the descendant-count confirmation and the per-row overflow menu; drag to re-parent and reorder with the three-band drop target and the pre-write cycle refusal; the pin toggle with `Ctrl+D`, which added one IPC command, `notes_set_pinned`; the trash actions with their undo toast; and the status bar's folder and tag slots with their two popovers. Q5 closed. 36 Rust tests, 303 TS, 95 Playwright. Two things worth carrying forward: the autosave needed an exception to §5.1's unchanged-document skip that has to survive the debounce, a note-switch flush *and* the retry timer — the retry is unreachable from the UI, so it is unit-tested; and creating a tag flushes before refetching, because `tags_list` hides a tag whose count is zero and the new tag is genuinely not in the library until the note carrying it is saved |
-| M5 | In progress | Branch `m5-search`. The `useSearch` hook: 150 ms debounce, the ≥2-character minimum, the active selection as scope, the previous page kept while the next one loads, and paging via `nextOffset` |
+| M5 | **Done** | 2026-10-10. Branch `m5-search`, four commits. The `useSearch` hook — 150 ms debounce, the ≥2-character minimum, the active selection as scope, the previous page kept while the next one loads, and paging via `nextOffset`; results replacing the list with `Esc` restoring it; one `NoteCard` for both with `NoteRow` carrying an optional snippet; a snippet allowlist holding `mark` and nothing else; the "No results for “query”" state and a polite live count; the mobile list view's own field; and a mock backend that answers with real prefix matching, the 8.0/1.0 weighting, and `<mark>` snippets rather than substrings and an opening excerpt. Four deviations from the plan recorded in §2. 36 Rust tests, 338 TS, 107 Playwright. The p95 half of "Done when" is **outstanding** and deliberately not covered |
 | M6 | Not started | Q6 has a default. Screenshot review of the full UI starts here |
 | M7 | Not started | **Blocked** — needs Android SDK, `docs/11-verification.md` §3.5 |
 | M8 | Not started | |
