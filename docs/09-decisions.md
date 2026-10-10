@@ -48,7 +48,7 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | Web + Capacitor | Acceptable for Android, weak for desktop. Electron packaging on the desktop would reintroduce the cost we just rejected. |
 | Native SwiftUI / WinUI | Two or three codebases. Not compatible with a single WYSIWYG editor implementation. |
 
-**Consequences.** Rust is a required language for a first-class contributor. Bundle size stays around 10–20 MB. The WebView version is outside our control, so the frontend must target the oldest supported WebView. Android release requires the NDK and a signing key.
+**Consequences.** Rust is a required language for a first-class contributor. Bundle size stays around 10–20 MB. The WebView version is outside our control, so the frontend must target the oldest supported WebView as a *constraint* — though M6 dropped the obligation to *test* on it, see `06-platform.md` §1. Android release requires the NDK and a signing key.
 
 ---
 

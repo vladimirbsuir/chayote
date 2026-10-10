@@ -117,7 +117,7 @@ The distinction matters because "it builds" reads like "it works", and on Androi
 | Both Rust ABIs cross-compile and link | The **real** SQLite backend running on device: migrations, FTS5, WAL on the device filesystem. Everything so far ran against the mock backend in the browser and against SQLite on Windows |
 | APK size against the 20 MB budget | The back button walking the view stack, via the Tauri handler rather than `popstate` (§4.4) |
 | The manifest requests no `INTERNET` permission | `Pause`/`Resume` flushing the autosave (§4.5) |
-| `adjustResize` present in the generated manifest — declared, not observed | The **oldest** System WebView that satisfies `minSdk` (§1 says never target above it) |
+| `adjustResize` present in the generated manifest — declared, not observed | A current stable System WebView. The oldest supported WebView was dropped as a test target at M6 (`06-platform.md` §1) |
 | Frontend layout at 360 × 640 in Chromium — already covered by the level-2 captures | Long-press opening the context menu; real 44 px touch targets; no hover states |
 | | Rotation preserving the open note and the editor scroll position |
 | | Airplane mode changing nothing, because nothing is online |

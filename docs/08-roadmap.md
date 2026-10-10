@@ -262,10 +262,10 @@ licences are all installed and `ANDROID_HOME` is set; only the Rust Android
 targets are missing, and `rustup target add` installs those without privileges.
 The roadmap said otherwise from M1 until M6 — see `11-verification.md` §2.
 
-**Blocked on a device.** `adb devices` lists nothing, and the entire runtime half
+**Blocked on a device.** `adb devices` lists nothing, and the runtime half
 of this milestone needs a physical arm64 handset: `adjustResize` against the
-on-screen keyboard, the back-button stack, `Pause`/`Resume` flushing, the oldest
-supported System WebView, long-press and 44 px touch targets, rotation, airplane
+on-screen keyboard, the back-button stack, `Pause`/`Resume` flushing, a stable
+System WebView, long-press and 44 px touch targets, rotation, airplane
 mode, and the **real** SQLite backend running on device. Everything so far ran
 against the mock backend in a browser and against SQLite on Windows; the
 combination has never run on Android. `11-verification.md` §3.5a splits the two
@@ -282,7 +282,7 @@ the manifest checked for a missing `INTERNET` permission.
 - Back-button handler per the stack in `06-platform.md` §4.4.
 - Lifecycle flush on `Pause`; reload on `Resume`.
 - `@fontsource/inter` bundled — no network font fetch.
-- Verified on an arm64 device with the **oldest** supported System WebView, not only the newest.
+- Verified on an arm64 device with a current stable System WebView. The oldest supported WebView is no longer a test target — dropped at M6, see `06-platform.md` §1.
 - **Done when:** every item in `06-platform.md` §6 "Android" passes on a physical arm64 device in airplane mode.
 
 ### M8 — Packaging

@@ -12,7 +12,11 @@ Tauri 2 owns both platforms. The differences below are platform-specific behavio
 |--------|-------|
 | Product name | `Chayote` |
 | Bundle identifier | `com.chayote.app` (frozen — see `09-decisions.md` ADR-012) |
-| WebView | Android System WebView (Chromium). **The user can update it independently of the app**, so never target a feature above the oldest WebView we support. |
+| WebView | Android System WebView (Chromium). **The user can update it independently of the app**, so never target a feature above the oldest WebView we support *in principle*. **In practice M6 dropped the obligation to test on it** — see below. |
+
+**Testing on the oldest WebView is no longer required.** Decided at M6. Verification targets any stable System WebView, not the floor.
+
+This is a deliberate reduction in rigour, taken because testing the floor means pinning an old WebView on a real device and holding that combination for a platform v1 will not otherwise be revisited. The rule above still stands as a *constraint* — no syntax or API newer than the oldest supported WebView should be used — and `color-mix()` is the one place already close to the line, which is why ADR-019 notes that `ConfirmDialog` used it before M6 did. What is gone is the **test**, not the constraint. A user on a genuinely old WebView may find a rendering difference that no check in this repository would have caught; that is the accepted cost, recorded rather than hidden.
 | Window chrome | Native decorations in v1. A custom title bar is a deliberate simplification; see `09-decisions.md` ADR-009. |
 | Min OS | Windows 10 1809, macOS 10.15, Ubuntu 20.04, Android 8.0 (API 26) |
 | IPC | `invoke` only. No HTTP server, no local socket, no port. |
@@ -151,7 +155,7 @@ Implement with a Tauri back-button handler, not by listening for `popstate`. A p
 | No system tray | No background sync agent in v1. Sync is foreground-only in the sync phase, or needs a foreground service, which is a separate design. |
 | No global shortcuts | Hardware-keyboard shortcuts work only while the app is focused |
 | No native file dialog until v1.2 | No import/export from Android in v1 |
-| System WebView version varies | Test on the oldest WebView that satisfies `minSdk`, not only on the newest |
+| System WebView version varies | Test on a current stable System WebView. The oldest supported WebView is no longer a test target (§1) |
 | SQLite `journal_mode = WAL` is supported | No behaviour difference expected from desktop. **Not yet verified on a device** — M6 ran on desktop only, and the earlier note here claiming it was "verified in M6" was wrong; WAL on the device filesystem is part of what the `06-platform.md` §6 checklist exists to catch |
 
 ## 5. Build and verification commands
@@ -190,7 +194,7 @@ npm run build                       # must complete with no TS errors
 
 **Android**
 
-- Cold start on an arm64 device with the WebView at its minimum supported version.
+- Cold start on an arm64 device with a current stable System WebView.
 - On-screen keyboard never covers the editor or the status bar.
 - Back button walks the view stack and exits from the list.
 - Backgrounding during typing loses nothing.
