@@ -84,6 +84,17 @@ type DragState = { draggedId: Uuid; targetId: Uuid | null; zone: DropZone | null
 const MENU_WIDTH = 168;
 const MENU_ESTIMATED_HEIGHT = 120;
 
+/* §6.3: re-parenting by drag is mouse-only in v1. A function of the live media
+   rather than a constant, because tests pin both answers by stubbing
+   `matchMedia` per case. */
+function isCoarsePointer(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches
+  );
+}
+
 export function FolderTree({
   nodes,
   counts,
@@ -110,6 +121,12 @@ export function FolderTree({
      past the container's edge is clipped; flip upward when there is no room
      below, against the viewport rather than the row. */
   const openMenu = (id: Uuid, anchor: HTMLElement): void => {
+    /* Opening a menu ends any drag UI: a drag in progress owns the pointer, and a
+       menu opening over it means the gesture became something else — on touch, a
+       hold that started a drag before the menu's re-render withdrew `draggable`.
+       Without this the row stays dimmed and untappable with no `dragend` ever
+       coming to clear it. */
+    setDrag(null);
     const rect = anchor.getBoundingClientRect();
     const up =
       rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight &&
@@ -534,17 +551,27 @@ function FolderRows({
               data-dragging={isDragged ? 'true' : undefined}
               /* No `aria-dropeffect`: it is deprecated in ARIA 1.1 and, more to the
                  point, drag-and-drop has neither a keyboard equivalent in the DOM
-                 at all nor a touch path — touch gestures never fire HTML5 drag
-                 events, so re-parenting is mouse-only in v1. The keyboard route
-                 to a specific position is a documented gap (`05-ui-ux.md` §6.3)
-                 rather than a fake ARIA attribute, and touch re-parenting waits
-                 on the same v1.1 "move to…" item. */
+                 at all nor a touch path — re-parenting is mouse-only in v1, and
+                 rows are not draggable on a coarse pointer at all. (A hold on a
+                 draggable row can start a touch drag on this WebView after all,
+                 with no `dragend` to end it — which is exactly why the gate is
+                 here rather than trusting the gesture to never start.) The
+                 keyboard route to a specific position is a documented gap
+                 (`05-ui-ux.md` §6.3) rather than a fake ARIA attribute, and touch
+                 re-parenting waits on the same v1.1 "move to…" item. */
               style={{ paddingLeft: 6 + depth * 16 }}
               /* `draggable` only while nothing else is going on. A row being renamed
                  is an input, and dragging a menu open over the tree would otherwise
-                 start a drag from whatever is underneath it. */
+                 start a drag from whatever is underneath it. Never on a coarse
+                 pointer: drag is mouse-only in v1, and on touch a hold on a
+                 draggable row can start a drag that no `dragend` ever ends — the
+                 row is left dimmed and untappable, found on a phone. */
               draggable={
-                editing === null && menu === null && drag === null && !creatingRoot
+                editing === null &&
+                menu === null &&
+                drag === null &&
+                !creatingRoot &&
+                !isCoarsePointer()
               }
               onDragStart={() => {
                 onDragStart(node.id);
