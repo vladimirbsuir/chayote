@@ -108,7 +108,13 @@ export function TopBar({
             rather than a field inside it: at 360 px the bar's two controls and
             a usable field do not fit on one row, and §9's reason for not putting
             the desktop bar on this view at all applies to the field with it. */}
-        <div className="mx-3 mt-3 flex h-10 flex-none items-center gap-2 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text-subtle)] focus-within:border-[var(--border-strong)] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]">
+        {/* `relative focus-within:z-10`: the focus ring is drawn 2 px *outside*
+            the container, straight onto the sidebar below — which paints later
+            and covers the ring's bottom edge. Lifting the container above the
+            sidebar while focused keeps the whole ring visible, with no layout
+            change. The desktop field sits inside its 52 px bar with room to
+            spare, so it needs none of this. */}
+        <div className="relative mx-3 mt-3 flex h-10 flex-none items-center gap-2 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text-subtle)] focus-within:z-10 focus-within:border-[var(--border-strong)] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]">
           <Search className="icon i-18" aria-hidden="true" />
           <input
             ref={inputRef}

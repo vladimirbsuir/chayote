@@ -13,7 +13,8 @@ import { qk } from '../queries/keys';
 import { IconButton } from './IconButton';
 import { EditorOverflowMenu } from './EditorOverflowMenu';
 import type { JsonDoc, Uuid } from '../types/note';
-import type { Note, NoteSummary, SaveNoteInput } from '../types/ipc';
+import type { Note, NoteFilter, NoteSummary, SaveNoteInput } from '../types/ipc';
+import { applySaveToList } from '../lib/noteOrder';
 import { NoteEditor } from '../editor/NoteEditor';
 import { EditorStatusBar } from './EditorStatusBar';
 import { EmptyState } from './EmptyState';
@@ -105,13 +106,22 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
        by exactly those two, so patching only the open note's own cache entry would
        leave a card showing a pin the note no longer has until the next refetch. */
     queryClient.setQueryData(qk.note(saved.id), saved);
-    queryClient.setQueriesData(
-      { queryKey: ['notes'] },
-      (existing: NoteSummary[] | undefined) =>
-        Array.isArray(existing)
-          ? existing.map((summary) => (summary.id === saved.id ? { ...summary, ...summaryOf(saved) } : summary))
-          : existing,
-    );
+    /* The save moved `updated_at`, which is the list ordering: patching the row
+       without re-sorting strands the edited note wherever it was.
+       `applySaveToList` re-sorts every live selection and leaves trash
+       (ordered by `deleted_at`) alone; search pages live under a different key
+       prefix and are never enumerated here. Enumerated with `getQueriesData`
+       rather than patched with `setQueriesData` because that updater never sees
+       the key — only the data — so per-selection branching inside it cannot
+       know which list it holds. */
+    const patched = summaryOf(saved);
+    for (const [key, existing] of queryClient.getQueriesData<NoteSummary[]>({
+      queryKey: ['notes'],
+    })) {
+      if (!Array.isArray(existing)) continue;
+      const filter = key[1] as NoteFilter | undefined;
+      queryClient.setQueryData(key, applySaveToList(existing, patched, filter?.kind));
+    }
   });
   const saveState = useEditorStore((state) => selectSaveState(state, noteId));
 

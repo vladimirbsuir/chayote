@@ -37,6 +37,22 @@ test.describe('mobile editor', () => {
     await expect(page.getByTestId('save-state')).toBeVisible();
   });
 
+  test('the tag editor opens centred, not hugging the screen edge', async ({ page }) => {
+    /* Found on a phone: the tag popover parked at the right edge with a sliver
+       of margin. Anchor-relative placement of a 260 px panel has nothing worth
+       following at 360 px, so the panel is centred there
+       (`popoverPlacement.test.ts` pins the geometry across viewports). */
+    await openEditor(page);
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('status-popover')).toBeVisible();
+
+    const box = await page.getByTestId('status-popover').boundingBox();
+    expect(box, 'tag editor has no box').not.toBeNull();
+    if (box === null) return;
+    expect(box.x, 'tag editor is not centred').toBe((MOBILE.width - 260) / 2);
+  });
+
   test('nothing in the row truncates to an ellipsis or wraps', async ({ page }) => {
     await openEditor(page);
 
@@ -204,6 +220,65 @@ test.describe('mobile list', () => {
     await expect(
       page.getByTestId('note-card').filter({ hasText: 'A brand new title' }),
     ).toHaveCount(1);
+  });
+
+  test('the focused search field draws its ring above the sidebar', async ({ page }) => {
+    /* Found on a phone: the focus ring's bottom edge was sliced off where the
+       sidebar begins. The ring is drawn 2 px outside the container, straight
+       onto the sidebar below — which paints later and covers it. The container
+       lifts above the sidebar while focused; this pins the mechanism, and the
+       device screenshot pins the pixels. */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await page.getByRole('searchbox', { name: 'Search notes' }).click();
+
+    const zIndex = await page
+      .getByRole('searchbox', { name: 'Search notes' })
+      .evaluate((input) => getComputedStyle(input.parentElement as HTMLElement).zIndex);
+    expect(zIndex).toBe('10');
+  });
+
+  test('editing a note moves it to the top of the list', async ({ page }) => {
+    /* Found on a phone: edit a note, go back, and it sits wherever it was.
+       Saves patch the cached lists in place without refetching, and the patch
+       kept the old order although `updated_at` — the ordering — just moved.
+       The patch re-sorts every live selection now; trash keeps deletion order
+       and search keeps relevance (`noteOrder.test.ts` pins both). */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    const cards = page.getByTestId('note-card');
+    await expect(cards.first()).toBeVisible();
+    const idsBefore = await cards.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-note-id')),
+    );
+    const editedId = idsBefore[idsBefore.length - 1] ?? '';
+
+    await cards.last().click();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Note content' }).pressSequentially('edited');
+    await page.getByRole('button', { name: 'Back to list' }).click();
+
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    const idsAfter = await cards.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-note-id')),
+    );
+    /* It moved up — and past every unpinned note, stopping only below the
+       pinned group, which outranks any timestamp. (In a live list a pinned
+       card carries its `pin-toggle` with `aria-pressed="true"`; the plain
+       `pin-indicator` exists only in the trash, where the pin is not
+       actionable.) */
+    expect(idsAfter.indexOf(editedId)).toBeLessThan(idsBefore.indexOf(editedId));
+    await expect(
+      cards
+        .filter({ has: page.locator('[data-testid="pin-toggle"][aria-pressed="false"]') })
+        .first(),
+    ).toHaveAttribute('data-note-id', editedId);
   });
 
   test('the sidebar fills the viewport with no dead strip at the edge', async ({ page }) => {
