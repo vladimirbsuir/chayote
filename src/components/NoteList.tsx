@@ -121,7 +121,17 @@ export function NoteList({
         id,
         key: menuKey(note, hasRowActions),
         placement: {
-          top: up ? rect.top - 4 : rect.bottom + 4,
+          /* Clamped so the estimate always lands inside the viewport. Moving
+             the top above the row does not move the box's bottom edge with it —
+             the menu still grows down from its top — so a tall row near the
+             fold fits neither below nor above, and arrived 13 px clipped in the
+             trash-restore flow once taller cards pushed the row into that zone.
+             Overlapping the row is fine: the menu is transient chrome above
+             everything, not layout. */
+          top: Math.min(
+            Math.max(8, up ? rect.top - 4 : rect.bottom + 4),
+            window.innerHeight - MENU_ESTIMATED_HEIGHT - 8,
+          ),
           left: Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8),
         },
       });
