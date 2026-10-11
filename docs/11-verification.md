@@ -165,6 +165,28 @@ Screenshots, input, install and launch:
 & $adb shell dumpsys package com.chayote.app   # version, signature, DEBUGGABLE flag
 ```
 
+Measuring instead of eyeballing: an eyeballed tap lands ~100 px off (the CSS
+viewport is 360 wide at DPR 3, plus the status bar and inset offsets), and a
+miss on a 20 px chevron can toggle the wrong control with no visible error
+until the next screenshot. `scripts/measure-screenshot.py` reads the pulled
+screenshot and prints the brightness runs in a band — hairlines, header glyphs,
+text rows — which bound the control to tap; the run's center is the coordinate
+on that axis. `--find dark` inverts for the light theme, `--axis cols` finds
+vertical edges, `--box` limits the scan. Defaults cover the sidebar's left
+gutter on a 1080×2460 shot, where the section chevrons and folder twisties
+live:
+
+```powershell
+& $adb pull /sdcard/<name>.png <local-path>
+python scripts/measure-screenshot.py <local-path>
+& $adb shell input tap <x> <y>
+```
+
+Needs Pillow (`pip install pillow`); otherwise stdlib only, and it needs no
+device connection — it runs on the pulled PNG. Proven in the section-collapse
+session: eyeballed taps kept landing in the neighbouring control's hit slop,
+and every tap after measuring landed first try.
+
 What the gear session taught, beyond §3.5a:
 
 - `screencap` returns the full `1080×2460`, so image pixels are device pixels 1:1 — but CSS pixels are ×3 *and* offset by the status bar and the safe-area insets, so eyeballed taps land ~100 px off (the M8 note). Measure the target in the previous screenshot instead of guessing.
