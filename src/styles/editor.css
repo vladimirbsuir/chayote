@@ -50,6 +50,17 @@
   padding-left: 24px;
 }
 
+/* Tailwind's preflight sets every `ul` and `ol` to `list-style: none`, which
+   the rule above does not undo: the list kept its indent but lost its markers.
+   Restore them here; the task list below keeps `none` and wins by specificity. */
+.note-editor ul {
+  list-style: disc outside;
+}
+
+.note-editor ol {
+  list-style: decimal outside;
+}
+
 .note-editor li {
   margin-bottom: 4px;
 }

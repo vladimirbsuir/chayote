@@ -26,7 +26,6 @@ import {
   Moon,
   MoreHorizontal,
   Palette,
-  Pilcrow,
   Pin,
   Plus,
   Quote,
@@ -89,7 +88,6 @@ const ICONS: Record<string, typeof Search> = {
   italic: Italic,
   strikethrough: Strikethrough,
   code: Code,
-  pilcrow: Pilcrow,
   'heading-1': Heading1,
   'heading-2': Heading2,
   'heading-3': Heading3,
@@ -121,7 +119,7 @@ describe('the icon inventory of 05-ui-ux.md §3.3', () => {
   it('has an implementation for every documented icon, and no others', () => {
     const documented = inventoryFromDoc();
     expect(documented.length).toBeGreaterThan(0);
-    /* ADR-015 fixes the inventory, now at 38 with the formatting toolbar.
+    /* ADR-015 fixes the inventory, now at 37 with the formatting toolbar.
        A count assertion alone would pass while the list silently grew; the
        equality below is what catches both a missing icon and an extra one. */
     expect([...documented].sort()).toEqual([...Object.keys(ICONS)].sort());
@@ -197,7 +195,7 @@ describe('the icon inventory of 05-ui-ux.md §3.3', () => {
   });
 
   it('keeps every icon colourless by construction', () => {
-    /* The `.icon` base rule is what makes `currentColor` true for all 38. If it
+    /* The `.icon` base rule is what makes `currentColor` true for all 37. If it
        ever gained a `fill` or `stroke` literal, every icon in the app would
        inherit it at once. */
     const css = readFileSync(STYLES, 'utf8');

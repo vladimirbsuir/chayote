@@ -11,7 +11,6 @@ import {
   List,
   ListOrdered,
   ListTodo,
-  Pilcrow,
   Quote,
   Redo2,
   SeparatorHorizontal,
@@ -63,7 +62,6 @@ export function FormattingToolbar({
   const activeItalic = editor?.isActive('italic') ?? false;
   const activeStrike = editor?.isActive('strike') ?? false;
   const activeCode = editor?.isActive('code') ?? false;
-  const activeParagraph = editor?.isActive('paragraph') ?? false;
   const activeH1 = editor?.isActive('heading', { level: 1 }) ?? false;
   const activeH2 = editor?.isActive('heading', { level: 2 }) ?? false;
   const activeH3 = editor?.isActive('heading', { level: 3 }) ?? false;
@@ -77,7 +75,6 @@ export function FormattingToolbar({
   const canItalic = editor?.can().toggleItalic() ?? false;
   const canStrike = editor?.can().toggleStrike() ?? false;
   const canCode = editor?.can().toggleCode() ?? false;
-  const canParagraph = editor?.can().setParagraph() ?? false;
   const canH1 = editor?.can().toggleHeading({ level: 1 }) ?? false;
   const canH2 = editor?.can().toggleHeading({ level: 2 }) ?? false;
   const canH3 = editor?.can().toggleHeading({ level: 3 }) ?? false;
@@ -140,16 +137,6 @@ export function FormattingToolbar({
         icon={<Code className={`icon ${mobile ? 'i-20' : 'i-18'}`} aria-hidden="true" />}
       />
       <Separator />
-      <ToolButton
-        mobile={mobile}
-        testId="format-paragraph"
-        label="Paragraph"
-        title="Paragraph"
-        pressed={activeParagraph}
-        disabled={!editable || !canParagraph}
-        onRun={() => editor?.chain().focus().setParagraph().run()}
-        icon={<Pilcrow className={`icon ${mobile ? 'i-20' : 'i-18'}`} aria-hidden="true" />}
-      />
       <ToolButton
         mobile={mobile}
         testId="format-h1"

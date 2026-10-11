@@ -90,6 +90,33 @@ test.describe('formatting toolbar', () => {
     await settleEditor(page);
     await page.getByRole('button', { name: 'Bullet list' }).click();
     await expect(editor.locator('ul li').last()).toHaveText('toolbar bullet');
+
+    /* Tailwind's preflight clears `list-style` globally: the indent without a
+       marker is the only visible symptom, so the marker style itself is the
+       assertion rather than the node existing. */
+    const bulletStyle = await editor
+      .locator('ul')
+      .last()
+      .evaluate((node) => getComputedStyle(node).listStyleType);
+    expect(bulletStyle).toBe('disc');
+  });
+
+  test('renders ordered list numbers', async ({ page }) => {
+    const editor = await openRichNote(page);
+    await caretToNewBlock(page, editor);
+
+    await page.keyboard.type('numbered item');
+    await settleEditor(page);
+    await page.keyboard.press('Shift+Home');
+    await settleEditor(page);
+    await page.getByRole('button', { name: 'Ordered list' }).click();
+    await expect(editor.locator('ol li').last()).toHaveText('numbered item');
+
+    const numberStyle = await editor
+      .locator('ol')
+      .last()
+      .evaluate((node) => getComputedStyle(node).listStyleType);
+    expect(numberStyle).toBe('decimal');
   });
 
   test('undoes through its undo button', async ({ page }) => {
