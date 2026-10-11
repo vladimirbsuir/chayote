@@ -172,4 +172,64 @@ describe('NoteList', () => {
       expect(selected).toHaveLength(1);
     });
   });
+
+  it('renders every card with its own border and surface, not as a continuous block', async () => {
+    /* Adjacent notes must read as separate cards: each carries its own border
+       and surface, with the 8 px gap living in the measured virtual row around
+       it. A `border-transparent` card on the raised sidebar is one block. */
+    const summaries = await seededSummaries(3);
+    render(
+      <QueryClientProvider client={client()}>
+        <NoteList
+          notes={summaries}
+          openNoteId={null}
+          now={Date.now()}
+          folderNames={new Map()}
+          showFolder
+          onOpen={() => {}}
+          empty={EMPTY_STATE}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-testid="note-card"]')).toHaveLength(3);
+    });
+    for (const card of Array.from(document.querySelectorAll('[data-testid="note-card"]'))) {
+      expect(card.className).toContain('border-[var(--border)]');
+      expect(card.className).toContain('bg-[var(--surface)]');
+      expect(card.className).not.toContain('border-transparent');
+    }
+    const row = document.querySelector('[data-index="0"]');
+    expect(row?.className).toContain('pb-2');
+  });
+
+  it('marks the open card with the accent border', async () => {
+    /* The open card is an accent border on the same surface — distinct from a
+       merely hovered card without a second background competing with the pin. */
+    const summaries = await seededSummaries(3);
+    const openId = summaries[0]?.id ?? null;
+    render(
+      <QueryClientProvider client={client()}>
+        <NoteList
+          notes={summaries}
+          openNoteId={openId}
+          now={Date.now()}
+          folderNames={new Map()}
+          showFolder
+          onOpen={() => {}}
+          empty={EMPTY_STATE}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-testid="note-card"]')).toHaveLength(3);
+    });
+    const open =
+      openId === null
+        ? null
+        : document.querySelector(`[data-testid="note-card"][data-note-id="${openId}"]`);
+    expect(open?.className).toContain('border-[var(--accent)]');
+  });
 });

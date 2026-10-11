@@ -8,6 +8,12 @@ import type { NoteRow } from '../types/ipc';
    a `NoteSummary` and nothing else — never a document, because the list must not
    load one (`02-architecture.md` §8, `03-data-model.md` §3.3).
 
+   Every card carries its own border and surface, with an 8 px gap from the
+   list's virtual rows around it: adjacent notes must read as separate cards,
+   not as one continuous block. The open card's border is the accent rather
+   than a second background, so it stays distinct from a merely hovered one
+   without adding a tint that would compete with the pin.
+
    Metrics are copied from the prototype: 9/10 padding, 14 px title at 550,
    13 px excerpt clamped to two lines, 12 px meta row. */
 
@@ -143,8 +149,8 @@ export const NoteCard = memo(function NoteCard({
       }}
       className={`group relative cursor-pointer rounded-[var(--r-input)] border px-[10px] py-[9px] transition-colors select-none [-webkit-touch-callout:none] ${
         isOpen
-          ? 'border-[var(--border)] bg-[var(--surface)]'
-          : 'border-transparent hover:bg-[var(--surface)]'
+          ? 'border-[var(--accent)] bg-[var(--surface)]'
+          : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)]'
       }`}
     >
       <div className="flex items-baseline gap-[6px]">

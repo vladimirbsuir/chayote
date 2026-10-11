@@ -22,7 +22,7 @@ import { EmptyState } from './EmptyState';
    overlaps its neighbour and clips the text between them. `estimateSize` stays
    as the first guess, and `measureElement` corrects it per row. */
 
-const ESTIMATED_CARD_HEIGHT = 96;
+const ESTIMATED_CARD_HEIGHT = 104;
 const OVERSCAN = 6;
 
 /** The menu's own metrics, from the prototype's popover: 168 px is the narrowest that
@@ -181,7 +181,7 @@ export function NoteList({
       role="listbox"
       aria-label="Notes"
       data-testid="note-list"
-      className="min-h-0 flex-1 overflow-y-auto px-1 py-1"
+      className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -192,9 +192,13 @@ export function NoteList({
               key={virtualRow.key}
               /* No `height` here: it would defeat `measureElement`. The measured
                  row becomes the positioning unit, so the total size and every
-                 `start` offset come from the same measurement. */
+                 `start` offset come from the same measurement. The bottom
+                 padding is the 8 px gap between cards — it is inside the
+                 measured row, so the virtualiser positions neighbours after
+                 it rather than under it. */
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
+              className="pb-2"
               style={{
                 position: 'absolute',
                 top: 0,
