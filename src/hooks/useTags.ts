@@ -4,9 +4,9 @@ import { tagsApi } from '../lib/ipc';
 import { qk } from '../queries/keys';
 
 /* Tags load once and are cached, for the same reason folders do
-   (`10-conventions.md` §8). `tags_list` already excludes a tag whose notes are
-   all in the trash — an empty filter in the sidebar is noise
-   (`03-data-model.md` §5) — so nothing here has to re-count. */
+   (`10-conventions.md` §8). Counts exclude trashed notes
+   (`03-data-model.md` §5); zero-count tags stay listed so they can be created
+   before any note carries them (ADR-021). */
 
 export function useTags(): { tags: TagWithCount[] | undefined } {
   const query = useQuery({ queryKey: qk.tags(), queryFn: tagsApi.list });

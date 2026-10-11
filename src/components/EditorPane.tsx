@@ -272,13 +272,12 @@ const createTag = useCallback(
       toggleTag(created.id);
       /* Two writes, in this order, and the order is the point.
 
-         `tags_list` hides a tag whose count is zero — an empty filter in the sidebar
-         is noise (`03-data-model.md` §5) — so the new tag is not in the library until
-         the note carrying it is saved. Attaching it is the debounced write, so the
-         save is flushed here rather than leaving the bar to say "Add tags" for 800 ms
-         over a tag that already exists. Then the refetch: the status bar resolves tag
-         names out of the cached list, and without the new tag in it the note would
-         carry a tag it cannot name. */
+         The new tag is in the library as soon as it is created — even at a
+         zero count (ADR-021) — but attaching it to the note is the debounced
+         write, so the save is flushed here rather than leaving the new name
+         unattached for 800 ms. Then the refetch: the status bar resolves tag
+         names out of the cached list, which is stale until invalidated, and
+         without the new tag in it the note would carry a tag it cannot name. */
       await autosave.flush();
       await queryClient.invalidateQueries({ queryKey: qk.tags() });
     },

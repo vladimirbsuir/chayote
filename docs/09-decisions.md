@@ -28,6 +28,43 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 018 | The frontend runs without Tauri, so the UI is testable in a browser | Accepted |
 | 019 | The accent is per-theme; custom accents are used verbatim | Accepted |
 | 020 | The Android back button is handled in Kotlin, and window insets in CSS | Accepted |
+| 021 | Tags stay listed at a zero count; the sidebar creates them | Accepted |
+
+---
+
+## ADR-021 — Tags stay listed at a zero count; the sidebar creates them
+
+**Status:** Accepted · **Date:** 2026-10-11
+
+**Context.** Since M4 `tags_list` carried `HAVING count > 0`: a tag with no live
+notes was hidden on both backends, and `05-ui-ux.md` §6.4 built on it — no add
+control in the Tags section, because creating one there would appear to do
+nothing, and the M8 removal of the dead `+` cited the same rule. The user
+rejected the rule itself: hiding makes tags second-class — they cannot be
+prepared before any note carries them — and "appears to do nothing" is a
+property of the hiding, not of the button.
+
+**Decision.** Zero-count tags stay listed with `count: 0`, on both backends, and
+the Tags section regains its `+` with an inline create like the Folders
+section's. Removing a tag from a note still never deletes the tag; deletion is
+an explicit act from the tag's own row menu, confirmed with the note count.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Keep hiding, restore `+` anyway | Recreates the M8 defect verbatim: the new tag is invisible until a note carries it. |
+| Show never-used tags but keep hiding all-trashed ones | Two rules where one sufficed, needing a second count to tell them apart; a tag whose notes are all trashed selects into the existing "No notes with this tag" state, which is already honest. |
+| Show zero-count tags only in the picker, not the sidebar | Two visibilities for one library; the sidebar and the picker would disagree about what exists. |
+
+**Consequences.**
+
+- Unused tags accumulate until deleted; the row menu's Delete is the cleanup.
+- The "No notes with this tag" empty state now also serves never-used tags, not
+  just emptied ones.
+- `03-data-model.md` §5 loses its `HAVING` clause; `05-ui-ux.md` §6.4 loses the
+  no-add-control sentence and gains the menu; the `tag_counts_…` Rust test is
+  rewritten around visibility rather than hiding.
 
 ---
 

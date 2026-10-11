@@ -349,7 +349,7 @@ There is no cap on pinned notes. If a user pins 50 notes, the ordering stops bei
 
 ### 6.4 Tags
 
-A tag is created by typing a new name into the tag editor; existing names complete. There is deliberately no add control in the sidebar's Tags section: `tags_list` hides zero-count tags (`03-data-model.md` §5), so creating one there would appear to do nothing. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; a tag disappears from the sidebar only when its note count reaches zero (`03-data-model.md` §5).
+A tag is created by typing a new name into the tag editor; existing names complete. There is currently no add control in the sidebar's Tags section. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; the tag stays in the sidebar with a zero count until it is deleted outright (`03-data-model.md` §5, ADR-021).
 
 **The editor and the picker are one visual language.** Both are portalled popovers anchored to their status-bar slot, and both are listboxes. They are the same component with different options, because a tag editor that looked different from the folder picker would be two visual languages for "choose a value" in a 28 px row. The picker is portalled rather than rendered in place because the status bar sits at the bottom of a `flex` column with its own stacking contexts: in place, the popover would be clipped by the editor pane and could not be raised above it. Its position is measured in the click handler rather than in an effect — the geometry is in hand at the click, and an effect that reads the DOM and then sets state is a second render for a value already known.
 
@@ -363,7 +363,7 @@ A tag is created by typing a new name into the tag editor; existing names comple
 
 **The slots show the pending value, not the saved one.** The folder and tags shown are what the next autosave will write. A click that appeared to do nothing for 800 ms would be the same lie the pin had.
 
-**Creating a tag flushes before it refetches.** A new tag's count is zero until the note carrying it is saved, and `tags_list` hides a tag whose notes are all in the trash and any tag with a zero count (`03-data-model.md` §5) — so the tag is genuinely not in the library until the write lands. Flushing the autosave and then invalidating the tag query is what makes the new name appear in the slot at all; without it the note would carry a tag the bar cannot name.
+**Creating a tag flushes before it refetches.** Attaching the tag is the debounced write, so the save is flushed here rather than leaving the new name unattached for 800 ms; invalidating the tag query then refreshes the cached list the slot resolves names from, so the bar never carries a tag it cannot name.
 
 ### 6.5 Search
 

@@ -379,11 +379,10 @@ LEFT JOIN note_tags nt ON nt.tag_id = t.id
 LEFT JOIN notes n ON n.id = nt.note_id AND n.deleted_at IS NULL
 WHERE t.deleted_at IS NULL
 GROUP BY t.id, t.name
-HAVING count > 0
 ORDER BY t.name COLLATE NOCASE;
 ```
 
-The `HAVING count > 0` hides tags whose notes are all in the trash — an empty filter in the sidebar is noise.
+Tags stay listed at a zero count — with no live notes yet, or all of them in the trash — so a tag can be created before any note carries it (ADR-021). Counts still exclude trashed notes.
 
 **Trash** — same as notes in a selection, with `deleted_at IS NOT NULL ORDER BY deleted_at DESC`.
 

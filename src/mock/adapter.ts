@@ -222,9 +222,8 @@ notes_move: ({ id, folderId }) => {
     tags_list: () =>
       state.tags
         .map((tag) => ({ id: tag.id, name: tag.name, count: countNotes(state, tag.id) }))
-        // A tag whose notes are all in the trash is hidden, matching
-        // `03-data-model.md` §5: an empty filter in the sidebar is noise.
-        .filter((tag) => tag.count > 0)
+        // Zero-count tags stay listed (ADR-021): tags can be created before any
+        // note carries them. Counts still exclude trashed notes (countNotes).
         .sort((a, b) => a.name.localeCompare(b.name)),
 
     tags_create: ({ name }) => {
