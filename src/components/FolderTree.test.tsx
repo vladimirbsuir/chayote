@@ -210,6 +210,23 @@ describe('FolderTree', () => {
     expect(onSelect).toHaveBeenCalledWith({ kind: 'folder', id: 'b' });
   });
 
+  it('swallows the release click after a hold that opened the menu', () => {
+    /* The release after a long-press synthesises a click on engines that do,
+       which would select the row under its own just-opened menu — measured on
+       the phone. The flag eats exactly that one; the next real click selects. */
+    const onSelect = vi.fn();
+    renderTree({ onSelect });
+
+    fireEvent.contextMenu(row('a'));
+    expect(screen.getByTestId('folder-menu')).toBeDefined();
+    fireEvent.click(row('a'));
+
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(row('a'));
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'folder', id: 'a' });
+  });
+
   it('leaves an unbound key alone so the event is not swallowed', () => {
     const onSelect = vi.fn();
     renderTree({ onSelect });
