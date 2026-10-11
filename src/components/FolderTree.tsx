@@ -146,6 +146,7 @@ export function FolderTree({
     });
   };
   const closeMenu = (): void => {
+    suppressOpenRef.current = false;
     setMenu(null);
   };
   /* Which row is being dragged, which row is under the pointer, and which of the
@@ -309,17 +310,35 @@ export function FolderTree({
     setDrag(null);
   };
 
+  /* A press that opened the menu via long-press ends in a release click on
+     engines that synthesise one — measured on the phone, where the hold
+     selected the row under its own menu. The flag eats exactly that one: the
+     same guard the note cards carry, for the same gesture. */
+  const suppressOpenRef = useRef(false);
+
   /* A drag in progress owns the pointer, so a row under it must not also select.
      §5 says selecting a folder is exclusive with everything else, and a re-parent
      that also changed the selection would be a second, unrequested change. */
   const clickRow = (id: Uuid): void => {
     if (drag !== null) return;
+    if (suppressOpenRef.current) {
+      suppressOpenRef.current = false;
+      return;
+    }
     focusRow(id);
     onSelect({ kind: 'folder', id });
   };
 
+  /* The gesture path to the menu — right-click, long-press — as opposed to the
+     row button and the keyboard, after neither of which a release click can
+     follow. Only a fresh open arms the guard (see `suppressOpenRef`). */
+  const contextMenuRow = (id: Uuid, anchor: HTMLElement): void => {
+    if (menu === null) suppressOpenRef.current = true;
+    openMenu(id, anchor);
+  };
+
   const runMenuAction = (action: FolderMenuAction, id: Uuid): void => {
-    setMenu(null);
+    closeMenu();
     switch (action) {
       case 'rename': {
         const node = rows.find((row) => row.node.id === id)?.node;
@@ -368,6 +387,7 @@ export function FolderTree({
           onCommitEditing={commitEditing}
           onEditEditing={closeEditing}
           onOpenMenu={openMenu}
+          onContextMenuRow={contextMenuRow}
           onCloseMenu={closeMenu}
           onMenuAction={runMenuAction}
           onShortcut={runMenuAction}
@@ -456,6 +476,7 @@ function FolderRows({
   onCommitEditing,
   onEditEditing,
   onOpenMenu,
+  onContextMenuRow,
   onCloseMenu,
   onMenuAction,
   onShortcut,
@@ -489,6 +510,9 @@ function FolderRows({
   onCommitEditing: () => void;
   onEditEditing: () => void;
   onOpenMenu: (id: Uuid, anchor: HTMLElement) => void;
+  /** The gesture path to the menu (right-click, long-press), which arms the
+      release-click guard — unlike the row button and the keyboard. */
+  onContextMenuRow: (id: Uuid, anchor: HTMLElement) => void;
   onCloseMenu: () => void;
   onMenuAction: (action: FolderMenuAction, id: Uuid) => void;
   onShortcut: (action: FolderMenuAction, id: Uuid) => void;
@@ -616,7 +640,7 @@ function FolderRows({
                  row's own button, all reach the same menu. */
               onContextMenu={(event) => {
                 event.preventDefault();
-                onOpenMenu(node.id, event.currentTarget);
+                onContextMenuRow(node.id, event.currentTarget);
               }}
               onKeyDown={(event) => {
                 /* §7: F2 renames, Delete removes. Both go through the same handler
@@ -807,6 +831,7 @@ function FolderRows({
                 onCommitEditing={onCommitEditing}
                 onEditEditing={onEditEditing}
                 onOpenMenu={onOpenMenu}
+                onContextMenuRow={onContextMenuRow}
                 onCloseMenu={onCloseMenu}
                 onMenuAction={onMenuAction}
                 onShortcut={onShortcut}
