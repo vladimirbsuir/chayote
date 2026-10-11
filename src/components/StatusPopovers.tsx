@@ -48,7 +48,10 @@ function Popover({ anchor, placement, label, onClose, children }: PopoverProps):
       ref={ref}
       data-testid="status-popover"
       style={{ top: placement.top, left: placement.left }}
-      className="fixed z-50 w-[260px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
+      /* Option labels are chrome, not content: a hold on one must pick it,
+         never select its text. The tag editor's filter input opts back in with
+         `select-text`, so it keeps its selection toolbar. */
+      className="fixed z-50 w-[260px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
     >
       <div className="border-b border-[var(--border)] px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
         {label}
@@ -253,7 +256,9 @@ export function TagEditor({
               });
             }
           }}
-          className="h-[26px] w-full rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text)] outline-none"
+          /* Explicitly selectable: the popover root carries `select-none`, and a
+             field the user types in must keep its selection toolbar. */
+          className="h-[26px] w-full rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text)] outline-none select-text"
         />
       </div>
 

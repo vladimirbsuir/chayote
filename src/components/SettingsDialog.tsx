@@ -108,7 +108,9 @@ export function SettingsDialog({
         aria-labelledby="settings-dialog-title"
         data-testid="settings-dialog"
         onKeyDown={onKeyDown}
-        className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
+        /* Dialog copy is chrome, not content: read, never copied. The colour
+           input below is a picker, not a text field, so nothing opts back in. */
+        className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
       >
         <div className="flex items-center gap-2 px-5 pt-[18px]">
           <span className="flex text-[var(--text-muted)]">

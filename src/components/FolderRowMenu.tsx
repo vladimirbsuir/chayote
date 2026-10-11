@@ -114,7 +114,9 @@ export function FolderRowMenu({
         itemRefs.current[next]?.focus();
       }}
       style={{ top: placement.top, left: placement.left }}
-      className="fixed z-50 min-w-[168px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-pop)]"
+      /* Menu labels are chrome, not content: a hold on an item must press it,
+         never select its text. */
+      className="fixed z-50 min-w-[168px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-pop)] select-none"
     >
       {items.map((item, index) => (
         <button

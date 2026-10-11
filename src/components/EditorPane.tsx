@@ -540,7 +540,9 @@ function MobileEditorBar({
 }) {
   if (onBack === undefined) return null;
   return (
-    <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2">
+    /* Bar chrome is not selectable: the title is read, never copied — copying
+       happens in the editor below it. */
+    <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 select-none">
       <IconButton label="Back to list" onClick={onBack} size="mobile">
         <ArrowLeft className="icon i-24" aria-hidden="true" />
       </IconButton>

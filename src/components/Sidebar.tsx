@@ -315,7 +315,12 @@ export function Sidebar({
       aria-label="Sidebar"
       data-testid="sidebar"
       style={width === null ? undefined : { width }}
-      className={`flex flex-col overflow-hidden bg-[var(--surface-raised)] ${
+      /* Chrome text is not selectable anywhere in the sidebar: on touch a hold
+         is a row gesture (open, menu) or a field edit, never a text selection —
+         and a hold over selectable text becomes a selection gesture with no
+         `contextmenu` at all. Text inputs opt back in explicitly with
+         `select-text`, so an input nested here keeps its selection toolbar. */
+      className={`flex flex-col overflow-hidden bg-[var(--surface-raised)] select-none ${
         width === null ? 'min-h-0 flex-1' : 'flex-none border-r border-[var(--border)]'
       }`}
     >

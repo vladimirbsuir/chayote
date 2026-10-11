@@ -160,6 +160,15 @@ describe('inline folder editing', () => {
     expect(document.activeElement).toBe(input());
   });
 
+  it('keeps the input selectable so a hold edits rather than opening a menu', () => {
+    /* The tree rows around it are `select-none`; the field the user types in
+       opts back in explicitly, or a hold in it would offer nothing to select. */
+    render(<StatefulTree />);
+    fireEvent.click(screen.getByTestId('open-root-create'));
+
+    expect(input().className).toContain('select-text');
+  });
+
   it('commits a typed name with Enter', async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(<StatefulTree onCreate={onCreate} />);

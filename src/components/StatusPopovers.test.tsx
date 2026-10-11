@@ -179,6 +179,18 @@ describe('TagEditor', () => {
     expect(selected[0]?.getAttribute('data-tag-id')).toBe('t-work');
   });
 
+  it('renders the popover itself unselectable so a hold picks, never selects', () => {
+    renderEditor();
+
+    expect(screen.getByTestId('status-popover').className).toContain('select-none');
+  });
+
+  it('keeps the filter input selectable under the unselectable popover', () => {
+    renderEditor();
+
+    expect(screen.getByTestId('tag-editor-input').className).toContain('select-text');
+  });
+
   it('declares itself a multi-select listbox, which is what it is', () => {
     renderEditor();
 

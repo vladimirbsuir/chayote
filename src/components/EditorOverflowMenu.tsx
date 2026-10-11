@@ -82,7 +82,9 @@ export function EditorOverflowMenu({
         <div
           role="menu"
           data-testid="editor-overflow"
-          className="absolute right-0 top-[48px] z-40 w-[200px] overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-pop)]"
+          /* Menu labels are chrome, not content: a hold on an item must press
+             it, never select its text. */
+          className="absolute right-0 top-[48px] z-40 w-[200px] overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-pop)] select-none"
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return;
             event.preventDefault();

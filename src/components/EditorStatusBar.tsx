@@ -73,7 +73,9 @@ export function EditorStatusBar({
   const mobile = variant === 'mobile';
   return (
     <div
-      className={`flex shrink-0 items-center gap-3 border-t border-[var(--border)] bg-[var(--surface-raised)] text-[12px] text-[var(--text-muted)] ${
+      /* Status text is chrome, not content: folder, tags, word count and save
+         state are read, never copied — copying happens in the editor. */
+      className={`flex shrink-0 items-center gap-3 border-t border-[var(--border)] bg-[var(--surface-raised)] text-[12px] text-[var(--text-muted)] select-none ${
         mobile ? 'h-11 gap-2 px-1' : 'h-7 px-3'
       }`}
     >

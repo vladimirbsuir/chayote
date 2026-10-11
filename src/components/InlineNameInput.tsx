@@ -100,7 +100,9 @@ export function InlineNameInput({
         onBlur={() => {
           commitOnce();
         }}
-        className={`h-[26px] w-full rounded-[var(--r-input)] border bg-[var(--surface)] px-[6px] text-[13px] text-[var(--text)] outline-none ${
+        /* Explicitly selectable: ancestors may carry `select-none`, and a field
+           the user types in must keep its selection toolbar. */
+        className={`h-[26px] w-full rounded-[var(--r-input)] border bg-[var(--surface)] px-[6px] text-[13px] text-[var(--text)] outline-none select-text ${
           error === null ? 'border-[var(--border-strong)]' : 'border-[var(--danger)]'
         }`}
       />

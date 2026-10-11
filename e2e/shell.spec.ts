@@ -58,6 +58,29 @@ test.describe('desktop two-pane layout', () => {
     expect(editorBox?.x ?? 0).toBeGreaterThanOrEqual(sidebarBox?.width ?? 0);
   });
 
+  test('chrome text is not selectable; the editor and the fields are', async ({ page }) => {
+    /* `05-ui-ux.md` §9: rows, menus, bars and dialogs carry `select-none` so a
+       hold is always a gesture, never a text selection; text inputs opt back in
+       with `select-text`. Asserted on computed style, which is what the
+       platform's long-press menu actually reads. */
+    await open(page);
+
+    const userSelectOf = (selector: string): Promise<string> =>
+      page.locator(selector).first().evaluate((node) => getComputedStyle(node).userSelect);
+
+    await expect(page.getByTestId('sidebar')).toBeVisible();
+    expect(await userSelectOf('[data-testid="sidebar"]')).toBe('none');
+    expect(await userSelectOf('[data-testid="folder-row"]')).toBe('none');
+    expect(await userSelectOf('[data-testid="tag-row"]')).toBe('none');
+    expect(await userSelectOf('[data-testid="note-card"]')).toBe('none');
+    expect(await userSelectOf('header')).toBe('none');
+    expect(await userSelectOf('[data-testid="save-state"]')).toBe('none');
+
+    /* Fields the user types in keep their selection toolbar. */
+    expect(await userSelectOf('input[aria-label="Search notes"]')).not.toBe('none');
+    expect(await userSelectOf('[role="textbox"][aria-label="Note content"]')).not.toBe('none');
+  });
+
   test('caps the editor column at the 720 px readable measure', async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 900 });
     await open(page);

@@ -684,7 +684,7 @@ function FolderRows({
                     break;
                 }
               }}
-              className={`group relative flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] pr-[6px] text-[13px] transition-colors ${
+              className={`group relative flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] pr-[6px] text-[13px] transition-colors select-none ${
                 isDragged
                   ? 'opacity-40'
                   : active
@@ -692,6 +692,11 @@ function FolderRows({
                     : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
               }`}
             >
+              {/* The row is not selectable, like the note cards and the tag rows
+                 beside it: a hold over the name must reach the row's
+                 `contextmenu`, not the platform's text selection — on the device
+                 the name selected instead and no menu opened. Copying happens in
+                 the editor, not in the tree, so nothing specified is lost. */}
               {/* The drop indicator: a 2 px accent rule pinned to the top or bottom
                   edge, or a soft accent fill for "into". A rule on the wrong edge
                   would read as re-ordering when the intent was re-parenting, which is

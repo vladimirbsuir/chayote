@@ -50,6 +50,12 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Settings')).toBeDefined();
   });
 
+  it('renders its copy unselectable, so a hold never selects a label', () => {
+    open();
+
+    expect(screen.getByTestId('settings-dialog').className).toContain('select-none');
+  });
+
   it('offers the three themes and reports the change', () => {
     const { onThemeChange } = open();
     expect(screen.getAllByRole('radio', { name: /Light|Dark|System/ }).length).toBe(3);
