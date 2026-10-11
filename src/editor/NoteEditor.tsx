@@ -75,6 +75,20 @@ export function NoteEditor({
       editor={editor}
       className="editor-scroll flex-1 overflow-y-auto px-8 pb-16 pt-10"
       data-testid="note-editor-pane"
+      /* Taps in the wrapper's own padding land outside ProseMirror even with its
+         full-height floor above, and on touch that tap would do nothing — no
+         caret, no keyboard. Route exactly those to the end of the document. Only
+         when the wrapper itself is the target (anything inside the text targets
+         a descendant and keeps ProseMirror's own position mapping), and never
+         mid-selection: releasing a text-selection drag over the padding must not
+         collapse what the user just selected. Scrollbar presses dispatch no
+         click, so they cannot reach this. */
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const selection = window.getSelection();
+        if (selection !== null && !selection.isCollapsed) return;
+        editor?.commands.focus('end');
+      }}
     />
   );
 }

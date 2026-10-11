@@ -525,7 +525,7 @@ describe('folder row menu', () => {
     render(<StatefulTree />);
     openMenuFor('Work');
 
-    fireEvent.mouseDown(document.body);
+    fireEvent.click(document.body);
 
     expect(screen.queryByTestId('folder-menu')).toBeNull();
   });

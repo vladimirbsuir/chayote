@@ -118,6 +118,12 @@ function Shell() {
     onOpenNoteGone: (goneId) => {
       if (goneId === null || goneId === useSelectionStore.getState().openNoteId) {
         setOpenNote(null);
+        /* `05-ui-ux.md` §2.4: on mobile the editor is a pushed view, not a side
+           pane — closing the note without popping strands the user on the
+           desktop "No note open" empty state instead of the list. Found on a
+           phone: deleting the open note showed that pane. At the root the pop
+           is a no-op, so deleting from the list view is unaffected. */
+        if (mobile) setStack(popView);
         if (useSelectionStore.getState().selection.kind === 'folder') {
           setSelection({ kind: 'all' });
         }
@@ -436,6 +442,25 @@ const confirmRef = useRef(confirm);
   useEffect(() => {
     stackRef.current = stack;
   }, [stack]);
+
+  /* Leaving the editor on a small screen pops the view stack (§2.4) — and closes
+     the note with it. On desktop the open note stays open beside the list, so its
+     row keeps the marker; on mobile the editor is gone, and a marker on a note
+     that is not open anywhere reads as a stuck selection. Found on a phone: the
+     row stayed highlighted all the way back on the list.
+
+     One funnel for both exits — the editor's back affordance and the system back
+     button below — so the two cannot disagree about what "back" leaves behind.
+     The bridge reads it through a ref for the same reason it reads the stack
+     through one. */
+  const leaveEditor = useCallback(() => {
+    setStack(popView);
+    if (mobile) setOpenNote(null);
+  }, [mobile]);
+  const leaveEditorRef = useRef(leaveEditor);
+  useEffect(() => {
+    leaveEditorRef.current = leaveEditor;
+  }, [leaveEditor]);
   useEffect(() =>
     installBackHandler(() => {
       if (confirmRef.current !== null) {
@@ -447,7 +472,7 @@ const confirmRef = useRef(confirm);
         return true;
       }
       if (!canPop(stackRef.current)) return false;
-      setStack(popView);
+      leaveEditorRef.current();
       return true;
     }),
   );
@@ -465,12 +490,6 @@ const confirmRef = useRef(confirm);
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [drawerOpen]);
-
-  /* Leaving the editor on a small screen pops the view stack (§2.4), which is
-     what the Android back button does natively in M7. */
-  const closeEditor = useCallback(() => {
-    setStack(popView);
-  }, []);
 
   const sidebar = (
     <Sidebar
@@ -556,7 +575,7 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
         <EditorPane
           noteId={openNoteId}
           selectionKey={selectionKey(selection)}
-          onClose={mobile ? closeEditor : undefined}
+          onClose={mobile ? leaveEditor : undefined}
           /* Only where there is no note row to carry it: §2.4 gives the mobile editor
              bar its delete action, and on desktop the row menu already owns the verb.
              The trash selection is excluded for §6.2's reason — a live row must not
@@ -616,12 +635,13 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
                 onNewNote={() => {
                   void createNote();
                 }}
-                onToggleSidebar={NOOP}
                 onToggleTheme={() => {
                   useSettingsStore.getState().setTheme(nextTheme(themeSetting));
                 }}
                 theme={theme}
-                onOpenOverflow={NOOP}
+                onOpenOverflow={() => {
+                  setSettingsOpen(true);
+                }}
               />
               {sidebar}
             </div>
@@ -727,13 +747,6 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
     </div>
   );
 }
-
-/* Tag creation, drag-reordering, and pinning are later parts of M4. The `+` in the
-    Tags header and the top-bar overflow menu stay wired to this until they are: the
-    controls are already in the prototype and in `05-ui-ux.md`, and removing them
-    would be a change to the specified appearance rather than to the implementation.
-    Each is annotated at its call site with the milestone that lands it. */
-const NOOP = (): void => {};
 
 /* One shared empty list rather than a fresh `[]` per render, so the sidebar's
    memoised rows are not handed a new reference on every tick. */

@@ -59,6 +59,12 @@ export type Autosave = {
 export function createAutosave(onSaved: (note: Note) => void): Autosave {
   let onSavedRef = onSaved;
   let inFlight = false;
+  /* Settles when the running save finishes. An overlapping flush waits on this
+     rather than spinning on `inFlight` — see `flush`. The two are set and
+     cleared together, except inside the `finally` below where the flag drops
+     first so the drain can start its follow-up save under a fresh promise. */
+  let flight: Promise<void> | null = null;
+  let settleFlight: (() => void) | null = null;
   let queued: SaveNoteInput | null = null;
   let attempts = 0;
   let lastSaved: string | null = null;
@@ -81,6 +87,32 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
     }
   };
 
+  /* Waits out whatever save is running. A helper rather than inline code in
+     `flush`: the shared lets are only assigned inside `persist`, so a direct
+     check after `flush`'s own assignments narrows to "always false" and lies.
+     A fresh function scope reads the declared types instead. */
+  const settleFlights = async (): Promise<void> => {
+    let current = flight;
+    while (current !== null) {
+      await current;
+      current = flight;
+    }
+  };
+
+  /* Persists whatever an overlap left queued — unless the retry timer owns it,
+     in which case an immediate write would jump the backoff queue. Same fresh-
+     scope reason as above. */
+  const drainLeftovers = async (): Promise<void> => {
+    if (queued !== null && retry === null) {
+      const next = queued;
+      const nextForced = forced;
+      queued = null;
+      forced = false;
+      await persist(next, nextForced);
+      await settleFlights();
+    }
+  };
+
   const persist = async (input: SaveNoteInput | null, force: boolean): Promise<void> => {
     const target = input ?? queued;
 
@@ -89,6 +121,10 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
       /* Sticky: a document edit arriving while a metadata write is queued must not
          clear the force, or the queued write is judged on the document and dropped. */
       forced = forced || force;
+      /* The caller is a flush that must not resolve before this document is
+         written. Wait for the running save; `flush` awaits the same promise and
+         then persists whatever this left queued. */
+      await flight;
       return;
     }
     if (target === null) return;
@@ -100,6 +136,9 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
     }
 
     inFlight = true;
+    flight = new Promise<void>((resolve) => {
+      settleFlight = resolve;
+    });
     markSaving(target.id);
     let failed = false;
     try {
@@ -127,6 +166,12 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
       }, retryDelayMs(attempts));
     } finally {
       inFlight = false;
+      /* The save itself is done; wake anyone waiting on it before the drain starts
+         its follow-up under a fresh promise — a waiter that woke into the drain's
+         save re-waits on that one through `flush`'s loop. */
+      settleFlight?.();
+      settleFlight = null;
+      flight = null;
       /* On failure the queue and the flag belong to the retry, so the drain must not
          touch them — clearing them here is what turns a retry into a no-op. */
       if (!failed) {
@@ -181,10 +226,20 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
       const force = forced;
       queued = null;
       await persist(input, force);
-      while (inFlight) {
-        await persist(null, forced);
-        queued = null;
-      }
+      /* An overlapping save may still be running — a second flush (blur, then
+         unmount), a late keystroke's debounce, the retry timer. Wait for the
+         work; never spin on the flag.
+
+         The old loop did spin: `while (inFlight)` re-entered `persist`, which
+         early-returned at once, forever. That is a microtask loop, and a
+         microtask loop starves the task queue — including the queue the save's
+         own IPC response arrives on. On this WebView a Tauri response needs a
+         task, so the save never settles, the flag never clears, and the app
+         freezes: type a title into a fresh note, press back, dead. Found on a
+         phone; unreproducible in a browser, where the mock resolves in a
+         microtask and the spin terminates. */
+      await settleFlights();
+      await drainLeftovers();
     },
 
     setBaseline: (target) => {

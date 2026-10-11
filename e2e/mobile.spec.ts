@@ -37,6 +37,22 @@ test.describe('mobile editor', () => {
     await expect(page.getByTestId('save-state')).toBeVisible();
   });
 
+  test('the tag editor opens centred, not hugging the screen edge', async ({ page }) => {
+    /* Found on a phone: the tag popover parked at the right edge with a sliver
+       of margin. Anchor-relative placement of a 260 px panel has nothing worth
+       following at 360 px, so the panel is centred there
+       (`popoverPlacement.test.ts` pins the geometry across viewports). */
+    await openEditor(page);
+
+    await page.getByTestId('status-tags').click();
+    await expect(page.getByTestId('status-popover')).toBeVisible();
+
+    const box = await page.getByTestId('status-popover').boundingBox();
+    expect(box, 'tag editor has no box').not.toBeNull();
+    if (box === null) return;
+    expect(box.x, 'tag editor is not centred').toBe((MOBILE.width - 260) / 2);
+  });
+
   test('nothing in the row truncates to an ellipsis or wraps', async ({ page }) => {
     await openEditor(page);
 
@@ -98,6 +114,42 @@ test.describe('mobile editor', () => {
     );
   });
 
+  test('deleting the open note returns to the list, not the desktop empty state', async ({
+    page,
+  }) => {
+    /* Found on a phone: deleting the open note closed it but left the editor
+       view on the stack, so the phone showed the desktop "No note open …
+       Ctrl+N" pane instead of the list. The pop lives next to the editor
+       close in `onOpenNoteGone`, so this pins the visible view, not the
+       stack value. */
+    await openEditor(page);
+
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('editor-overflow-trash').click();
+
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await expect(page.getByText('No note open')).toHaveCount(0);
+  });
+
+  test('leaving the editor clears the open marker — the list shows no selection', async ({
+    page,
+  }) => {
+    /* Found on a phone: backing out of a note left its row highlighted, which on
+       desktop is the open marker beside a visible editor but on a phone — where
+       the editor is gone — reads as a stuck selection. Leaving closes the note
+       with the view, through the same funnel for the bar back affordance and the
+       system back button. */
+    await openEditor(page);
+    await expect(page.getByTestId('note-card')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Back to list' }).click();
+
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await expect(page.locator('[data-testid="note-card"][aria-selected="true"]')).toHaveCount(
+      0,
+    );
+  });
+
   test('a pin made in the editor reaches the Pinned filter', async ({ page }) => {
     /* The regression M7 found on the device: `EditorPane` called `notesApi.setPinned`
        directly, so it updated its own state and left every `['notes']` cache stale —
@@ -125,6 +177,110 @@ test.describe('mobile editor', () => {
 });
 
 test.describe('mobile list', () => {
+  test('the bar gear opens Settings — the hamburger it replaced was dead', async ({ page }) => {
+    /* The list bar's left slot was a `menu` "Open sidebar" button wired to a
+       no-op since M3: the sidebar content *is* the list view, so nothing opened,
+       and mobile had no path to Settings at all. The slot is a gear opening the
+       dialog directly — asserted here so a future edit cannot silently re-dead
+       it, since a dead icon button passes every assertion except one that
+       presses it. */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await expect(page.getByRole('button', { name: 'Open sidebar' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Open settings' }).click();
+    await expect(page.getByTestId('settings-dialog')).toBeVisible();
+
+    await page.getByTestId('settings-done').click();
+    await expect(page.getByTestId('settings-dialog')).toHaveCount(0);
+  });
+
+  test('typing a title then going back returns to the list, unfrozen', async ({ page }) => {
+    /* Found on a phone: create a note, immediately type a title, press the back
+       arrow — the app froze and answered nothing. The tap blurs the editor
+       (flush one starts the save) and the unmount flushes again while it is
+       still running; the old flush spun on the in-flight flag and starved the
+       save's own response. In a browser the mock resolves in a microtask so the
+       spin terminates — this pins the flow, and `useAutosave.test.ts` pins the
+       deadlock itself. */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await page.getByRole('button', { name: 'New note' }).click();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Note content' }).pressSequentially('A brand new title');
+    await page.getByRole('button', { name: 'Back to list' }).click();
+
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await expect(page.getByText('No note open')).toHaveCount(0);
+    await expect(
+      page.getByTestId('note-card').filter({ hasText: 'A brand new title' }),
+    ).toHaveCount(1);
+  });
+
+  test('the focused search field draws its ring above the sidebar', async ({ page }) => {
+    /* Found on a phone: the focus ring's bottom edge was sliced off where the
+       sidebar begins. The ring is drawn 2 px outside the container, straight
+       onto the sidebar below — which paints later and covers it. The container
+       lifts above the sidebar while focused; this pins the mechanism, and the
+       device screenshot pins the pixels. */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await page.getByRole('searchbox', { name: 'Search notes' }).click();
+
+    const zIndex = await page
+      .getByRole('searchbox', { name: 'Search notes' })
+      .evaluate((input) => getComputedStyle(input.parentElement as HTMLElement).zIndex);
+    expect(zIndex).toBe('10');
+  });
+
+  test('editing a note moves it to the top of the list', async ({ page }) => {
+    /* Found on a phone: edit a note, go back, and it sits wherever it was.
+       Saves patch the cached lists in place without refetching, and the patch
+       kept the old order although `updated_at` — the ordering — just moved.
+       The patch re-sorts every live selection now; trash keeps deletion order
+       and search keeps relevance (`noteOrder.test.ts` pins both). */
+    await page.setViewportSize(MOBILE);
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    const cards = page.getByTestId('note-card');
+    await expect(cards.first()).toBeVisible();
+    const idsBefore = await cards.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-note-id')),
+    );
+    const editedId = idsBefore[idsBefore.length - 1] ?? '';
+
+    await cards.last().click();
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Note content' }).pressSequentially('edited');
+    await page.getByRole('button', { name: 'Back to list' }).click();
+
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    const idsAfter = await cards.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-note-id')),
+    );
+    /* It moved up — and past every unpinned note, stopping only below the
+       pinned group, which outranks any timestamp. (In a live list a pinned
+       card carries its `pin-toggle` with `aria-pressed="true"`; the plain
+       `pin-indicator` exists only in the trash, where the pin is not
+       actionable.) */
+    expect(idsAfter.indexOf(editedId)).toBeLessThan(idsBefore.indexOf(editedId));
+    await expect(
+      cards
+        .filter({ has: page.locator('[data-testid="pin-toggle"][aria-pressed="false"]') })
+        .first(),
+    ).toHaveAttribute('data-note-id', editedId);
+  });
+
   test('the sidebar fills the viewport with no dead strip at the edge', async ({ page }) => {
     /* Found on a phone: the list below the search field ended early with a
        vertical divider floating off the right edge. The mobile list reuses the
@@ -203,6 +359,150 @@ test.describe('mobile touch', () => {
     userAgent: ANDROID_UA,
     hasTouch: true,
     isMobile: true,
+  });
+
+  test('a trashed note restores from the row menu after the toast is gone', async ({
+    page,
+  }) => {
+    /* The gap this file keeps finding: on touch the note rows had no menu at
+       all — the button is `pointer:fine`-only and a hold selected text — so
+       once the undo toast expired a trashed note was stuck. The row answers
+       `contextmenu` like the folder rows, which is what a hold fires on the
+       device (proven with `input swipe x y x y 900`); the right-click here
+       reaches the same `openMenu` measurement. The toast is dismissed first so
+       this pins the stuck state, not the undo path. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    const card = page.getByTestId('note-card').first();
+    const noteId = await card.getAttribute('data-note-id');
+    await card.click({ button: 'right' });
+    await page.getByTestId('note-menu-delete').click();
+    await page.getByTestId('undo-toast-dismiss').click();
+
+    await page.getByTestId('filter-trash').click();
+    const trashed = page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`);
+    await expect(trashed).toBeVisible();
+    await trashed.click({ button: 'right' });
+
+    const menu = page.getByTestId('note-menu');
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox, 'note menu has no box').not.toBeNull();
+    if (menuBox === null) return;
+    expect(menuBox.x, 'menu starts off-screen').toBeGreaterThanOrEqual(0);
+    expect(menuBox.y, 'menu starts off-screen').toBeGreaterThanOrEqual(0);
+    expect(menuBox.x + menuBox.width, 'menu overflows the viewport').toBeLessThanOrEqual(
+      MOBILE.width,
+    );
+    expect(menuBox.y + menuBox.height, 'menu overflows the viewport').toBeLessThanOrEqual(
+      MOBILE.height,
+    );
+
+    await page.getByTestId('note-menu-restore').click();
+    await page.getByTestId('filter-all').click();
+    await expect(
+      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`),
+    ).toBeVisible();
+  });
+
+  test('only one row menu is open at a time', async ({ page }) => {
+    /* Found on a phone: long-pressing a second row left the first menu up, so
+       two portalled menus overlapped. The state lives in the list — opening for
+       another row replaces. Dispatched, not right-clicked: a right-click sends
+       a `mousedown` first and the old menu closes on that, which is exactly what
+       a touch hold does not do — and what hid this on desktop. */
+    const hold = (index: number): Promise<void> =>
+      page
+        .getByTestId('note-card')
+        .nth(index)
+        .evaluate((row) => {
+          row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+        });
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    await hold(0);
+    await expect(page.getByTestId('note-menu')).toBeVisible();
+    await hold(1);
+
+    await expect(page.getByTestId('note-menu')).toHaveCount(1);
+  });
+
+  test('the row menu pins and unpins, the touch path to the pin', async ({ page }) => {
+    /* On touch there is no hover, so the row menu is the only path to the pin
+       outside the editor. Right-click reaches the same `openMenu` a hold does.
+       Proven by the label flipping: the menu re-reads the note, so the opposite
+       verb means the write landed and the list refreshed. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+
+    const noteId = await page.getByTestId('note-card').first().getAttribute('data-note-id');
+    const row = (): ReturnType<typeof page.locator> =>
+      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`);
+    const menuLabel = async (): Promise<string> => {
+      await row().click({ button: 'right' });
+      const label = (await page.getByTestId('note-menu-pin').textContent()) ?? '';
+      await page.keyboard.press('Escape');
+      return label;
+    };
+
+    const first = await menuLabel();
+    expect(first).toMatch(/Pin note|Unpin note/);
+
+    await row().click({ button: 'right' });
+    await page.getByTestId('note-menu-pin').click();
+    await expect(page.getByTestId('note-menu')).toHaveCount(0);
+
+    expect(await menuLabel()).not.toBe(first);
+  });
+
+  test('tapping empty editor space puts the caret at the end', async ({ page }) => {
+    /* Found on a phone: tapping the empty area under a short note did nothing —
+       no caret, no keyboard — while tapping text worked. The editable element
+       was only as tall as its content, so the tap landed outside it. It now
+       fills the pane (taps below the text resolve natively), and taps in the
+       wrapper's own padding fall back to the document end. `touchscreen` drives
+       this because only a touch tap synthesises the path a finger takes. */
+    await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    await expect(page.getByTestId('note-list')).toBeVisible();
+    await page.getByTestId('note-card').first().click();
+    const box = await page.getByRole('textbox', { name: 'Note content' }).boundingBox();
+    expect(box, 'editor has no box').not.toBeNull();
+    if (box === null) return;
+
+    const caret = async (): Promise<{ collapsed: boolean; inside: boolean }> =>
+      page.evaluate(() => {
+        const selection = document.getSelection();
+        const anchor = selection?.anchorNode ?? null;
+        return {
+          collapsed: selection?.isCollapsed ?? false,
+          inside:
+            anchor instanceof Node &&
+            document.querySelector('.ProseMirror')?.contains(anchor) === true,
+        };
+      });
+    const blur = async (): Promise<void> => {
+      await page.evaluate(() => {
+        (document.activeElement as HTMLElement | null)?.blur();
+      });
+    };
+
+    /* Below the text, inside the editable element's empty floor. */
+    await blur();
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height - 100);
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeFocused();
+    expect(await caret()).toEqual({ collapsed: true, inside: true });
+
+    /* The wrapper's own left padding, outside the editable element entirely. */
+    await blur();
+    await page.touchscreen.tap(box.x - 20, box.y + box.height / 2);
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeFocused();
+    expect(await caret()).toEqual({ collapsed: true, inside: true });
   });
 
   test('the folder menu opens fully inside the viewport', async ({ page }) => {

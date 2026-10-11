@@ -143,7 +143,7 @@ While working:
   the document is genuinely wrong, change it in the same commit — never leave a
   document describing something the code does not do.
 - Update `docs/08-roadmap.md` §7 in the same commit as the work it describes.
-- Commit at the end of each task. Do not push unless explicitly asked.
+- Commit at the end of each task, without being asked: once the gates pass, commit (`10-conventions.md` §11, one logical change per commit) and report the commit. Never end a work session with uncommitted changes unless the user said not to. Do not push unless explicitly asked.
 - Do not re-propose the stack, the layout, or the editor choice. They are
   decided and the reasoning is in `docs/09-decisions.md`.
 

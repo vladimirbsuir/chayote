@@ -1,6 +1,6 @@
 # 11 — Verification Strategy
 
-**Status:** Frozen. Last updated 2026-10-07.
+**Status:** Frozen. Last updated 2026-10-10.
 
 How each layer is proved correct, and what an agent can check without asking a human. Read this before milestone M0 and before claiming any feature is done.
 
@@ -105,7 +105,7 @@ Verify each, rather than trusting the exit code alone:
 ```powershell
 rustup target list --installed    # aarch64-linux-android, armv7-linux-androideabi
 sdkmanager --list_installed       # platform-tools, platforms;android-33..37.0, ndk;27.2.12479018
-adb devices                       # a device id, status "device"   <- still empty
+adb devices                       # 11121253C6000586, status "device" (attached since M7; empty through M6)
 adb shell getprop ro.product.cpu.abi   # arm64-v8a
 ```
 
@@ -133,13 +133,46 @@ The distinction matters because "it builds" reads like "it works", and on Androi
 | ~~APK size against the 20 MB budget~~ **done at M7 — 14.65 MiB** | ~~The back button walking the view stack~~ **confirmed broken at M7**, and §4.4's prescribed mechanism does not exist in Tauri 2.12. See `06-platform.md` §4.4; needs an ADR |
 | ~~The manifest requests no `INTERNET` permission~~ **done at M7** | `Pause`/`Resume` flushing the autosave (§4.5). **Observed on device at M7** — typing inside the debounce and backgrounding lost nothing |
 | ~~`adjustResize` present in the manifest — declared, not observed~~ **done at M7, `aapt2`** | A current stable System WebView. The oldest supported WebView was dropped as a test target at M6 (`06-platform.md` §1). **Tested at M7 on WebView 153.0.8010.57** |
-| ~~The back button walking the view stack~~ **done at M7 via ADR-020**, and observed on the device | Long-press opening the context menu. **Measured at M8**: the user's own long-press opened the folder menu (and showed it clipped — the portal fix), and `adb shell input swipe x y x y 900` reproduces a WebView-recognised long-press, contrary to the earlier note that it could not |
+| ~~The back button walking the view stack~~ **done at M7 via ADR-020**, and observed on the device | Long-press opening the context menu. **Measured at M8**: the user's own long-press opened the folder menu (and showed it clipped — the portal fix), and `adb shell input swipe x y x y 900` reproduces a WebView-recognised long-press, contrary to the earlier note that it could not. The note rows answered the same hold with a text selection — no `contextmenu` handler and selectable text as far as the gesture could reach — so a trashed note was unrestorable on touch past the toast; rows and list section are not selectable now and answer `contextmenu` like the folder rows. The prevented hold synthesises no release events on this WebView, so the menu stays open; the row eats the release click for engines that do synthesise one. `adb` hold coordinates must be CDP-measured, not eyeballed — the CSS viewport is 360 wide at DPR 3 |
 | ~~Window insets keep the app clear of the system bars~~ **found broken on device at M7 and fixed** | ~~44 px touch targets~~ **done at M7** — the editor's status bar slots were ~20 px and are 44 px, asserted as geometry in `e2e/mobile.spec.ts`. Playwright cannot see the insets, since Chromium reports zero |
 | Frontend layout at 360 × 640 in Chromium — now also covered by `e2e/mobile.spec.ts`, which asserts the mobile row's shape and that nothing wraps | Airplane mode changing nothing, because nothing is online. **Not yet exercised** — it needs a permission this shell does not have |
 | | Rotation preserving the open note and the editor scroll position. **Layout verified at M7**; scroll position not measured |
 | | Cold start reaching an editable caret on the device. **Verified at M7** |
 
 The second column is the reason M7 exists as a milestone rather than a build step. The first column is a real gate and worth running before anyone is asked to plug in a phone. **Struck-through rows ran, not stopped mattering** — every one of those rows is a regression risk, and §3.5 gives the commands that catch it. The three that remain were not skipped for difficulty: two need a human or a permission this shell does not have, and the third is a spec problem rather than a build problem.
+
+### 3.5b Device-session cookbook — Windows, USB, Infinix X6836
+
+Everything below was re-derived from scratch in a session where `adb` was assumed missing, and is written down so the next session does not repeat it. The device at the time: Infinix X6836, Android 13, `arm64-v8a`, `1080×2460` at density 480 (CSS pixel ×3), id `11121253C6000586`.
+
+**`adb` is not on `PATH` in agent shells — never assume it is.** The SDK from §2 is real; the binary is at `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`. Likewise `ANDROID_HOME` / `ANDROID_SDK_ROOT` live in the `HKCU\Environment` registry but have been observed absent from agent PowerShell sessions, so no command may rely on them — pass full paths (`aapt2` under `build-tools\36.1.0`, `sdkmanager` under `cmdline-tools\latest\bin`). First command of every session:
+
+```powershell
+$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+& $adb devices   # want: 11121253C6000586  device
+```
+
+Screenshots, input, install and launch:
+
+```powershell
+& $adb shell screencap -p /sdcard/<name>.png
+& $adb pull /sdcard/<name>.png <local-path>
+& $adb shell input tap <x> <y>                 # single tap, device pixels
+& $adb shell input swipe <x> <y> <x> <y> 900   # long-press the WebView recognises
+& $adb shell input keyevent 4                  # system back — deterministic for dialogs
+& $adb shell am start -n com.chayote.app/.MainActivity
+& $adb install -r <apk>                        # -r keeps data on a signature match
+& $adb shell dumpsys package com.chayote.app   # version, signature, DEBUGGABLE flag
+```
+
+What the gear session taught, beyond §3.5a:
+
+- `screencap` returns the full `1080×2460`, so image pixels are device pixels 1:1 — but CSS pixels are ×3 *and* offset by the status bar and the safe-area insets, so eyeballed taps land ~100 px off (the M8 note). Measure the target in the previous screenshot instead of guessing.
+- Screenshot after *every* tap and read it before the next one. Blind taps deleted a folder in M8 and missed a menu item here (two taps dismissed the editor overflow instead of pressing Move to trash — suspect a small vertical offset; `keyevent 4` closed the same dialog with no coordinates at all).
+- For an on-device check of a frontend change, build debug, not release: `npx tauri android build --apk --debug --target aarch64` is minutes (cached Rust deps, one ABI — enough for this phone), while the full release is ~25. The installed app is already a debug build under the same machine debug key, so `install -r` updates it with data intact. A release APK is unsigned and not installable as-is.
+- Device state is test data until told otherwise: creating notes, trashing them, and changing settings during verification is expected — but say what was left behind (here: one extra empty Untitled note, trash flow unretouched).
+
+**The session loop is install → exercise → screenshot → review → fix, and it applies to every change, not just device work.** A change is not done when the tests pass: install the build on the phone, perform the actions the change touches, screenshot each state, look at the shots, and change the code if they show anything wrong. Screenshots nobody reviewed are decoration. This is a standing requirement, repeated in §7 so no session needs to be reminded of it.
 
 ## 4. Visual regression against the prototype
 
@@ -191,5 +224,7 @@ Per `README.md` §4.1 and `10-conventions.md` §11:
 - Run the gate commands after each change and report the real output.
 - Update `docs/08-roadmap.md` §7 in the same commit as the work it describes.
 - Screenshot UI work and compare it against `prototype/index.html` before declaring it done.
+- **Verify on the device before declaring it done.** Any change that affects the mobile UI is installed on the USB phone (§3.5b), exercised, screenshotted, and reviewed — §3.5b's loop, unprompted.
+- **Commit without being asked.** Once the gates pass, commit the work in the same session — one logical change per commit (`10-conventions.md` §11) — and say what was committed. Never end a work session with uncommitted changes unless the user said not to. Do not push unless explicitly asked.
 - **Stop and ask** when: a plan needs approval, a visual judgement is required, a change touches R1–R9, a decision changes, or a check cannot be run.
 - **Never** claim a check passed that was not run. If `adb` is missing, the Android milestone is blocked, not done.

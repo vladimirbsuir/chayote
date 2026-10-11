@@ -1053,6 +1053,9 @@ test.describe('trash', () => {
 
     /* §6.2: only permanent delete and empty trash confirm. */
     await expect(page.getByRole('dialog')).toContainText('cannot be undone');
+    /* Found on a phone: the row menu stayed up under its own confirmation —
+       choosing an item closes the menu before anything else changes. */
+    await expect(page.getByTestId('note-menu')).toHaveCount(0);
     await page.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`)).toBeVisible();
 

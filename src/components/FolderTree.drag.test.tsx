@@ -41,6 +41,26 @@ const TREE: FolderNode[] = [WORK, PERSONAL];
 const noWrite = (): Promise<void> => Promise.resolve();
 const noop = (): void => {};
 
+/* `isCoarsePointer` reads the live media, so both answers are pinned by stubbing
+   `matchMedia` per case. The restore answers a fine pointer — behaviourally the
+   default, and nothing else under `src/` reads the media. */
+afterEach(() => {
+  stubPointer(false);
+});
+
+function stubPointer(coarse: boolean): void {
+  window.matchMedia = (query: string) => ({
+    matches: coarse && query.includes('pointer: coarse'),
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
+
 function row(id: string): HTMLElement {
   const found = document.querySelector(`[data-testid="folder-row"][data-folder-id="${id}"]`);
   if (!(found instanceof HTMLElement)) throw new Error(`no row for folder ${id}`);
@@ -332,6 +352,46 @@ describe('folder drag', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Work actions' }));
 
     expect(row('b').getAttribute('draggable')).toBe('false');
+  });
+
+  it('keeps rows draggable with a fine pointer, the mouse path', () => {
+    stubPointer(false);
+    render(<DragTree />);
+
+    expect(row('a').getAttribute('draggable')).toBe('true');
+  });
+
+  it('makes no row draggable on a coarse pointer, where drag is not a path', () => {
+    /* §6.3: re-parenting by drag is mouse-only in v1. On touch a hold on a
+       draggable row can start a drag that no `dragend` ever ends — found on a
+       phone, where the row stayed dimmed and untappable. With nothing
+       draggable there is nothing to get stuck. */
+    stubPointer(true);
+    render(<DragTree />);
+
+    expect(row('a').getAttribute('draggable')).toBe('false');
+    expect(row('b').getAttribute('draggable')).toBe('false');
+  });
+
+  it('opening the menu clears a stuck drag, so the row selects again', () => {
+    /* The other half of the phone find: a drag that started before the menu's
+       re-render withdrew `draggable` stays set with no `dragend` coming — the
+       row is dimmed and clicks on it do nothing. Opening the menu ends the
+       drag UI, so the row is a row again as soon as the menu closes. */
+    const onSelect = vi.fn();
+    render(<DragTree onSelect={onSelect} />);
+
+    fireEvent.dragStart(row('a'));
+    fireEvent.click(row('a'));
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(row('a').getAttribute('data-dragging')).toBe('true');
+
+    fireEvent.contextMenu(row('a'));
+    expect(row('a').getAttribute('data-dragging')).toBeNull();
+
+    fireEvent.keyDown(screen.getByTestId('folder-menu'), { key: 'Escape' });
+    fireEvent.click(row('a'));
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'folder', id: 'a' });
   });
 });
 

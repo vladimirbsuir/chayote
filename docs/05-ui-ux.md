@@ -1,6 +1,6 @@
 # 05 — UI & UX Specification
 
-**Status:** Frozen. Last updated 2026-10-09.
+**Status:** Frozen. Last updated 2026-10-10.
 
 ---
 
@@ -58,7 +58,7 @@ The sidebar is three stacked regions, not three columns. Filters, then structure
 | Folders | max 40 % of pane, scroll | Tree | Collapsible, drag to re-parent and reorder |
 | Tags | max 25 % of pane, scroll | Flat list with counts | Collapsible |
 | List header | 32 px | Active selection name + count | |
-| Note list | remainder | Virtualised cards | Click to open, right-click for menu |
+| Note list | remainder | Virtualised cards | Click to open, right-click for menu, long-press for menu on touch |
 
 ### 2.3 Tablet (768–1023 px)
 
@@ -71,7 +71,7 @@ Single pane. One view visible at a time; navigation pushes a view onto an in-app
 ```
   Desktop layout      Android: list view         Android: editor view
 ┌─────────┬────────┐  ┌──────────────────────┐   ┌──────────────────────┐
-│ sidebar │ editor │  │[menu] Chayote    [+] │   │[back] Chayote    [···]│
+│ sidebar │ editor │  │[gear] Chayote    [+] │   │[back] Chayote    [···]│
 └─────────┴────────┘  │[search] Search…      │   │                      │
                       │ All   [pin] Pinned    │   │  Meeting notes       │
                       │ [folder] Folders      │   │                      │
@@ -84,7 +84,9 @@ Single pane. One view visible at a time; navigation pushes a view onto an in-app
                                                    └──────────────────────┘
 ```
 
-Back behaviour: the Android system back button pops the view stack. At the root it moves the task to the background. The list → editor transition is a horizontal slide matching the platform convention.
+Back behaviour: the Android system back button pops the view stack. At the root it moves the task to the background. The list → editor transition is a horizontal slide matching the platform convention. Leaving the editor closes the note with the view: the list shows no open marker, because on a single pane there is no open note once the editor is gone — a marker there reads as a stuck selection.
+
+The list view's bar carries a settings gear, the app name, and a new-note button. The gear opens the settings dialog directly: the bar has no room for the desktop's overflow menu, and the slot previously held a `menu` "Open sidebar" button that did nothing — the sidebar content *is* the list view, so there was nothing to open. A hamburger that opens settings would be the same control wearing the wrong icon, so the gear says what it does.
 
 The editor view has its own top bar because it needs a back affordance, the note title, and a delete action. It does not reuse the desktop top bar.
 
@@ -93,6 +95,8 @@ The editor view has its own top bar because it needs a back affordance, the note
 So below 768 px the row carries **folder, tags, `342 w`, and Saved** — what `prototype/index.html` §3 already drew. The title is absent because the bar above it carries the title, and the pin is absent because §2.4 gives the editor its own bar for actions and the pin goes in that bar's overflow menu, beside the delete action. §9's row is unchanged.
 
 The row is also **44 px tall on mobile rather than 28**, because §9 requires 44 × 44 px touch targets on Android and a 28 px row cannot contain one. The bar grows rather than the target overflowing a row too short to hold it, which would look wrong to someone who can see exactly where the tap lands.
+
+**Tapping empty space under short content puts the caret at the end of the document.** The editable element fills the pane, so the tap lands inside it and resolves natively; taps in the surrounding padding fall back to the same place. Tapping text puts the caret exactly there, as everywhere. Found on a phone, where the dead area under a short note simply swallowed the tap.
 
 ### 2.5 Editor measure
 
@@ -211,7 +215,7 @@ Every icon used in v1, and nothing else. Adding an icon to the UI means adding i
 | `sun` | Light theme |
 | `moon` | Dark theme |
 | `monitor` | System theme |
-| `menu` | Android sidebar toggle |
+| `menu` | Tablet drawer toggle (§2.3) — deliberately absent from the mobile list bar, where there is no drawer to open |
 | `arrow-left` | Android back |
 | `chevron-down` | Expanded tree branch, collapsed section header |
 | `chevron-right` | Collapsed tree branch |
@@ -239,7 +243,7 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 
 | Component | Responsibility |
 |-----------|----------------|
-| `TopBar` | Search field, new note, theme toggle, overflow menu. Present on desktop; variant `Mobile` on Android list. |
+| `TopBar` | Search field, new note, theme toggle, overflow menu. Present on desktop; variant `Mobile` on the Android list carries a settings gear, the app name and a new-note button, with the search field below the bar. |
 | `Sidebar` | Filters, tag rows with counts, `NoteList`. The tag list renders here; there is no `TagList.tsx`. Owns selection state. |
 | `FolderTree`, `folderRows.ts` | Recursive tree. Keyboard navigable. Drag to re-parent and reorder. |
 | `NoteList` | Virtualised list. Renders `NoteSummary`, never loads full documents. |
@@ -293,11 +297,11 @@ The new note's folder is resolved in this order:
 
 Delete moves the note to trash with an **undo toast** for 6 seconds offering "Undo". The soft delete is already persisted; undo simply restores. Permanent delete and empty trash require `ConfirmDialog`.
 
-**The actions a note row offers are the selection's, not the shell's.** A live list offers exactly one item — *Move to trash*. The trash offers *Restore* and *Delete permanently*, and never *Move to trash* again. Emptiness drives the whole thing: a live note cannot have a "delete permanently" control on it, and a trashed note cannot be moved to the trash a second time. This is the one mistake in this section worth being pedantic about.
+**The actions a note row offers are the selection's, not the shell's.** A live list offers *Pin note*/*Unpin note* and *Move to trash*. The trash offers *Restore* and *Delete permanently*, and never *Move to trash* again. Emptiness drives the whole thing: a live note cannot have a "delete permanently" control on it, and a trashed note cannot be moved to the trash a second time. This is the one mistake in this section worth being pedantic about. The pin duplicates the row's hover control deliberately: on touch there is no hover, so without it a phone could only pin from inside the editor.
 
-**A deleted note's row is menu-keyed, not a boolean.** Opening a menu remembers which note it is for and where; when the note's id, timestamp or available actions change, the key stops matching and the menu is simply not rendered. A boolean would need an effect to close it, and an effect repairs state one render late — showing the wrong note's actions for a frame, in a menu whose whole purpose is destructive actions.
+**A deleted note's row is menu-keyed, not a boolean.** Opening a menu remembers which note it is for and where; when the note's id, timestamp or available actions change, the key stops matching and the menu is simply not rendered. A boolean would need an effect to close it, and an effect repairs state one render late — showing the wrong note's actions for a frame, in a menu whose whole purpose is destructive actions. **One menu is open at a time, and choosing an item closes it.** The state lives in the list, not the row — per-card state let two holds open two menus at once — and the close happens in the item press, because a permanent delete opens its confirmation before the note changes and the menu would sit under its own dialog.
 
-**The note row menu is portalled and positioned against the viewport.** The note list is virtualised, and every row is a transformed, absolutely positioned element — which creates a stacking context, so a menu rendered inside a row cannot be lifted above the rows after it by `z-index`, and the scroll container's `overflow` clips it as well. Measured in the click handler rather than in an effect, because the geometry is available at the click. It opens upward when there is no room below, which is the common case for the last card and not only for the last card.
+**The note row menu is portalled and positioned against the viewport.** The note list is virtualised, and every row is a transformed, absolutely positioned element — which creates a stacking context, so a menu rendered inside a row cannot be lifted above the rows after it by `z-index`, and the scroll container's `overflow` clips it as well. Measured in the handler that opens it rather than in an effect, because the geometry is available at the event. It opens upward when there is no room below, which is the common case for the last card and not only for the last card. It opens three ways — the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch — the same three as the folder menu below. A hold fires `contextmenu` on the device; the row is not selectable, because a hold over selectable text becomes a selection gesture and no `contextmenu` fires at all. The row eats the click a release synthesises rather than opening the note under the menu — on this WebView a prevented hold synthesises nothing and the menu simply stays open, and the guard is for engines that do.
 
 **The folder row menu is portalled the same way.** The tree scrolls inside its own `overflow` container, and the in-row menu was clipped by it — the long-press menu on a phone arrived as a sliver showing only Rename. Same contract: measured by the opener, flipped upward with no room below, closed by `Esc` and outside press.
 
@@ -309,7 +313,7 @@ Delete moves the note to trash with an **undo toast** for 6 seconds offering "Un
 
 Creating a folder is inline: a single text input in place, `Enter` commits, `Esc` cancels, empty input cancels. Renaming is the same. Deleting a folder with children requires confirmation naming the count. Reordering and re-parenting by drag; `position` values are densified in one transaction (`03-data-model.md` §3.2).
 
-**Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. A tap on the twisty collapses on touch exactly as a click does on desktop. On touch, long-press opens the row's menu; otherwise the gesture scrolls. Drag to re-parent is mouse-only in v1 — touch fires no HTML5 drag events — so on a phone re-parenting waits on the v1.1 "move to…" menu item, like keyboard re-parenting does.
+**Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. A tap on the twisty collapses on touch exactly as a click does on desktop. On touch, long-press opens the row's menu; otherwise the gesture scrolls. Drag to re-parent is mouse-only in v1 — rows are not draggable on a coarse pointer at all — so on a phone re-parenting waits on the v1.1 "move to…" menu item, like keyboard re-parenting does. The gate is load-bearing: on this WebView a hold on a draggable row can start a touch drag that no `dragend` ever ends, leaving the row dimmed and untappable — found on a phone — and opening the menu ends any drag UI, for the same reason.
 
 **A drop target has three bands.** The outer quarter at each end reorders among siblings, drawn as a 2 px accent rule pinned to that edge; the middle half makes the row the new parent, drawn as a soft accent fill. A quarter rather than a third, because re-parenting is the rarer intent but needs a target big enough to hit, and thirds would have left it under nine pixels on a 26 px row. A rule on the wrong edge would read as re-ordering when the intent was re-parenting, which is the whole distinction.
 
@@ -458,6 +462,8 @@ Each value is its hue at the lightness that clears **4.5:1 against its own theme
 
 **A custom accent is used verbatim, in both themes.** It cannot be a curated pair, and deriving one at runtime was rejected: it puts colour maths and a second rendering of the same colour in the app, for a control that is by definition off the preset list. The custom input therefore shows the colour's contrast against the current theme's surfaces and warns when it is below 4.5:1, so the consequence is visible at the moment of choosing it rather than afterwards. This is the one place the accent can fail the contrast bar, and it is the user's own colour doing it.
 
+Reached from the top-bar overflow menu on desktop and tablet, and from the gear on the mobile list bar (§2.4) — every breakpoint has a path to it, which mobile lacked until the dead hamburger became the gear.
+
 Settings live in the Tauri store, never in the notes database, so resetting or syncing settings can never touch notes.
 
 ## 7. Keyboard shortcuts
@@ -548,7 +554,7 @@ loses the pointer mid-drag. It is painted as a 1 px hairline and hit-tested at
 9 px, centred on it.
 
 **The top bar is not rendered on the mobile list view.** The Android list view
-carries its own bar with a `menu` button, the app name, and a new-note button
+carries its own bar with a `settings` gear button, the app name, and a new-note button
 (§2.4); the desktop bar would be a second bar above it.
 
 ## 10. Accessibility

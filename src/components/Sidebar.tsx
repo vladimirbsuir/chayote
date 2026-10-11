@@ -220,7 +220,11 @@ export function Sidebar({
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col border-t border-[var(--border)]">
+      {/* `select-none`: on touch a hold anywhere near the rows must reach the
+          row's `contextmenu`, not the platform's text selection — measured on
+          the device, where a hold over a card grabbed the "Empty trash" header
+          two rows up and no menu ever opened. Copying happens in the editor. */}
+      <section className="flex min-h-0 flex-1 flex-col border-t border-[var(--border)] select-none">
         <header className="flex items-baseline justify-between border-b border-[var(--border)] px-3 py-[10px] text-[12px] font-medium text-[var(--text)]">
           <span className="truncate" data-testid="list-header">
             {header.title}

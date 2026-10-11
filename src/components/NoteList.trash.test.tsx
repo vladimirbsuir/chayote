@@ -46,6 +46,7 @@ const noop = (): void => {};
 
 function List(props: {
   notes?: NoteSummary[];
+  onPin?: (id: string) => void;
   onDelete?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDestroy?: (id: string) => void;
@@ -58,6 +59,7 @@ function List(props: {
       folderNames={new Map()}
       showFolder
       onOpen={noop}
+      onTogglePin={props.onPin}
       onDeleteNote={props.onDelete}
       onRestoreNote={props.onRestore}
       onDestroyNote={props.onDestroy}
@@ -88,15 +90,16 @@ describe('note row actions', () => {
     expect(screen.queryByTestId('note-menu')).toBeNull();
   });
 
-  it('offers exactly one item — move to trash — in a live list', () => {
+  it('offers pin and move to trash, and nothing else, in a live list', () => {
     const onDelete = vi.fn();
-    render(<List onDelete={onDelete} />);
+    render(<List onPin={noop} onDelete={onDelete} />);
 
     openMenuFor('n-1');
 
     const items = screen.getAllByRole('menuitem');
-    expect(items).toHaveLength(1);
-    expect(items[0]?.textContent).toContain('Move to trash');
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toContain('Pin note');
+    expect(items[1]?.textContent).toContain('Move to trash');
   });
 
   it('offers restore and permanent delete, and no soft delete, in the trash', () => {
@@ -110,6 +113,27 @@ describe('note row actions', () => {
     expect(labels[1]).toContain('Delete permanently');
     /* §6.2: a note already in the trash cannot be moved to the trash again. */
     expect(labels.some((label) => label.includes('Move to trash'))).toBe(false);
+    /* The pin of a deleted note is not actionable anywhere, menu included. */
+    expect(screen.queryByTestId('note-menu-pin')).toBeNull();
+  });
+
+  it('names the pin item for the state it will leave, like the editor menu', () => {
+    render(<List notes={[note({ isPinned: true })]} onPin={noop} onDelete={noop} />);
+
+    openMenuFor('n-1');
+
+    expect(screen.getByTestId('note-menu-pin').textContent).toContain('Unpin note');
+  });
+
+  it('pins through the menu for the note the row is about', () => {
+    const onPin = vi.fn();
+    render(<List onPin={onPin} onDelete={noop} />);
+
+    openMenuFor('n-1');
+    fireEvent.click(screen.getByTestId('note-menu-pin'));
+
+    expect(onPin).toHaveBeenCalledWith('n-1');
+    expect(screen.queryByTestId('note-menu')).toBeNull();
   });
 
   it('calls the handler it was given, for the note the row is about', () => {
@@ -170,7 +194,7 @@ describe('note row actions', () => {
     render(<List onDelete={noop} />);
     openMenuFor('n-1');
 
-    fireEvent.mouseDown(document.body);
+    fireEvent.click(document.body);
 
     expect(screen.queryByTestId('note-menu')).toBeNull();
   });
@@ -211,6 +235,110 @@ describe('note row actions', () => {
     openMenuFor('n-1');
 
     expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('opens the menu from a right-click, the path a touch long-press takes', () => {
+    /* On the device a hold fires `contextmenu` — the WebView recognises the
+       adb swipe-hold, and the folder rows already open their menu this way. The
+       note rows answered it with a text selection, which is the gap: the menu
+       button is `pointer:fine`-only, so on touch there was no other path. */
+    render(<List onRestore={noop} onDestroy={noop} />);
+
+    fireEvent.contextMenu(screen.getByTestId('note-card'));
+
+    const labels = screen.getAllByRole('menuitem').map((item) => item.textContent);
+    expect(labels).toHaveLength(2);
+    expect(labels[0]).toContain('Restore');
+    expect(labels[1]).toContain('Delete permanently');
+  });
+
+  it('asks for no menu on right-click when the caller supplies no actions', () => {
+    render(<List />);
+
+    fireEvent.contextMenu(screen.getByTestId('note-card'));
+
+    expect(screen.queryByTestId('note-menu')).toBeNull();
+  });
+
+  it('does not open the note on the click that ends a long-press, but does after', () => {
+    /* The release after the hold synthesises a click. Without the guard the row
+       opens the note under the menu it just opened; with it, exactly that one
+       click is eaten — and as an outside click it also dismisses the menu — so
+       the next real click opens as usual. */
+    const onOpen = vi.fn();
+    render(
+      <NoteList
+        notes={[note()]}
+        openNoteId={null}
+        now={NOW}
+        folderNames={new Map()}
+        showFolder
+        onOpen={onOpen}
+        onDeleteNote={noop}
+        empty={EMPTY_STATE}
+      />,
+    );
+
+    const card = screen.getByTestId('note-card');
+    fireEvent.contextMenu(card);
+    expect(screen.getByTestId('note-menu')).toBeDefined();
+
+    fireEvent.click(card);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('note-menu')).toBeNull();
+
+    fireEvent.click(card);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith('n-1');
+  });
+
+  it('opens the menu from the ContextMenu key, per the §7 shortcut table', () => {
+    render(<List onDelete={noop} />);
+
+    fireEvent.keyDown(screen.getByTestId('note-card'), { key: 'ContextMenu' });
+
+    expect(screen.getByTestId('note-menu')).toBeDefined();
+    expect(screen.getByTestId('note-menu-delete')).toBeDefined();
+  });
+
+  it('keeps only one menu open: a second row replaces the first', () => {
+    /* Found on a phone: long-pressing a second row left the first menu up, so
+       two portalled menus overlapped. The state lives in the list now, and
+       opening for another row replaces rather than adds. */
+    render(
+      <List
+        notes={[note({ id: 'n-1', title: 'First' }), note({ id: 'n-2', title: 'Second' })]}
+        onDelete={noop}
+      />,
+    );
+
+    const cards = screen.getAllByTestId('note-card');
+    const first = cards[0];
+    const second = cards[1];
+    if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement)) {
+      throw new Error('expected two cards');
+    }
+    fireEvent.contextMenu(first);
+    expect(screen.getByRole('menu', { name: 'First actions' })).toBeDefined();
+
+    fireEvent.contextMenu(second);
+
+    expect(screen.getAllByRole('menu')).toHaveLength(1);
+    expect(screen.getByRole('menu', { name: 'Second actions' })).toBeDefined();
+  });
+
+  it('closes the menu when an action runs, before anything else changes', () => {
+    /* Found on a phone: permanent delete opens a confirmation, and the menu
+       stayed up under its own dialog — the note has not changed yet, so the
+       data-change keying cannot close it. Choosing closes, for all three items. */
+    const onDestroy = vi.fn();
+    render(<List onRestore={noop} onDestroy={onDestroy} />);
+
+    fireEvent.contextMenu(screen.getByTestId('note-card'));
+    fireEvent.click(screen.getByTestId('note-menu-destroy'));
+
+    expect(onDestroy).toHaveBeenCalledWith('n-1');
+    expect(screen.queryByTestId('note-menu')).toBeNull();
   });
 });
 
