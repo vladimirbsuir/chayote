@@ -548,12 +548,27 @@ describe('folder row menu', () => {
 
     const target = row('a');
     target.getBoundingClientRect = (): DOMRect =>
+      ({ top: 630, bottom: 656, left: 8, right: 300, width: 292, height: 26 }) as DOMRect;
+    fireEvent.contextMenu(target);
+
+    /* 656 + 120 clears the 768 px jsdom viewport, and 630 clears the menu
+       above — so the menu lands above the row rather than clipped below it. */
+    expect(screen.getByTestId('folder-menu').style.top).toBe('626px');
+  });
+
+  it('clamps the menu into the viewport when neither side fits the estimate', () => {
+    render(<StatefulTree />);
+
+    const target = row('a');
+    target.getBoundingClientRect = (): DOMRect =>
       ({ top: 700, bottom: 726, left: 8, right: 300, width: 292, height: 26 }) as DOMRect;
     fireEvent.contextMenu(target);
 
-    /* 726 + 120 clears the 768 px jsdom viewport, and 700 clears the menu
-       above — so the menu lands above the row rather than clipped below it. */
-    expect(screen.getByTestId('folder-menu').style.top).toBe('696px');
+    /* 726 + 120 clears the 768 px jsdom viewport, but so would 696 + 120 — a
+       tall row near the fold fits the estimate neither below nor above, and
+       the trash-restore flow arrived 13 px clipped past it. The estimate is
+       clamped so the box lands inside; overlapping the row is fine. */
+    expect(screen.getByTestId('folder-menu').style.top).toBe('640px');
   });
 
   it('gives the twisty a larger tap target on coarse pointers', () => {

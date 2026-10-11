@@ -185,7 +185,9 @@ python scripts/measure-screenshot.py <local-path>
 Needs Pillow (`pip install pillow`); otherwise stdlib only, and it needs no
 device connection — it runs on the pulled PNG. Proven in the section-collapse
 session: eyeballed taps kept landing in the neighbouring control's hit slop,
-and every tap after measuring landed first try.
+and every tap after measuring landed first try. Aim at the middle of the item
+box rather than its text core — at a scaled root font the items are far taller
+than their text, and an edge tap lands in the neighbour.
 
 What the gear session taught, beyond §3.5a:
 

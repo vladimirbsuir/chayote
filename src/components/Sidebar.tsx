@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ChevronDown,
@@ -210,6 +210,13 @@ export function Sidebar({
     count: number;
   } | null>(null);
 
+  /* Measured on the phone: the release after a hold synthesises a click on
+     engines that do, which would select the row under its own just-opened
+     menu. The flag eats exactly that one — the same guard the note cards
+     carry, for the same gesture. Set only on a fresh open from `contextmenu`:
+     a press that closes an open menu synthesises nothing after it. */
+  const suppressTagOpenRef = useRef(false);
+
   /* Measured in the handler that opens it and handed to the menu as a plain
      value — the row-menu contract all three menus share. Always sets, never
      toggles: a second press on another row replaces. */
@@ -233,6 +240,7 @@ export function Sidebar({
     });
   };
   const closeTagMenu = (): void => {
+    suppressTagOpenRef.current = false;
     setTagMenu(null);
   };
 
@@ -282,7 +290,7 @@ export function Sidebar({
   };
 
   const runTagMenuAction = (action: TagMenuAction, id: Uuid): void => {
-    setTagMenu(null);
+    closeTagMenu();
     const tag = tags?.find((candidate) => candidate.id === id);
     if (tag === undefined) return;
     if (action === 'rename') {
@@ -407,6 +415,10 @@ export function Sidebar({
                   data-tag-id={tag.id}
                   aria-current={active ? 'true' : undefined}
                   onClick={() => {
+                    if (suppressTagOpenRef.current) {
+                      suppressTagOpenRef.current = false;
+                      return;
+                    }
                     onSelect({ kind: 'tag', id: tag.id });
                   }}
                   onKeyDown={(event) => {
@@ -430,6 +442,10 @@ export function Sidebar({
                      up. Copying happens in the editor, not in the list. */
                   onContextMenu={(event) => {
                     event.preventDefault();
+                    /* Only a fresh open can precede a release click: when a
+                       menu is already up the press replaces it, and no click
+                       follows that. */
+                    if (tagMenu === null) suppressTagOpenRef.current = true;
                     openTagMenu(tag.id, event.currentTarget);
                   }}
                   className={`group relative flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] py-0 pr-2 pl-1 text-[13px] transition-colors select-none ${
@@ -568,9 +584,11 @@ export function Sidebar({
         <ConfirmDialog
           title={`Delete “${pendingDeleteTag.name}”?`}
         body={
-          pendingDeleteTag.count === 1
-            ? `The tag is removed from 1 note. The note itself is kept.`
-            : `The tag is removed from ${pendingDeleteTag.count} notes. The notes themselves are kept.`
+          pendingDeleteTag.count === 0
+            ? `The tag is not used by any note.`
+            : pendingDeleteTag.count === 1
+              ? `The tag is removed from 1 note. The note itself is kept.`
+              : `The tag is removed from ${pendingDeleteTag.count} notes. The notes themselves are kept.`
         }
           confirmLabel="Delete tag"
           onCancel={() => {

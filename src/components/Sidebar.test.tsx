@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Sidebar } from './Sidebar';
@@ -169,6 +169,23 @@ describe('Sidebar', () => {
     expect(screen.queryByTestId('tag-menu')).toBeNull();
   });
 
+  it('swallows the release click after a hold that opened the tag menu', () => {
+    /* The release after a long-press synthesises a click on engines that do —
+       measured on the phone, where the hold selected the tag under its own
+       menu. The flag eats exactly that one; the next real click selects. */
+    const onSelect = vi.fn();
+    renderSidebar({ onSelect });
+
+    fireEvent.contextMenu(tagRow());
+    expect(screen.getByTestId('tag-menu')).toBeDefined();
+    fireEvent.click(tagRow());
+
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(tagRow());
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'tag', id: 't-work' });
+  });
+
   it('renames a tag from its row menu', async () => {
     let renamed: { id: string; name: string } | null = null;
     renderSidebar({
@@ -214,6 +231,15 @@ describe('Sidebar', () => {
       expect(deleted).toBe('t-work');
     });
     expect(screen.queryByText('Delete “work”?')).toBeNull();
+  });
+
+  it('says an unused tag is used by no note rather than naming a zero count', () => {
+    renderSidebar({ tags: [{ id: 't-new', name: 'new', count: 0 }] });
+
+    fireEvent.contextMenu(screen.getByTestId('tag-row'));
+    fireEvent.click(screen.getByTestId('tag-menu-delete'));
+
+    expect(screen.getByText('The tag is not used by any note.')).toBeDefined();
   });
 
   it('distinguishes an empty pinned filter from an empty all-notes view', () => {
