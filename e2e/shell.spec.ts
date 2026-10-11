@@ -671,6 +671,89 @@ test.describe('folder organisation', () => {
 /* `05-ui-ux.md` §6.3a. These drive the real command through the mock backend, so
    the ordering claim is checked against storage rather than against a component
    that would re-sort it for us. */
+/* ADR-021: tags stay listed at a zero count and the sidebar creates, renames and
+   deletes them — the row menu reaches the same verbs three ways, like the
+   folder and note rows. */
+test.describe('tag management', () => {
+  test('creates a tag from the sidebar + with a zero count', async ({ page }) => {
+    await open(page);
+
+    await page.getByRole('button', { name: 'New tag' }).click();
+    await page.getByTestId('tag-name-input').fill('e2e-extra');
+    await page.getByTestId('tag-name-input').press('Enter');
+
+    /* Visible immediately, at a zero count — the hiding rule this replaces made
+       exactly this flow look broken. */
+    const row = page.getByTestId('tag-row').filter({ hasText: 'e2e-extra' });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('0');
+  });
+
+  test('renames a tag from its row menu', async ({ page }) => {
+    await open(page);
+
+    const before = await page.getByTestId('tag-row').count();
+    await page.getByTestId('tag-row').first().click({ button: 'right' });
+    await page.getByTestId('tag-menu-rename').click();
+
+    await page.getByTestId('tag-name-input').fill('e2e-renamed');
+    await page.getByTestId('tag-name-input').press('Enter');
+
+    await expect(page.getByTestId('tag-row').filter({ hasText: 'e2e-renamed' })).toBeVisible();
+    await expect(page.getByTestId('tag-row')).toHaveCount(before);
+  });
+
+  test('deletes a tag from its row menu after confirming the count', async ({ page }) => {
+    await open(page);
+
+    const before = await page.getByTestId('tag-row').count();
+    await page.getByTestId('tag-row').first().click({ button: 'right' });
+    await page.getByTestId('tag-menu-delete').click();
+
+    /* The confirmation names the count, because deleting detaches the tag from
+       every note carrying it while the notes themselves survive. */
+    await expect(page.getByRole('dialog')).toContainText(/removed from \d+ notes?/);
+    await page.getByRole('button', { name: 'Delete tag' }).click();
+
+    await expect(page.getByTestId('tag-row')).toHaveCount(before - 1);
+  });
+
+  test('opens the tag menu from a hold, the touch path to rename and delete', async ({
+    page,
+  }) => {
+    /* On touch there is no hover, so the hold is the only path outside the
+       editor. Dispatched, not right-clicked: a right-click sends a `mousedown`
+       first and the menu closes on that, which is exactly what a touch hold
+       does not do — the same reason the note rows pin it this way. */
+    await open(page);
+    await expect(page.getByTestId('tag-row').first()).toBeVisible();
+
+    await page
+      .getByTestId('tag-row')
+      .first()
+      .evaluate((row) => {
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      });
+
+    await expect(page.getByTestId('tag-menu')).toBeVisible();
+    await expect(page.getByTestId('tag-menu-rename')).toBeVisible();
+    await expect(page.getByTestId('tag-menu-delete')).toBeVisible();
+  });
+
+  test('returns to All when the selected tag is deleted', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('tag-row').first().click();
+    await expect(page.getByTestId('list-header')).toContainText('Tag:');
+
+    await page.getByTestId('tag-row').first().click({ button: 'right' });
+    await page.getByTestId('tag-menu-delete').click();
+    await page.getByRole('button', { name: 'Delete tag' }).click();
+
+    await expect(page.getByTestId('list-header')).toHaveText('All notes');
+  });
+});
+
 test.describe('pinning', () => {
   test('pins from a card and moves the note to the top of the list', async ({ page }) => {
     await open(page);

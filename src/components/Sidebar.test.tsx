@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Sidebar } from './Sidebar';
 import { useSelectionStore } from '../stores/selection';
@@ -62,12 +62,21 @@ function renderSidebar(overrides: Partial<React.ComponentProps<typeof Sidebar>> 
     onNewNote: () => {},
     onToggleFolder: () => {},
     onCreateFolder: noWrite,
-onRenameFolder: noWrite,
+    onRenameFolder: noWrite,
     onDeleteFolder: noWrite,
     onMoveFolder: noMove,
+    onCreateTag: noWrite,
+    onRenameTag: noWrite,
+    onDeleteTag: noWrite,
     ...overrides,
   };
   render(<Sidebar {...props} />);
+}
+
+function tagRow(): HTMLElement {
+  const first = screen.getAllByTestId('tag-row')[0];
+  if (first === undefined) throw new Error('expected a tag row');
+  return first;
 }
 
 describe('Sidebar', () => {
@@ -101,14 +110,110 @@ describe('Sidebar', () => {
     expect(screen.getByText('No tags yet')).toBeDefined();
   });
 
-  it('offers no add control for tags, which are created from a note instead', () => {
-    /* A tag with no notes is invisible by the `tags_list` count rule, so a
-       sidebar create control would appear to do nothing. Creation lives in the
-       note's tag editor (§6.4); the section header carries no button. */
+  it('offers an add control for tags that opens an inline input', () => {
+    /* ADR-021: tags stay listed at a zero count, so creating one from the
+       sidebar is a live control rather than the dead one M8 removed. */
     renderSidebar();
 
     expect(screen.getByRole('button', { name: 'New folder' })).toBeDefined();
-    expect(screen.queryByRole('button', { name: 'New tag' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'New tag' }));
+    expect(screen.getByTestId('tag-name-input')).toBeDefined();
+  });
+
+  it('creates a tag from the sidebar input with Enter', async () => {
+    let created: string | null = null;
+    renderSidebar({
+      onCreateTag: (name) => {
+        created = name;
+        return Promise.resolve();
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New tag' }));
+    const input = screen.getByTestId('tag-name-input');
+    fireEvent.change(input, { target: { value: 'urgent' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(created).toBe('urgent');
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('tag-name-input')).toBeNull();
+    });
+  });
+
+  it('cancels an empty tag create without writing', () => {
+    let writes = 0;
+    renderSidebar({
+      onCreateTag: () => {
+        writes += 1;
+        return Promise.resolve();
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New tag' }));
+    fireEvent.keyDown(screen.getByTestId('tag-name-input'), { key: 'Enter', code: 'Enter' });
+
+    expect(writes).toBe(0);
+    expect(screen.queryByTestId('tag-name-input')).toBeNull();
+  });
+
+  it('opens the tag menu on right-click and closes it on Escape', () => {
+    renderSidebar();
+
+    expect(screen.queryByTestId('tag-menu')).toBeNull();
+    fireEvent.contextMenu(tagRow());
+    expect(screen.getByTestId('tag-menu')).toBeDefined();
+
+    fireEvent.keyDown(screen.getByTestId('tag-menu'), { key: 'Escape', code: 'Escape' });
+    expect(screen.queryByTestId('tag-menu')).toBeNull();
+  });
+
+  it('renames a tag from its row menu', async () => {
+    let renamed: { id: string; name: string } | null = null;
+    renderSidebar({
+      onRenameTag: (id, name) => {
+        renamed = { id, name };
+        return Promise.resolve();
+      },
+    });
+
+    fireEvent.contextMenu(tagRow());
+    fireEvent.click(screen.getByTestId('tag-menu-rename'));
+
+    const input = screen.getByTestId<HTMLInputElement>('tag-name-input');
+    expect(input.value).toBe('work');
+    fireEvent.change(input, { target: { value: 'play' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(renamed).toEqual({ id: 't-work', name: 'play' });
+    });
+  });
+
+  it('deletes a tag from its row menu after confirming the count', async () => {
+    let deleted: string | null = null;
+    renderSidebar({
+      selection: { kind: 'tag', id: 't-work' },
+      onDeleteTag: (id) => {
+        deleted = id;
+        return Promise.resolve();
+      },
+    });
+
+    fireEvent.contextMenu(tagRow());
+    fireEvent.click(screen.getByTestId('tag-menu-delete'));
+
+    /* The confirmation names the count, because deleting detaches the tag from
+       every note carrying it while the notes themselves survive. */
+    expect(screen.getByText('Delete “work”?')).toBeDefined();
+    expect(screen.getByText(/removed from 2 notes/)).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete tag' }));
+
+    await waitFor(() => {
+      expect(deleted).toBe('t-work');
+    });
+    expect(screen.queryByText('Delete “work”?')).toBeNull();
   });
 
   it('distinguishes an empty pinned filter from an empty all-notes view', () => {
@@ -146,6 +251,9 @@ describe('Sidebar', () => {
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}
+        onCreateTag={noWrite}
+        onRenameTag={noWrite}
+        onDeleteTag={noWrite}
       />,
     );
 
@@ -179,6 +287,9 @@ describe('Sidebar', () => {
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}
+        onCreateTag={noWrite}
+        onRenameTag={noWrite}
+        onDeleteTag={noWrite}
       />,
     );
 
@@ -289,6 +400,9 @@ describe('Sidebar', () => {
         onRenameFolder={noWrite}
         onDeleteFolder={noWrite}
         onMoveFolder={noMove}
+        onCreateTag={noWrite}
+        onRenameTag={noWrite}
+        onDeleteTag={noWrite}
       />,
     );
 

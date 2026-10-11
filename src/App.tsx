@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { foldersApi, installBackHandler, notesApi, windowApi } from './lib/ipc';
+import { foldersApi, installBackHandler, notesApi, tagsApi, windowApi } from './lib/ipc';
 import { isInsideSubtree } from './components/folderRows';
 import { useNow, useNotes } from './hooks/useNotes';
 import { useSearch } from './hooks/useSearch';
@@ -262,6 +262,47 @@ function Shell() {
     void queryClient.invalidateQueries({ queryKey: ['notes'] });
     refetch();
   }, [queryClient, refetch]);
+
+  /* Tag writes invalidate the tag query and the note list together, for the
+     same reason folder writes do (`10-conventions.md` §7): a rename moves the
+     name every row carries, and a delete strips chips off notes. One
+     invalidation rather than two, because they land in the same user action. */
+  const tagsChanged = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey: ['tags'] });
+    void queryClient.invalidateQueries({ queryKey: ['notes'] });
+    refetch();
+  }, [queryClient, refetch]);
+
+  const createTag = useCallback(
+    async (name: string): Promise<void> => {
+      await tagsApi.create(name);
+      tagsChanged();
+    },
+    [tagsChanged],
+  );
+
+  const renameTag = useCallback(
+    async (id: Uuid, name: string): Promise<void> => {
+      await tagsApi.rename(id, name);
+      tagsChanged();
+    },
+    [tagsChanged],
+  );
+
+  /* Deleting the tag that is selected leaves nothing to show, so the selection
+     moves to All rather than to a row that no longer exists — the same
+     `NOT_FOUND` handling a folder delete gets. */
+  const deleteTag = useCallback(
+    async (id: Uuid): Promise<void> => {
+      await tagsApi.remove(id);
+      const current = useSelectionStore.getState().selection;
+      if (current.kind === 'tag' && current.id === id) {
+        setSelection({ kind: 'all' });
+      }
+      tagsChanged();
+    },
+    [tagsChanged],
+  );
 
   const createFolder = useCallback(
     async (name: string, parentId: Uuid | null): Promise<void> => {
@@ -572,6 +613,9 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
       onRenameFolder={renameFolder}
       onDeleteFolder={deleteFolder}
       onMoveFolder={moveFolder}
+      onCreateTag={createTag}
+      onRenameTag={renameTag}
+      onDeleteTag={deleteTag}
     />
   );
 
