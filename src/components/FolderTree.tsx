@@ -134,7 +134,13 @@ export function FolderTree({
     setMenu({
       id,
       placement: {
-        top: up ? rect.top - 4 : rect.bottom + 4,
+        /* Clamped so the estimate always lands inside the viewport — the same
+           13 px clip the note rows hit in the trash-restore flow: moving the
+           top above the row does not move the box's bottom edge with it. */
+        top: Math.min(
+          Math.max(8, up ? rect.top - 4 : rect.bottom + 4),
+          window.innerHeight - MENU_ESTIMATED_HEIGHT - 8,
+        ),
         left: Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8),
       },
     });
