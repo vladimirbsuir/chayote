@@ -17,6 +17,7 @@ import type { Note, NoteFilter, NoteSummary, SaveNoteInput } from '../types/ipc'
 import { applySaveToList } from '../lib/noteOrder';
 import { NoteEditor } from '../editor/NoteEditor';
 import { EditorStatusBar } from './EditorStatusBar';
+import { FormattingToolbar } from './FormattingToolbar';
 import { EmptyState } from './EmptyState';
 import { summaryOf } from './summaryOf';
 import { FolderPicker, TagEditor } from './StatusPopovers';
@@ -86,6 +87,11 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
      document belongs to TipTap (`10-conventions.md` §7) and nothing else reads it
      during render. */
   const editorRef = useRef<Editor | null>(null);
+  /* The same instance as state for the formatting toolbar. The toolbar reads
+     `isActive`/`can` during render, and a ref write renders nothing — without
+     the mirror its pressed states would freeze at the mount value. Set and
+     cleared beside the ref so both always point at the mounted editor. */
+  const [toolbarEditor, setToolbarEditor] = useState<Editor | null>(null);
 
   /* `04-editor.md` §9: folder and tags are "click to change". Which of the two
      popovers is open, and the element each was opened from — the menu needs the
@@ -187,6 +193,7 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
       setFolderId(data.folderId);
       setTagIds(ids);
       editorRef.current = editor;
+      setToolbarEditor(editor);
       autosave.setBaseline(targetOf(editor) as SaveNoteInput);
     },
     [autosave, noteId, queryClient, targetOf],
@@ -210,6 +217,7 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
   );
 
   const onDispose = useCallback((): void => {
+    setToolbarEditor(null);
     void autosave.flush();
   }, [autosave]);
 
@@ -459,6 +467,10 @@ status={
               isPinned={pinned}
               onTogglePin={togglePin}
               onTrash={onTrash ?? NOOP}
+            />
+            <FormattingToolbar
+              editor={toolbarEditor}
+              variant={onClose === undefined ? 'desktop' : 'mobile'}
             />
             <NoteEditor
               key={data.id}

@@ -5,25 +5,41 @@ import { describe, expect, it } from 'vitest';
 import {
   AlertCircle,
   ArrowLeft,
+  Bold,
   Check,
   ChevronDown,
   ChevronRight,
+  Code,
   FilePlus,
   Folder,
   Hash,
+  Heading1,
+  Heading2,
+  Heading3,
   Inbox,
+  Italic,
+  List,
+  ListOrdered,
+  ListTodo,
   Menu,
   Monitor,
   Moon,
   MoreHorizontal,
   Palette,
+  Pilcrow,
   Pin,
   Plus,
+  Quote,
+  Redo2,
   RotateCw,
   Search,
+  SeparatorHorizontal,
   Settings as SettingsIcon,
+  SquareCode,
+  Strikethrough,
   Sun,
   Trash,
+  Undo2,
   X,
 } from 'lucide-react';
 
@@ -69,6 +85,22 @@ const ICONS: Record<string, typeof Search> = {
   'alert-circle': AlertCircle,
   'rotate-cw': RotateCw,
   inbox: Inbox,
+  bold: Bold,
+  italic: Italic,
+  strikethrough: Strikethrough,
+  code: Code,
+  pilcrow: Pilcrow,
+  'heading-1': Heading1,
+  'heading-2': Heading2,
+  'heading-3': Heading3,
+  list: List,
+  'list-ordered': ListOrdered,
+  'list-todo': ListTodo,
+  quote: Quote,
+  'square-code': SquareCode,
+  'separator-horizontal': SeparatorHorizontal,
+  'undo-2': Undo2,
+  'redo-2': Redo2,
 };
 
 const SIZES = ['i-16', 'i-18', 'i-20', 'i-24'] as const;
@@ -89,9 +121,9 @@ describe('the icon inventory of 05-ui-ux.md §3.3', () => {
   it('has an implementation for every documented icon, and no others', () => {
     const documented = inventoryFromDoc();
     expect(documented.length).toBeGreaterThan(0);
-    /* ADR-015 fixes the inventory at 22. A count assertion alone would pass
-       while the list silently grew; the equality below is what catches both a
-       missing icon and an extra one. */
+    /* ADR-015 fixes the inventory, now at 38 with the formatting toolbar.
+       A count assertion alone would pass while the list silently grew; the
+       equality below is what catches both a missing icon and an extra one. */
     expect([...documented].sort()).toEqual([...Object.keys(ICONS)].sort());
   });
 
@@ -165,7 +197,7 @@ describe('the icon inventory of 05-ui-ux.md §3.3', () => {
   });
 
   it('keeps every icon colourless by construction', () => {
-    /* The `.icon` base rule is what makes `currentColor` true for all 22. If it
+    /* The `.icon` base rule is what makes `currentColor` true for all 38. If it
        ever gained a `fill` or `stroke` literal, every icon in the app would
        inherit it at once. */
     const css = readFileSync(STYLES, 'utf8');

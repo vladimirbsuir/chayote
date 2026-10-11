@@ -227,6 +227,22 @@ Every icon used in v1, and nothing else. Adding an icon to the UI means adding i
 | `alert-circle` | Error and warning states |
 | `rotate-cw` | Retry a failed save, reset settings |
 | `inbox` | Empty state for a selection with no notes |
+| `bold` | Formatting toolbar: bold mark |
+| `italic` | Formatting toolbar: italic mark |
+| `strikethrough` | Formatting toolbar: strikethrough mark |
+| `code` | Formatting toolbar: inline code mark |
+| `pilcrow` | Formatting toolbar: paragraph block |
+| `heading-1` | Formatting toolbar: heading level 1 |
+| `heading-2` | Formatting toolbar: heading level 2 |
+| `heading-3` | Formatting toolbar: heading level 3 |
+| `list` | Formatting toolbar: bullet list |
+| `list-ordered` | Formatting toolbar: ordered list |
+| `list-todo` | Formatting toolbar: task list |
+| `quote` | Formatting toolbar: blockquote |
+| `square-code` | Formatting toolbar: code block |
+| `separator-horizontal` | Formatting toolbar: horizontal rule |
+| `undo-2` | Formatting toolbar: undo |
+| `redo-2` | Formatting toolbar: redo |
 
 #### Bundle and rendering
 
@@ -250,6 +266,7 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 | `NoteCard` | Title, excerpt, timestamp, pinned indicator. Optional folder name when the selection is All or Pinned. Every card carries its own border and surface with an 8 px gap, so adjacent notes read as separate cards; the open card's border is the accent. |
 | `EditorOverflowMenu` | Mobile three-dots menu: pin and trash for the open note. |
 | `EditorPane` | Owns the TipTap instance, autosave state machine, status bar. |
+| `FormattingToolbar` | Static formatting row above the editor content (desktop and mobile): the four marks, paragraph plus H1–H3, bullet / ordered / task lists, blockquote, code block, horizontal rule, undo / redo. Horizontally scrollable; 32 px targets on desktop, 44 px on Android. |
 | `EditorStatusBar` | Folder, tags, word count, save state (`04-editor.md` §9). |
 | `StatusPopovers` | One listbox component behind both popovers: `TagEditor` for adding and removing tags, `FolderPicker` for changing a note's folder. |
 | `ConfirmDialog` | Destructive confirmation only. Used by permanent delete and empty trash. Never for save or navigation. |
