@@ -247,7 +247,7 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 | `Sidebar` | Filters, tag rows with counts, `NoteList`. The tag list renders here; there is no `TagList.tsx`. Owns selection state. |
 | `FolderTree`, `folderRows.ts` | Recursive tree. Keyboard navigable. Drag to re-parent and reorder. |
 | `NoteList` | Virtualised list. Renders `NoteSummary`, never loads full documents. |
-| `NoteCard` | Title, excerpt, timestamp, pinned indicator. Optional folder name when the selection is All or Pinned. |
+| `NoteCard` | Title, excerpt, timestamp, pinned indicator. Optional folder name when the selection is All or Pinned. Every card carries its own border and surface with an 8 px gap, so adjacent notes read as separate cards; the open card's border is the accent. |
 | `EditorOverflowMenu` | Mobile three-dots menu: pin and trash for the open note. |
 | `EditorPane` | Owns the TipTap instance, autosave state machine, status bar. |
 | `EditorStatusBar` | Folder, tags, word count, save state (`04-editor.md` §9). |

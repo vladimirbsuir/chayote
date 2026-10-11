@@ -279,15 +279,17 @@ body {
 }
 .list-head .muted { color: var(--text-subtle); font-weight: 400; }
 
-.note-list { flex: 1; overflow-y: auto; padding: 4px; }
+.note-list { flex: 1; overflow-y: auto; padding: 8px; }
 .note-card {
   padding: 9px 10px;
   border-radius: var(--r-input);
   cursor: pointer;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 8px;
 }
-.note-card:hover { background: var(--surface); }
-.note-card.active { background: var(--surface); border-color: var(--border); }
+.note-card:hover { border-color: var(--border-strong); }
+.note-card.active { border-color: var(--accent); }
 .note-card .row1 { display: flex; align-items: baseline; gap: 6px; }
 .note-card .title {
   font-size: 14px; font-weight: 550; line-height: 1.4;
