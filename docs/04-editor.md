@@ -114,12 +114,14 @@ Notes:
   `newGroupDelay` are the §6 values. `newGroupOnInputRule` is `true` by
   default in this version.
 - **`EditorShortcuts`** is this project's own extension, carrying the
-  editor-local bindings from `05-ui-ux.md` §7 that need editor commands rather
-  than a raw view: the four marks, `Ctrl/Cmd+Enter` for a task item, and `Tab` /
-  `Shift+Tab`. It must come **after** StarterKit, because TipTap merges every
-  extension's shortcuts into one keymap and a later extension wins. That is why
-  it re-implements the list half of `Tab` rather than inheriting StarterKit's
-  `listKeymap`.
+   editor-local bindings from `05-ui-ux.md` §7 that need editor commands rather
+   than a raw view: the four marks, `Ctrl/Cmd+Enter` for a task item, `Tab` /
+   `Shift+Tab`, and one `Backspace` case — an empty top-level paragraph after a
+   divider deletes the divider at once, instead of deleting the paragraph first
+   and stranding the divider node-selected. It must come **after** StarterKit,
+   because TipTap merges every extension's shortcuts into one keymap and a later
+   extension wins. That is why it re-implements the list half of `Tab` rather
+   than inheriting StarterKit's `listKeymap`.
 
 Clipboard out (§4.3) is not in this array. ProseMirror's
 `clipboardTextSerializer` is a TipTap **core** extension, configured through the
