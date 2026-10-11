@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AccentChoice, Settings, Theme } from '../lib/settings';
+import type { AccentChoice, SectionCollapse, Settings, Theme } from '../lib/settings';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '../lib/settings';
 import { debounce } from '../lib/debounce';
 import type { Debounced } from '../lib/debounce';
@@ -25,6 +25,10 @@ export type SettingsState = Settings & {
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebarCollapsed: () => void;
   toggleFolderCollapsed: (id: Uuid) => void;
+  /** Collapse or expand a whole structure section — the high-level Folders or
+      Tags list — rather than one folder's twisty. Persisted like the rest, so
+      a collapsed list stays collapsed across launches. */
+  toggleSectionCollapsed: (section: keyof SectionCollapse) => void;
   setLastNote: (id: Uuid | null) => void;
   setLastSelection: (selection: Settings['lastSelection']) => void;
   reset: () => void;
@@ -37,6 +41,7 @@ const PERSISTED: ReadonlyArray<keyof Settings> = [
   'sidebarWidth',
   'sidebarCollapsed',
   'collapsedFolders',
+  'sectionsCollapsed',
   'lastNoteId',
   'lastSelection',
 ];
@@ -89,6 +94,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         collapsedFolders: current.includes(id)
           ? current.filter((candidate) => candidate !== id)
           : [...current, id],
+      });
+    },
+    toggleSectionCollapsed: (section) => {
+      const current = get().sectionsCollapsed;
+      update({
+        sectionsCollapsed: { ...current, [section]: !current[section] },
       });
     },
     /* Which note is open and which selection is active are persisted so a

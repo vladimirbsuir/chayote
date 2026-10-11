@@ -55,8 +55,8 @@ The sidebar is three stacked regions, not three columns. Filters, then structure
 | Region | Height | Content | Behaviour |
 |--------|--------|---------|-----------|
 | Filters | auto | All notes, Pinned | Segmented control |
-| Folders | max 40 % of pane, scroll | Tree | Collapsible, drag to re-parent and reorder |
-| Tags | max 25 % of pane, scroll | Flat list with counts | Collapsible |
+| Folders | max 40 % of pane, scroll | Tree | Collapsible per branch and as a whole section, drag to re-parent and reorder |
+| Tags | max 25 % of pane, scroll | Flat list with counts | Collapsible as a whole section |
 | List header | 32 px | Active selection name + count | |
 | Note list | remainder | Virtualised cards | Click to open, right-click for menu, long-press for menu on touch |
 
@@ -217,8 +217,8 @@ Every icon used in v1, and nothing else. Adding an icon to the UI means adding i
 | `monitor` | System theme |
 | `menu` | Tablet drawer toggle (§2.3) — deliberately absent from the mobile list bar, where there is no drawer to open |
 | `arrow-left` | Android back |
-| `chevron-down` | Expanded tree branch, collapsed section header |
-| `chevron-right` | Collapsed tree branch |
+| `chevron-down` | Expanded tree branch, expanded section header |
+| `chevron-right` | Collapsed tree branch, collapsed section header |
 | `more-horizontal` | Overflow menus |
 | `settings` | Settings dialog |
 | `palette` | Accent colour control |
@@ -313,7 +313,7 @@ Delete moves the note to trash with an **undo toast** for 6 seconds offering "Un
 
 Creating a folder is inline: a single text input in place, `Enter` commits, `Esc` cancels, empty input cancels. Renaming is the same. Deleting a folder with children requires confirmation naming the count. Reordering and re-parenting by drag; `position` values are densified in one transaction (`03-data-model.md` §3.2).
 
-**Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. A tap on the twisty collapses on touch exactly as a click does on desktop. On touch, long-press opens the row's menu; otherwise the gesture scrolls. Drag to re-parent is mouse-only in v1 — rows are not draggable on a coarse pointer at all — so on a phone re-parenting waits on the v1.1 "move to…" menu item, like keyboard re-parenting does. The gate is load-bearing: on this WebView a hold on a draggable row can start a touch drag that no `dragend` ever ends, leaving the row dimmed and untappable — found on a phone — and opening the menu ends any drag UI, for the same reason.
+**Folder tree collapse state is persisted per folder** in the settings store, so a collapsed branch stays collapsed across launches. A tap on the twisty collapses on touch exactly as a click does on desktop. On touch, long-press opens the row's menu; otherwise the gesture scrolls. Drag to re-parent is mouse-only in v1 — rows are not draggable on a coarse pointer at all — so on a phone re-parenting waits on the v1.1 "move to…" menu item, like keyboard re-parenting does. The gate is load-bearing: on this WebView a hold on a draggable row can start a touch drag that no `dragend` ever ends, leaving the row dimmed and untappable — found on a phone — and opening the menu ends any drag UI, for the same reason. The Folders and Tags sections collapse as a whole from a chevron in their headers, for top-level lists the per-folder twisty cannot shorten; that state is persisted in the settings store too, and creating a folder from a collapsed section expands it first so the input it opens is on screen.
 
 **A drop target has three bands.** The outer quarter at each end reorders among siblings, drawn as a 2 px accent rule pinned to that edge; the middle half makes the row the new parent, drawn as a soft accent fill. A quarter rather than a third, because re-parenting is the rarer intent but needs a target big enough to hit, and thirds would have left it under nine pixels on a 26 px row. A rule on the wrong edge would read as re-ordering when the intent was re-parenting, which is the whole distinction.
 

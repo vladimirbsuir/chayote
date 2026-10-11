@@ -79,6 +79,7 @@ function Shell() {
   const sidebarWidth = useSettingsStore((state) => state.sidebarWidth);
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
   const collapsedFolders = useSettingsStore((state) => state.collapsedFolders);
+  const sectionsCollapsed = useSettingsStore((state) => state.sectionsCollapsed);
   const defaultFolderId = useSettingsStore((state) => state.defaultFolderId);
 
   const [stack, setStack] = useState<ViewStack>({ stack: ['list'] });
@@ -517,6 +518,14 @@ const confirmRef = useRef(confirm);
       folderNames={folderNames}
       folderCounts={folderCounts}
       collapsedFolders={collapsedFolders}
+      foldersCollapsed={sectionsCollapsed.folders}
+      tagsCollapsed={sectionsCollapsed.tags}
+      onToggleFoldersCollapsed={() => {
+        useSettingsStore.getState().toggleSectionCollapsed('folders');
+      }}
+      onToggleTagsCollapsed={() => {
+        useSettingsStore.getState().toggleSectionCollapsed('tags');
+      }}
       openNoteId={openNoteId}
       firstLaunch={firstLaunch}
       onSelect={(next) => {

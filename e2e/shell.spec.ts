@@ -245,6 +245,68 @@ test.describe('selection model', () => {
   });
 });
 
+/* `05-ui-ux.md` §2.2: the Folders and Tags sections collapse as a whole from a
+   chevron in their headers — the twisty hides one branch, and a long top-level
+   list needs the coarser control. */
+test.describe('sidebar sections', () => {
+  test('collapses the whole Folders list from its header', async ({ page }) => {
+    await open(page);
+
+    await expect(page.getByTestId('folder-row').first()).toBeVisible();
+    await page.getByTestId('section-toggle-folders').click();
+
+    await expect(page.getByTestId('folder-row')).toHaveCount(0);
+    await expect(page.getByTestId('section-toggle-folders')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await expect(page.getByTestId('note-card').first()).toBeVisible();
+
+    await page.getByTestId('section-toggle-folders').click();
+    await expect(page.getByTestId('folder-row').first()).toBeVisible();
+  });
+
+  test('collapses the whole Tags list from its header', async ({ page }) => {
+    await open(page);
+
+    await expect(page.getByTestId('tag-row').first()).toBeVisible();
+    await page.getByTestId('section-toggle-tags').click();
+
+    await expect(page.getByTestId('tag-row')).toHaveCount(0);
+    await expect(page.getByTestId('note-card').first()).toBeVisible();
+  });
+
+  test('keeps a collapsed section collapsed across a reload', async ({ page }) => {
+    await open(page);
+
+    await page.getByTestId('section-toggle-tags').click();
+    await expect(page.getByTestId('tag-row')).toHaveCount(0);
+
+    /* Settings are written through the 300 ms debounce, so the stored value is
+       polled rather than read straight after the click. */
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const raw = window.localStorage.getItem('settings.json');
+          if (raw === null) return null;
+          return (
+            (JSON.parse(raw) as { sectionsCollapsed?: { tags?: boolean } }).sectionsCollapsed
+              ?.tags ?? null
+          );
+        }),
+      )
+      .toBe(true);
+
+    await page.reload();
+
+    await expect(page.getByTestId('tag-row')).toHaveCount(0);
+    await expect(page.getByTestId('section-toggle-tags')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+});
+
 /* `05-ui-ux.md` §10 requires the tree pattern, and M4's acceptance bar is a
    keyboard-navigable tree. These drive it in a real browser because the parts
    jsdom cannot judge are the parts that matter: that a click lands on the row and
