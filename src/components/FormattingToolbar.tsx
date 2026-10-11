@@ -7,6 +7,8 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  IndentDecrease,
+  IndentIncrease,
   Italic,
   List,
   ListOrdered,
@@ -81,6 +83,8 @@ export function FormattingToolbar({
   const canBullet = editor?.can().toggleBulletList() ?? false;
   const canOrdered = editor?.can().toggleOrderedList() ?? false;
   const canTask = editor?.can().toggleTaskList() ?? false;
+  const canIndent = editor?.can().indent() ?? false;
+  const canOutdent = editor?.can().outdent() ?? false;
   const canQuote = editor?.can().toggleBlockquote() ?? false;
   const canCodeBlock = editor?.can().toggleCodeBlock() ?? false;
   const canHr = editor?.can().setHorizontalRule() ?? false;
@@ -197,6 +201,24 @@ export function FormattingToolbar({
         disabled={!editable || !canTask}
         onRun={() => editor?.chain().focus().toggleTaskList().run()}
         icon={<ListTodo className={`icon ${mobile ? 'i-20' : 'i-18'}`} aria-hidden="true" />}
+      />
+      <ToolButton
+        mobile={mobile}
+        testId="format-indent"
+        label="Increase indent"
+        title="Increase indent (Ctrl+])"
+        disabled={!editable || !canIndent}
+        onRun={() => editor?.chain().focus().indent().run()}
+        icon={<IndentIncrease className={`icon ${mobile ? 'i-20' : 'i-18'}`} aria-hidden="true" />}
+      />
+      <ToolButton
+        mobile={mobile}
+        testId="format-outdent"
+        label="Decrease indent"
+        title="Decrease indent (Ctrl+[)"
+        disabled={!editable || !canOutdent}
+        onRun={() => editor?.chain().focus().outdent().run()}
+        icon={<IndentDecrease className={`icon ${mobile ? 'i-20' : 'i-18'}`} aria-hidden="true" />}
       />
       <Separator />
       <ToolButton

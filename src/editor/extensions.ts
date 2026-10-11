@@ -8,6 +8,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { TaskItemView } from './TaskItemView'
+import { Indent } from './indent'
 
 /* The node and mark set is fixed by `04-editor.md` §1.2. Node names must match
    the Rust validator in `src-tauri/src/doc/validate.rs`, because the document in
@@ -105,6 +106,7 @@ export const EDITOR_EXTENSIONS = [
   }),
   TaskList,
   TaskItemWithCheckbox.configure({ nested: true }),
+  Indent,
   Typography,
   EditorShortcuts,
   Placeholder.configure({

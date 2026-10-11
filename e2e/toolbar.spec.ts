@@ -137,6 +137,48 @@ test.describe('formatting toolbar', () => {
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(editor.locator('strong', { hasText: 'undo me' })).toHaveCount(0);
   });
+
+  test('indents a paragraph through its indent buttons and the Ctrl+] shortcut', async ({
+    page,
+  }) => {
+    const editor = await openRichNote(page);
+    await caretToNewBlock(page, editor);
+
+    await page.keyboard.type('indented line');
+    await settleEditor(page);
+    await page.keyboard.press('Shift+Home');
+    await settleEditor(page);
+
+    await page.getByRole('button', { name: 'Increase indent' }).click();
+    await expect(editor.locator('p').last()).toHaveCSS('margin-left', '24px');
+
+    await page.keyboard.press('Control+]');
+    await expect(editor.locator('p').last()).toHaveCSS('margin-left', '48px');
+
+    await page.getByRole('button', { name: 'Decrease indent' }).click();
+    await page.getByRole('button', { name: 'Decrease indent' }).click();
+    await expect(editor.locator('p').last()).toHaveCSS('margin-left', '0px');
+  });
+
+  test('nests a bullet list through its increase button', async ({ page }) => {
+    const editor = await openRichNote(page);
+    await caretToNewBlock(page, editor);
+
+    await page.keyboard.type('first item');
+    await settleEditor(page);
+    await page.keyboard.press('Shift+Home');
+    await settleEditor(page);
+    await page.getByRole('button', { name: 'Bullet list' }).click();
+    await expect(editor.locator('ul li').last()).toHaveText('first item');
+
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('nested item');
+    await settleEditor(page);
+    await page.keyboard.press('Shift+Home');
+    await settleEditor(page);
+    await page.getByRole('button', { name: 'Increase indent' }).click();
+    await expect(editor.locator('ul ul li').last()).toHaveText('nested item');
+  });
 });
 
 test.describe('formatting toolbar on mobile', () => {

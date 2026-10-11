@@ -67,6 +67,8 @@ describe('FormattingToolbar', () => {
       'Bullet list',
       'Ordered list',
       'Task list',
+      'Increase indent',
+      'Decrease indent',
       'Blockquote',
       'Code block',
       'Horizontal rule',

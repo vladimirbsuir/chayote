@@ -33,9 +33,9 @@ Node and mark names are fixed. Anything not listed here is not in v1.
 | Node | Attributes | Content |
 |------|-----------|---------|
 | `doc` | — | `block+` |
-| `paragraph` | — | `inline*` |
-| `heading` | `level: 1\|2\|3` | `inline*` |
-| `blockquote` | — | `block+` |
+| `paragraph` | `indent: 0..7, default 0` | `inline*` |
+| `heading` | `level: 1\|2\|3`, `indent: 0..7, default 0` | `inline*` |
+| `blockquote` | `indent: 0..7, default 0` | `block+` |
 | `codeBlock` | `language: string \| null` | `text*` |
 | `bulletList` | — | `listItem+` |
 | `orderedList` | `start: integer` | `listItem+` |
@@ -78,6 +78,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { Indent } from '../src/editor/indent'
 
 const EditorShortcuts = Extension.create({ /* §7 bindings */ })
 
@@ -93,6 +94,7 @@ export const EDITOR_EXTENSIONS = [
   }),
   TaskList,
   TaskItem.configure({ nested: true }),
+  Indent,
   Typography,
   EditorShortcuts,
   Placeholder.configure({
@@ -113,6 +115,16 @@ Notes:
 - `undoRedo` — TipTap 3 renamed the history extension; `depth` and
   `newGroupDelay` are the §6 values. `newGroupOnInputRule` is `true` by
   default in this version.
+- **`Indent`** is this project's own extension (`src/editor/indent.ts`),
+   carrying the `indent` attribute for `paragraph`, `heading` and `blockquote`
+   (§1.2) and the `indent` / `outdent` commands behind the toolbar buttons and
+   `05-ui-ux.md` §7's `Ctrl/Cmd+]` / `Ctrl/Cmd+[`. Inside a list item the
+   commands dispatch to sink/lift, so lists nest structurally and a nested
+   ordered list restarts at 1; a cursor inside a quote indents the whole quote,
+   not the inner paragraph. Levels run 0–7 in 24 px steps, matching the list
+   padding, and clamp at both ends. Pasted `margin-left` is not preserved:
+   §4.1 rule 2 strips presentational attributes, so external indent arrives
+   flat while lists keep their structure.
 - **`EditorShortcuts`** is this project's own extension, carrying the
    editor-local bindings from `05-ui-ux.md` §7 that need editor commands rather
    than a raw view: the four marks, `Ctrl/Cmd+Enter` for a task item, `Tab` /

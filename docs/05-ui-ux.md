@@ -237,6 +237,8 @@ Every icon used in v1, and nothing else. Adding an icon to the UI means adding i
 | `list` | Formatting toolbar: bullet list |
 | `list-ordered` | Formatting toolbar: ordered list |
 | `list-todo` | Formatting toolbar: task list |
+| `indent-increase` | Formatting toolbar: increase indent (nests lists, indents prose and quotes) |
+| `indent-decrease` | Formatting toolbar: decrease indent (unnests lists, outdents prose and quotes) |
 | `quote` | Formatting toolbar: blockquote |
 | `square-code` | Formatting toolbar: code block |
 | `separator-horizontal` | Formatting toolbar: horizontal rule |
@@ -265,7 +267,7 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 | `NoteCard` | Title, excerpt, timestamp, pinned indicator. Optional folder name when the selection is All or Pinned. Every card carries its own border and surface with an 8 px gap, so adjacent notes read as separate cards; the open card's border is the accent. |
 | `EditorOverflowMenu` | Mobile three-dots menu: pin and trash for the open note. |
 | `EditorPane` | Owns the TipTap instance, autosave state machine, status bar. |
-| `FormattingToolbar` | Static formatting row above the editor content (desktop and mobile): the four marks, H1–H3, bullet / ordered / task lists, blockquote, code block, horizontal rule, undo / redo. Horizontally scrollable; 32 px targets on desktop, 44 px on Android. No paragraph button: pressing an active block button toggles it back to a paragraph, so a dedicated control would duplicate every one of them. |
+| `FormattingToolbar` | Static formatting row above the editor content (desktop and mobile): the four marks, H1–H3, bullet / ordered / task lists, increase / decrease indent, blockquote, code block, horizontal rule, undo / redo. Horizontally scrollable; 32 px targets on desktop, 44 px on Android. No paragraph button: pressing an active block button toggles it back to a paragraph, so a dedicated control would duplicate every one of them. The indent buttons are context-sensitive: inside a list they nest / unnest (a nested ordered list restarts at 1), elsewhere they indent / outdent the paragraph, heading, or whole blockquote in 24 px steps up to 7 levels (`04-editor.md` §1.2). |
 | `EditorStatusBar` | Folder, tags, word count, save state (`04-editor.md` §9). |
 | `StatusPopovers` | One listbox component behind both popovers: `TagEditor` for adding and removing tags, `FolderPicker` for changing a note's folder. |
 | `ConfirmDialog` | Destructive confirmation only. Used by permanent delete and empty trash. Never for save or navigation. |
@@ -500,10 +502,11 @@ Settings live in the Tauri store, never in the notes database, so resetting or s
 | Toggle task complete | `Ctrl/Cmd+Enter` |
 | Undo / redo | `Ctrl/Cmd+Z` · `Ctrl/Cmd+Shift+Z` |
 | Bold / italic / strike / code | `Ctrl/Cmd+B` · `I` · `Shift+X` · `E` |
+| Increase / decrease indent | `Ctrl/Cmd+]` · `Ctrl/Cmd+[` |
 | Move focus: sidebar → editor | `Ctrl/Cmd+Enter` (from the list) |
 | Dismiss: search, dialog, sidebar | `Esc` |
 
-Inside the editor, `Tab` inserts two spaces inside `codeBlock` and indents list items; `Shift+Tab` outdents; `Tab` in a paragraph inserts two spaces, which keeps focus inside the editor and never cycles focus rings. Escape is deliberately unbound in the editor. Standard text navigation keys are untouched, including `Ctrl/Cmd+A`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`, `Ctrl/Cmd+X`.
+Inside the editor, `Tab` inserts two spaces inside `codeBlock` and indents list items; `Shift+Tab` outdents; `Tab` in a paragraph inserts two spaces, which keeps focus inside the editor and never cycles focus rings. Paragraph, heading and blockquote indent is on the toolbar's increase / decrease buttons and on `Ctrl/Cmd+]` / `Ctrl/Cmd+[` — `Tab` deliberately stays as spaces so prose editing never changes a block's indent by accident. Escape is deliberately unbound in the editor. Standard text navigation keys are untouched, including `Ctrl/Cmd+A`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`, `Ctrl/Cmd+X`.
 
 **Strike is `Ctrl/Cmd+Shift+X`, not `Ctrl/Cmd+S`.** An earlier revision of this
 table assigned `Ctrl/Cmd+S` to both *Save now* and *strike*. Save now wins: it is
@@ -514,7 +517,8 @@ Google Docs uses for the same mark, so the muscle memory is the same.
 The four mark shortcuts need editor commands rather than raw keystrokes, so they
 live in the `EditorShortcuts` extension in `src/editor/extensions.ts` and not in
 `editorProps` (`04-editor.md` §2.1). TipTap 3 ships no default keymap for bold,
-italic, or strike, so all four are bound explicitly.
+italic, or strike, so all four are bound explicitly. The indent shortcuts live
+in the `Indent` extension in `src/editor/indent.ts` for the same reason.
 
 On Android, external keyboards should work. The software keyboard shows a `done` action that closes it rather than a newline, since the editor's block behaviour makes a return key less useful than on desktop.
 
