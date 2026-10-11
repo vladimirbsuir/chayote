@@ -244,7 +244,7 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 | Component | Responsibility |
 |-----------|----------------|
 | `TopBar` | Search field, new note, theme toggle, overflow menu. Present on desktop; variant `Mobile` on the Android list carries a settings gear, the app name and a new-note button, with the search field below the bar. |
-| `Sidebar` | Filters, tag rows with counts, `NoteList`. The tag list renders here; there is no `TagList.tsx`. Owns selection state. |
+| `Sidebar` | Filters, tag rows with counts and menus, `NoteList`. The tag list renders here; there is no `TagList.tsx`. Owns selection state. |
 | `FolderTree`, `folderRows.ts` | Recursive tree. Keyboard navigable. Drag to re-parent and reorder. |
 | `NoteList` | Virtualised list. Renders `NoteSummary`, never loads full documents. |
 | `NoteCard` | Title, excerpt, timestamp, pinned indicator. Optional folder name when the selection is All or Pinned. Every card carries its own border and surface with an 8 px gap, so adjacent notes read as separate cards; the open card's border is the accent. |
@@ -349,7 +349,9 @@ There is no cap on pinned notes. If a user pins 50 notes, the ordering stops bei
 
 ### 6.4 Tags
 
-A tag is created by typing a new name into the tag editor; existing names complete. There is currently no add control in the sidebar's Tags section. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; the tag stays in the sidebar with a zero count until it is deleted outright (`03-data-model.md` §5, ADR-021).
+A tag is created from the sidebar's `+` — an inline input like the folder one, committed with `Enter` — or by typing a new name into the tag editor; existing names complete. Case-insensitive match, normalised to the first-created spelling. Removing a tag from a note never deletes the tag itself; the tag stays in the sidebar with a zero count until it is deleted outright (`03-data-model.md` §5, ADR-021).
+
+**Tag actions live in a per-row overflow menu**, like the folder rows': the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch. Its items are **Rename** and **Delete**, text rather than icons for the inventory's reason. Renaming is the same inline input as creating; deleting confirms with the note count and detaches the tag from every note carrying it while the notes themselves survive, returning the selection to All.
 
 **The editor and the picker are one visual language.** Both are portalled popovers anchored to their status-bar slot, and both are listboxes. They are the same component with different options, because a tag editor that looked different from the folder picker would be two visual languages for "choose a value" in a 28 px row. The picker is portalled rather than rendered in place because the status bar sits at the bottom of a `flex` column with its own stacking contexts: in place, the popover would be clipped by the editor pane and could not be raised above it. Its position is measured in the click handler rather than in an effect — the geometry is in hand at the click, and an effect that reads the DOM and then sets state is a second render for a value already known.
 

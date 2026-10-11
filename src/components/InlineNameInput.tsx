@@ -21,9 +21,12 @@ type InlineNameInputProps = {
   value: string;
   placeholder: string;
   /** `VALIDATION` from the backend, or null. Shown without stealing focus, so the
-      user can keep editing rather than restart (§8, "Keep editing"). */
+     user can keep editing rather than restart (§8, "Keep editing"). */
   error?: string | null;
   label: string;
+  /** The input's test id. Defaults to the folder one, which is what every
+     existing caller — and its tests — uses. */
+  testId?: string;
   onChange: (value: string) => void;
   onCommit: () => void;
   onCancel: () => void;
@@ -34,6 +37,7 @@ export function InlineNameInput({
   placeholder,
   error = null,
   label,
+  testId = 'folder-name-input',
   onChange,
   onCommit,
   onCancel,
@@ -68,7 +72,7 @@ export function InlineNameInput({
         ref={inputRef}
         type="text"
         aria-label={label}
-        data-testid="folder-name-input"
+        data-testid={testId}
         placeholder={placeholder}
         value={value}
         aria-invalid={error !== null}
