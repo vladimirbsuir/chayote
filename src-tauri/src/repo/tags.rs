@@ -56,8 +56,9 @@ impl SqliteTagsRepo {
 }
 
 impl TagsRepo for SqliteTagsRepo {
-    /// `03-data-model.md` §5. `HAVING count > 0` hides tags whose notes are
-    /// all in the trash: an empty filter in the sidebar is noise.
+    /// `03-data-model.md` §5. Tags stay listed at a zero count so they can be
+    /// created before any note carries them (ADR-021); counts still exclude
+    /// trashed notes.
     fn list(&self) -> Result<Vec<TagWithCount>, AppError> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare(
@@ -67,7 +68,6 @@ impl TagsRepo for SqliteTagsRepo {
                    LEFT JOIN notes n ON n.id = nt.note_id AND n.deleted_at IS NULL
                   WHERE t.deleted_at IS NULL
                   GROUP BY t.id, t.name
-                 HAVING count > 0
                ORDER BY t.name COLLATE NOCASE",
             )?;
             let rows = stmt

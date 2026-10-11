@@ -1044,7 +1044,7 @@ fn tag_names_are_case_insensitive_and_normalised_to_the_first_spelling() {
 }
 
 #[test]
-fn tag_counts_exclude_notes_in_the_trash_and_hide_empty_tags() {
+fn tag_counts_exclude_notes_in_the_trash_and_show_empty_tags() {
     let f = fixture("tags-count");
     let repo = notes(&f.db);
     let tags = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&f.db));
@@ -1065,20 +1065,26 @@ fn tag_counts_exclude_notes_in_the_trash_and_hide_empty_tags() {
         .expect("tag the note");
     }
 
+    /* ADR-021: a tag with no live notes stays listed at a zero count, so tags
+       can be created before any note carries them. Ordered by name. */
     let listed = tags.list().expect("list");
-    assert_eq!(listed.len(), 1, "a tag with no live notes is hidden");
-    assert_eq!(listed[0].id, work.id);
-    assert_eq!(listed[0].count, 2);
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].id, lonely.id);
+    assert_eq!(listed[0].count, 0);
+    assert_eq!(listed[1].id, work.id);
+    assert_eq!(listed[1].count, 2);
 
     repo.soft_delete(&drop_one.summary.id).expect("soft delete");
     let after = tags.list().expect("list");
-    assert_eq!(after[0].count, 1, "trashed note does not count");
+    assert_eq!(after.len(), 2);
+    assert_eq!(after[1].count, 1, "trashed note does not count");
 
-    // Removing the tag itself takes it out of the sidebar.
+    // Removing the tag itself takes it out of the sidebar; the unused one stays.
     tags.delete(&work.id).expect("delete tag");
-    assert!(tags.list().expect("list").is_empty());
+    let remaining = tags.list().expect("list");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, lonely.id);
     assert!(repo.get(&keep.summary.id).is_ok(), "the note survives");
-    let _ = lonely;
 }
 
 #[test]
@@ -1110,11 +1116,11 @@ fn removing_a_tag_from_a_note_leaves_the_tag_alone() {
 
     let reloaded = repo.get(&note.summary.id).expect("note");
     assert!(reloaded.summary.tags.is_empty(), "detached from the note");
-    assert_eq!(
-        tags.list().expect("list").len(),
-        0,
-        "the tag itself survives"
-    );
+    /* ADR-021: detaching the last note leaves a visible zero-count tag rather
+       than hiding the row — the tag itself survives either way. */
+    let listed = tags.list().expect("list");
+    assert_eq!(listed.len(), 1, "the tag itself survives");
+    assert_eq!(listed[0].count, 0);
 }
 
 #[test]

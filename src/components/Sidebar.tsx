@@ -225,10 +225,7 @@ export function Sidebar({
       </section>
 
       <section aria-label="Tags" className="min-h-0 overflow-hidden">
-        {/* No add control here: a tag with no notes is invisible by the
-            `tags_list` count rule (`03-data-model.md` §5), so creating one from
-            this section would appear to do nothing. Tags are created by typing
-            a new name into a note's tag editor (§6.4). */}
+        {/* Tags are created by typing a new name into a note's tag editor (§6.4). */}
         <SectionHead
           icon={<Hash className="icon i-16" aria-hidden="true" />}
           label="Tags"
