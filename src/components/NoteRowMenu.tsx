@@ -123,7 +123,9 @@ export function NoteRowMenu({
         itemRefs.current[next]?.focus();
       }}
       style={{ top: placement.top, left: placement.left }}
-      className="fixed z-50 min-w-[168px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-pop)]"
+      /* Menu labels are chrome, not content: a hold on an item must press it,
+         never select its text. */
+      className="fixed z-50 min-w-[168px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-pop)] select-none"
     >
       {items.map((item, index) => (
         <button
@@ -194,7 +196,10 @@ function buildItems(
       action: 'delete',
       label: 'Move to trash',
       icon: Trash,
-      danger: false,
+      /* Destructive like every other delete in the app's menus — the editor's
+         overflow menu already paints this same verb red, and a trash move in
+         default text reads as harmless housekeeping rather than deletion. */
+      danger: true,
       run: onDelete,
     });
   }
