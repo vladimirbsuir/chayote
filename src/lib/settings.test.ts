@@ -21,6 +21,7 @@ describe('settings store', () => {
     // ADR-014: first launch creates no folders, so the default folder is none.
     expect(DEFAULT_SETTINGS.defaultFolderId).toBeNull();
     expect(DEFAULT_SETTINGS.collapsedFolders).toEqual([]);
+    expect(DEFAULT_SETTINGS.sectionsCollapsed).toEqual({ folders: false, tags: false });
     expect(DEFAULT_SETTINGS.lastNoteId).toBeNull();
   });
 

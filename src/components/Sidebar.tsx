@@ -1,6 +1,18 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { FilePlus, Folder, Hash, Inbox, Pin, Plus, Search, Trash, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  FilePlus,
+  Folder,
+  Hash,
+  Inbox,
+  Pin,
+  Plus,
+  Search,
+  Trash,
+  X,
+} from 'lucide-react';
 import type { NoteRow, Selection } from '../types/ipc';
 import type { FolderNode } from '../types/folder';
 import type { TagWithCount } from '../types/tag';
@@ -51,6 +63,13 @@ type SidebarProps = {
   folderNames: Map<string, string>;
   folderCounts: Map<string, number>;
   collapsedFolders: Uuid[];
+  /** Whether the whole Folders / Tags list is collapsed. Optional so callers
+      that do not persist section state — tests — still get a working toggle
+      from the uncontrolled fallback below. */
+  foldersCollapsed?: boolean;
+  tagsCollapsed?: boolean;
+  onToggleFoldersCollapsed?: () => void;
+  onToggleTagsCollapsed?: () => void;
   openNoteId: Uuid | null;
   /** True when the database holds no live notes at all, which is a different
       empty state from a selection that happens to be empty (§8). */
@@ -97,6 +116,8 @@ export function Sidebar({
   folderNames,
   folderCounts,
   collapsedFolders,
+  foldersCollapsed: foldersCollapsedProp,
+  tagsCollapsed: tagsCollapsedProp,
   openNoteId,
   firstLaunch,
   onSelect,
@@ -114,6 +135,8 @@ export function Sidebar({
   onDeleteFolder,
   onMoveFolder,
   onFolderError,
+  onToggleFoldersCollapsed: onToggleFoldersCollapsedProp,
+  onToggleTagsCollapsed: onToggleTagsCollapsedProp,
 }: SidebarProps) {
   const header = useMemo(
     () => headerFor(selection, notes ?? EMPTY_NOTES, folderNames, search),
@@ -125,6 +148,24 @@ export function Sidebar({
      itself is rendered by `FolderTree` — the two halves of one control, each owned
      by the component that actually draws it. */
   const [creatingRoot, setCreatingRoot] = useState(false);
+
+  /* The uncontrolled fallback for the section toggles below: the app passes the
+     persisted values and their toggles, and anything that does not — tests —
+     gets local state instead, so the headers are collapsible either way. */
+  const [foldersLocal, setFoldersLocal] = useState(false);
+  const [tagsLocal, setTagsLocal] = useState(false);
+  const foldersIsCollapsed = foldersCollapsedProp ?? foldersLocal;
+  const tagsIsCollapsed = tagsCollapsedProp ?? tagsLocal;
+  const toggleFoldersCollapsed =
+    onToggleFoldersCollapsedProp ??
+    (() => {
+      setFoldersLocal((open) => !open);
+    });
+  const toggleTagsCollapsed =
+    onToggleTagsCollapsedProp ??
+    (() => {
+      setTagsLocal((open) => !open);
+    });
 
   const scoped = selection.kind === 'folder' || selection.kind === 'tag';
 
@@ -151,26 +192,36 @@ export function Sidebar({
           singular="folder"
           /* §6.3: creating a folder is an inline input, not a dialog. `+` opens
              it and `Enter` commits, which is why this is a request rather than a
-             write — the input has to exist before there is anything to write. */
+             write — the input has to exist before there is anything to write.
+             From a collapsed section it expands first, so the input it opens is
+             actually on screen. */
           onAdd={() => {
+            if (foldersIsCollapsed) toggleFoldersCollapsed();
             setCreatingRoot((open) => !open);
           }}
+          collapsed={foldersIsCollapsed}
+          onToggleCollapsed={toggleFoldersCollapsed}
+          controlsId="sidebar-folders"
         />
-        <FolderTree
-          nodes={folders}
-          counts={folderCounts}
-          selection={selection}
-          collapsed={collapsedFolders}
-          onSelect={onSelect}
-          onToggle={onToggleFolder}
-          onCreate={onCreateFolder}
-          onRename={onRenameFolder}
-          onDelete={onDeleteFolder}
-          onMove={onMoveFolder}
-          onError={onFolderError}
-          creatingRoot={creatingRoot}
-          onCreatingRootChange={setCreatingRoot}
-        />
+        {foldersIsCollapsed ? null : (
+          <div id="sidebar-folders">
+            <FolderTree
+              nodes={folders}
+              counts={folderCounts}
+              selection={selection}
+              collapsed={collapsedFolders}
+              onSelect={onSelect}
+              onToggle={onToggleFolder}
+              onCreate={onCreateFolder}
+              onRename={onRenameFolder}
+              onDelete={onDeleteFolder}
+              onMove={onMoveFolder}
+              onError={onFolderError}
+              creatingRoot={creatingRoot}
+              onCreatingRootChange={setCreatingRoot}
+            />
+          </div>
+        )}
       </section>
 
       <section aria-label="Tags" className="min-h-0 overflow-hidden">
@@ -182,8 +233,12 @@ export function Sidebar({
           icon={<Hash className="icon i-16" aria-hidden="true" />}
           label="Tags"
           singular="tag"
+          collapsed={tagsIsCollapsed}
+          onToggleCollapsed={toggleTagsCollapsed}
+          controlsId="sidebar-tags"
         />
-        <div className="max-h-[25vh] overflow-y-auto px-2 pb-[10px]">
+        {tagsIsCollapsed ? null : (
+          <div id="sidebar-tags" className="max-h-[25vh] overflow-y-auto px-2 pb-[10px]">
           {tags === undefined || tags.length === 0 ? (
             <p className="px-[6px] py-1 text-[13px] text-[var(--text-subtle)]">No tags yet</p>
           ) : (
@@ -217,7 +272,8 @@ export function Sidebar({
               );
             })
           )}
-        </div>
+          </div>
+        )}
       </section>
 
       {/* `select-none`: on touch a hold anywhere near the rows must reach the
@@ -366,6 +422,9 @@ function SectionHead({
   label,
   singular,
   onAdd,
+  collapsed,
+  onToggleCollapsed,
+  controlsId,
 }: {
   icon: ReactNode;
   label: string;
@@ -373,10 +432,42 @@ function SectionHead({
   /** Absent where there is nothing to add in place — the Tags section, where a
       fresh tag would be invisible until a note carries it. */
   onAdd?: () => void;
+  /** Whether the whole section's list is collapsed. With the toggle below this
+      hides many top-level folders or tags at once; the per-folder twisties
+      inside the tree are the finer control. */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+  /** The list the toggle controls, for `aria-controls`. */
+  controlsId?: string;
 }) {
+  const expanded = collapsed !== true;
   return (
     <div className="flex items-center gap-[6px] px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
-      <span className="flex text-[var(--text-subtle)]">{icon}</span>
+      {onToggleCollapsed === undefined ? (
+        <span className="flex text-[var(--text-subtle)]">{icon}</span>
+      ) : (
+        <>
+          <button
+            type="button"
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`}
+            aria-expanded={expanded}
+            aria-controls={controlsId}
+            data-testid={`section-toggle-${label.toLowerCase()}`}
+            onClick={onToggleCollapsed}
+            /* The twisty's reasoning applies here too: 16 px against §9's 44 px
+               touch bar, so the same invisible coarse-pointer hit slop roughly
+               doubles the target without moving any pixel. */
+            className="relative grid h-5 w-5 flex-none place-items-center rounded bg-transparent text-[var(--text-subtle)] transition-colors hover:bg-[var(--surface-sunken)] hover:text-[var(--text)] pointer-coarse:before:absolute pointer-coarse:before:-inset-2 pointer-coarse:before:content-['']"
+          >
+            {expanded ? (
+              <ChevronDown className="icon i-16" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="icon i-16" aria-hidden="true" />
+            )}
+          </button>
+          <span className="flex text-[var(--text-subtle)]">{icon}</span>
+        </>
+      )}
       {label}
       {onAdd === undefined ? null : (
         <button

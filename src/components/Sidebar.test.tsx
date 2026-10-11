@@ -185,6 +185,78 @@ describe('Sidebar', () => {
     expect(container.querySelectorAll('[data-testid="folder-row"]')).toHaveLength(1);
   });
 
+  it('collapses the whole Folders list from its header, keeping the header and the notes', () => {
+    /* The twisty hides one branch; the section toggle hides the high-level list
+       itself, which is what a long top-level list needs. */
+    renderSidebar();
+
+    expect(screen.getByRole('tree', { name: /folder/i })).toBeDefined();
+    fireEvent.click(screen.getByTestId('section-toggle-folders'));
+
+    expect(screen.queryByRole('tree', { name: /folder/i })).toBeNull();
+    expect(screen.getByTestId('section-toggle-folders')).toBeDefined();
+    expect(screen.getByTestId('note-list')).toBeDefined();
+    expect(screen.getAllByTestId('tag-row')).toHaveLength(1);
+  });
+
+  it('collapses the whole Tags list from its header', () => {
+    renderSidebar();
+
+    expect(screen.getAllByTestId('tag-row')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('section-toggle-tags'));
+
+    expect(screen.queryByTestId('tag-row')).toBeNull();
+    expect(screen.getByTestId('section-toggle-tags')).toBeDefined();
+    expect(screen.getByTestId('note-list')).toBeDefined();
+  });
+
+  it('expands a collapsed section on a second press', () => {
+    renderSidebar();
+
+    const toggle = screen.getByTestId('section-toggle-folders');
+    fireEvent.click(toggle);
+    expect(screen.queryByRole('tree', { name: /folder/i })).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('tree', { name: /folder/i })).toBeDefined();
+  });
+
+  it('announces the section toggle state for assistive technology', () => {
+    renderSidebar();
+
+    const toggle = screen.getByTestId('section-toggle-folders');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-controls')).toBe('sidebar-folders');
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('honours controlled section props and reports the toggle', () => {
+    let toggled = 0;
+    renderSidebar({
+      foldersCollapsed: true,
+      onToggleFoldersCollapsed: () => {
+        toggled += 1;
+      },
+    });
+
+    expect(screen.queryByRole('tree', { name: /folder/i })).toBeNull();
+    fireEvent.click(screen.getByTestId('section-toggle-folders'));
+    expect(toggled).toBe(1);
+  });
+
+  it('expands a collapsed Folders section when a folder is added from its header', () => {
+    /* `+` opens an input inside the tree, so from a collapsed section it expands
+       first — otherwise it would open an input nobody can see. */
+    renderSidebar();
+
+    fireEvent.click(screen.getByTestId('section-toggle-folders'));
+    expect(screen.queryByRole('tree', { name: /folder/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New folder' }));
+    expect(screen.getByRole('tree', { name: /folder/i })).toBeDefined();
+  });
+
   it('marks the active filter tab for assistive technology', () => {
     renderSidebar({ selection: { kind: 'pinned' } });
     expect(screen.getByTestId('filter-pinned').getAttribute('aria-selected')).toBe('true');

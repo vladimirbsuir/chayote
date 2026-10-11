@@ -17,6 +17,14 @@ export type AccentChoice =
 
 export type AccentPreset = 1 | 2 | 3 | 4 | 5 | 6;
 
+/** Which of the sidebar's structure sections are collapsed as a whole. This is
+    the high-level list, not the per-folder twisty state in `collapsedFolders`:
+    with many top-level folders or tags the tree itself is the thing to hide. */
+export type SectionCollapse = {
+  folders: boolean;
+  tags: boolean;
+};
+
 export type Settings = {
   theme: Theme;
   accent: AccentChoice;
@@ -27,6 +35,7 @@ export type Settings = {
       toggling back restores 320 px rather than the minimum. */
   sidebarCollapsed: boolean;
   collapsedFolders: Uuid[];
+  sectionsCollapsed: SectionCollapse;
   lastNoteId: Uuid | null;
   lastSelection: Selection;
 };
@@ -38,6 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarWidth: 320,
   sidebarCollapsed: false,
   collapsedFolders: [],
+  sectionsCollapsed: { folders: false, tags: false },
   lastNoteId: null,
   lastSelection: { kind: 'all' },
 };
