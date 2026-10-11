@@ -246,7 +246,7 @@ body {
 .tree { padding: 0 8px 10px; overflow-y: auto; }
 .tree-row {
   display: flex; align-items: center; gap: 6px;
-  height: 26px; padding: 0 6px;
+  height: 26px; padding: 0 6px 0 12px;
   border-radius: var(--r-input);
   color: var(--text);
   font-size: 13px;
@@ -254,7 +254,7 @@ body {
 }
 .tree-row:hover { background: var(--surface-sunken); }
 .tree-row.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
-.tree-row .twisty { width: 14px; display: flex; color: var(--text-subtle); }
+.tree-row .twisty { width: 20px; display: flex; color: var(--text-subtle); }
 .tree-row.active .twisty { color: var(--accent); }
 .tree-row .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-row .fcount { margin-left: auto; font-size: 11px; color: var(--text-subtle); }
@@ -262,10 +262,13 @@ body {
 .tags { padding: 0 8px 10px; overflow-y: auto; }
 .tag-row {
   display: flex; align-items: center; gap: 6px;
-  height: 26px; padding: 0 8px 0 6px;
+  height: 26px; padding: 0 8px 0 12px;
   border-radius: var(--r-input);
   font-size: 13px; cursor: pointer;
 }
+/* The header chevron's width as a spacer: the tag glyph hangs under the
+   section glyph the way a folder glyph hangs under its header's. */
+.tag-row::before { content: ""; width: 20px; flex: none; }
 .tag-row:hover { background: var(--surface-sunken); }
 .tag-row.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
 .tag-row .tcount { margin-left: auto; font-size: 11px; color: var(--text-subtle); }
@@ -671,12 +674,12 @@ body {
                   <svg class="icon i-16" aria-hidden="true" style="opacity:.7"><use href="#i-folder"/></svg>
                   <span class="fname">Work</span><span class="fcount">6</span>
                 </div>
-                <div class="tree-row" style="padding-left:22px">
+                <div class="tree-row" style="padding-left:28px">
                   <span class="twisty"></span>
                   <svg class="icon i-16" aria-hidden="true" style="opacity:.55"><use href="#i-folder"/></svg>
                   <span class="fname">Projects</span><span class="fcount">3</span>
                 </div>
-                <div class="tree-row" style="padding-left:22px">
+                <div class="tree-row" style="padding-left:28px">
                   <span class="twisty"></span>
                   <svg class="icon i-16" aria-hidden="true" style="opacity:.55"><use href="#i-folder"/></svg>
                   <span class="fname">Meetings</span><span class="fcount">3</span>
@@ -686,7 +689,7 @@ body {
                   <svg class="icon i-16" aria-hidden="true" style="opacity:.7"><use href="#i-folder"/></svg>
                   <span class="fname">Personal</span><span class="fcount">4</span>
                 </div>
-                <div class="tree-row" style="padding-left:22px">
+                <div class="tree-row" style="padding-left:28px">
                   <span class="twisty"></span>
                   <svg class="icon i-16" aria-hidden="true" style="opacity:.55"><use href="#i-folder"/></svg>
                   <span class="fname">Reading</span><span class="fcount">2</span>

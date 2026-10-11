@@ -259,13 +259,21 @@ export function Sidebar({
                       onSelect({ kind: 'tag', id: tag.id });
                     }
                   }}
-                  className={`flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] py-0 pl-[6px] pr-2 text-[13px] transition-colors ${
+                  className={`flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] py-0 pr-2 pl-1 text-[13px] transition-colors ${
                     active
                       ? 'bg-[var(--accent-soft)] font-medium text-[var(--accent)]'
                       : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
                   }`}
                 >
-                  <Hash className="icon i-16 flex-none opacity-70" aria-hidden="true" />
+                  {/* The header chevron's width as a spacer, mirroring the folder
+                      rows: the tag glyph hangs under the section glyph the way a
+                      folder glyph hangs under its header's, at any root size. */}
+                  <span aria-hidden="true" className="w-5 flex-none" />
+                  <Hash
+                    data-testid="tag-icon"
+                    className="icon i-16 flex-none opacity-70"
+                    aria-hidden="true"
+                  />
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap">{tag.name}</span>
                   <span className="ml-auto pl-1 text-[11px] text-[var(--text-subtle)]">{tag.count}</span>
                 </div>
@@ -444,7 +452,9 @@ function SectionHead({
   return (
     <div className="flex items-center gap-[6px] px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
       {onToggleCollapsed === undefined ? (
-        <span className="flex text-[var(--text-subtle)]">{icon}</span>
+        <span data-testid={`section-icon-${label.toLowerCase()}`} className="flex text-[var(--text-subtle)]">
+          {icon}
+        </span>
       ) : (
         <>
           <button
@@ -465,7 +475,12 @@ function SectionHead({
               <ChevronRight className="icon i-16" aria-hidden="true" />
             )}
           </button>
-          <span className="flex text-[var(--text-subtle)]">{icon}</span>
+          <span
+            data-testid={`section-icon-${label.toLowerCase()}`}
+            className="flex text-[var(--text-subtle)]"
+          >
+            {icon}
+          </span>
         </>
       )}
       {label}

@@ -559,7 +559,14 @@ function FolderRows({
                  keyboard route to a specific position is a documented gap
                  (`05-ui-ux.md` §6.3) rather than a fake ARIA attribute, and touch
                  re-parenting waits on the same v1.1 "move to…" item. */
-              style={{ paddingLeft: 6 + depth * 16 }}
+              /* The row hangs under its section header: the twisty sits where the
+                 header's chevron sits and the glyph where the header's glyph
+                 sits, at any root size. The header's side is rem-based (`px-3`
+                 plus a `w-5` chevron), so a pixel indent cannot meet it once the
+                 font scales — the base indent is rem with only the per-level
+                 nesting kept in pixels, which is the offset §6.3 promises to
+                 keep. */
+              style={{ paddingLeft: `calc(0.25rem + ${depth * 16}px)` }}
               /* `draggable` only while nothing else is going on. A row being renamed
                  is an input, and dragging a menu open over the tree would otherwise
                  start a drag from whatever is underneath it. Never on a coarse
@@ -647,7 +654,7 @@ function FolderRows({
                     break;
                 }
               }}
-              className={`group relative flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] px-[6px] text-[13px] transition-colors ${
+              className={`group relative flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] pr-[6px] text-[13px] transition-colors ${
                 isDragged
                   ? 'opacity-40'
                   : active
@@ -680,12 +687,16 @@ function FolderRows({
                   className="pointer-events-none absolute inset-0 rounded-[var(--r-input)] bg-[var(--accent-soft)]"
                 />
               ) : null}
-              <span className="flex w-[14px] flex-none">
+              {/* The twisty slot is the header chevron's width (`w-5` either way),
+                  so the two arrows share a column and the glyphs below share
+                  theirs — the column contract in the row's `paddingLeft`. */}
+              <span className="flex w-5 flex-none">
                 {hasChildren ? (
                   <button
                     type="button"
                     tabIndex={-1}
                     aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.name}`}
+                    data-testid="folder-twisty"
                     onClick={(event) => {
                       event.stopPropagation();
                       onToggle(node.id);
@@ -709,7 +720,11 @@ function FolderRows({
                   </button>
                 ) : null}
               </span>
-              <Folder className="icon i-16 flex-none opacity-70" aria-hidden="true" />
+              <Folder
+                data-testid="folder-icon"
+                className="icon i-16 flex-none opacity-70"
+                aria-hidden="true"
+              />
               <span className="overflow-hidden text-ellipsis whitespace-nowrap">{node.name}</span>
               {count > 0 ? (
                 <span className="ml-auto pl-1 text-[11px] text-[var(--text-subtle)]">{count}</span>

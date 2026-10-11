@@ -276,6 +276,31 @@ test.describe('sidebar sections', () => {
     await expect(page.getByTestId('note-card').first()).toBeVisible();
   });
 
+  test('lines top-level rows up under their section headers', async ({ page }) => {
+    /* The twisty shares the header chevron's column and each glyph shares its
+       header glyph's column — measured, not asserted from class names, since a
+       few pixels of drift are invisible to every DOM assertion and are exactly
+       what a scaled root font produces. One pixel of tolerance absorbs
+       sub-pixel rounding, not a real offset. */
+    await open(page);
+
+    const leftOf = async (testId: string): Promise<number> => {
+      const box = await page.getByTestId(testId).first().boundingBox();
+      expect(box, `${testId} has no box`).not.toBeNull();
+      return Math.round(box?.x ?? -1);
+    };
+
+    expect(Math.abs((await leftOf('folder-twisty')) - (await leftOf('section-toggle-folders')))).toBeLessThanOrEqual(
+      1,
+    );
+    expect(Math.abs((await leftOf('folder-icon')) - (await leftOf('section-icon-folders')))).toBeLessThanOrEqual(
+      1,
+    );
+    expect(Math.abs((await leftOf('tag-icon')) - (await leftOf('section-icon-tags')))).toBeLessThanOrEqual(
+      1,
+    );
+  });
+
   test('keeps a collapsed section collapsed across a reload', async ({ page }) => {
     await open(page);
 
