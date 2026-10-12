@@ -148,7 +148,7 @@ function parse(raw: string | null): Partial<Settings> {
 /// The same pairs are in `styles/tokens.css`; the contrast test is what keeps the
 /// two copies honest.
 export const ACCENT_PRESETS: ReadonlyArray<{ name: string; light: string; dark: string }> = [
-  { name: 'Default', light: '#2769ec', dark: '#4881ef' },
+  { name: 'Blue', light: '#2769ec', dark: '#4881ef' },
   { name: 'Green', light: '#1f7a4d', dark: '#26975f' },
   { name: 'Violet', light: '#814ef5', dark: '#9469f7' },
   { name: 'Rust', light: '#c2410c', dark: '#ea4f0e' },

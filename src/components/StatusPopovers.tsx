@@ -9,7 +9,7 @@ import type { Uuid } from '../types/note';
 /* The "no folder" choice, worded once: it labels the picker's first option and
    the settings dialog's button for the same value, so the two can never read
    as two different meanings. */
-export const NONE_LABEL = 'None — notes start unfiled';
+export const NONE_LABEL = 'None';
 
 
 type PopoverProps = {

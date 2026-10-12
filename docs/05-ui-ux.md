@@ -461,7 +461,7 @@ A modal dialog with:
 | Setting | Control | Default |
 |---------|---------|---------|
 | Theme | Segmented: Light / Dark / System | System |
-| Accent colour | **Six preset swatches plus a custom colour input** | Each theme's own preset 1 |
+| Accent colour | **Six preset swatches plus a custom colour editor behind the palette swatch** | Each theme's own preset 1 |
 | Default folder for new notes | Folder picker, "None" allowed | None — everything starts unfiled |
 | Reset settings | Destructive button with confirmation | — |
 
@@ -471,16 +471,16 @@ A modal dialog with:
 
 | Preset | Light | Dark |
 |--------|-------|------|
-| Default | `#2769ec` | `#4881ef` |
+| Blue | `#2769ec` | `#4881ef` |
 | Green | `#1f7a4d` | `#26975f` |
 | Violet | `#814ef5` | `#9469f7` |
 | Rust | `#c2410c` | `#ea4f0e` |
 | Magenta | `#b91c5c` | `#e44a88` |
 | Teal | `#0f766e` | `#13948a` |
 
-Each value is its hue at the lightness that clears **4.5:1 against its own theme's `--surface-raised`**, held in HSL so the hue and saturation are the preset's and only the lightness moves. Four of the six light values are the reviewed palette unchanged; Default and Violet are the two that did not hold. `src/styles/tokens.test.ts` asserts the ratio over both token tables, which is what makes the claim above true rather than aspirational.
+Each value is its hue at the lightness that clears **4.5:1 against its own theme's `--surface-raised`**, held in HSL so the hue and saturation are the preset's and only the lightness moves. Four of the six light values are the reviewed palette unchanged; Blue and Violet are the two that did not hold. `src/styles/tokens.test.ts` asserts the ratio over both token tables, which is what makes the claim above true rather than aspirational.
 
-**A custom accent is used verbatim, in both themes.** It cannot be a curated pair, and deriving one at runtime was rejected: it puts colour maths and a second rendering of the same colour in the app, for a control that is by definition off the preset list. The custom input therefore shows the colour's contrast against the current theme's surfaces and warns when it is below 4.5:1, so the consequence is visible at the moment of choosing it rather than afterwards. This is the one place the accent can fail the contrast bar, and it is the user's own colour doing it.
+**A custom accent is used verbatim, in both themes.** It cannot be a curated pair, and deriving one at runtime was rejected: it puts colour maths and a second rendering of the same colour in the app, for a control that is by definition off the preset list. A custom colour shows no readout and no contrast warning. This is the one place the accent can fail the contrast bar, and it is the user's own colour doing it.
 
 Reached from the top-bar overflow menu on desktop and tablet, and from the gear on the mobile list bar (§2.4) — every breakpoint has a path to it, which mobile lacked until the dead hamburger became the gear.
 

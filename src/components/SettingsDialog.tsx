@@ -4,7 +4,6 @@ import { ThemeToggle } from './ThemeToggle';
 import { useDialogFocus } from './useDialogFocus';
 import { flattenFolders, popoverPlacement } from './popoverPlacement';
 import { FolderPicker, NONE_LABEL } from './StatusPopovers';
-import { contrastBetween } from '../lib/contrast';
 import { hexToHsl, hslToHex, normalizeHexInput } from '../lib/color';
 import { ACCENT_PRESETS, presetValue } from '../lib/settings';
 import type { AccentChoice, Theme } from '../lib/settings';
@@ -18,10 +17,9 @@ import type { Uuid } from '../types/note';
    Two things here are decisions rather than transcriptions of the prototype.
 
    **The accent readout.** ADR-019 resolves a preset through the cascade but takes
-   a custom colour verbatim, in both themes, and a custom colour is the one thing
-   that can fall under 4.5:1. Showing the measured ratio here means the user finds
-   that out while choosing the colour, instead of discovering it on an active row
-   afterwards. It is the only place in the app that computes a ratio.
+   a custom colour verbatim, in both themes. The readout names the preset in use
+   so the swatch ring is not carrying the meaning alone; a custom colour shows
+   no readout at all.
 
      **The default folder uses the shared `FolderPicker`, not a native select.**
      An earlier revision used a native `<select>` here on the grounds that a form
@@ -78,6 +76,10 @@ export function SettingsDialog({
   const [draft, setDraft] = useState<string>(() =>
     accent !== null && accent.kind === 'custom' ? accent.hex : '#2f6fed',
   );
+  /* The custom editor opens from the palette swatch alone: with six presets on
+     show, an always-visible panel of sliders is clutter for anyone who never
+     picks a colour of their own. */
+  const [customOpen, setCustomOpen] = useState(accent !== null && accent.kind === 'custom');
   const [confirming, setConfirming] = useState(false);
   /* The folder picker portals to the body, outside the panel's DOM. The trap
      and the Esc handling only apply to keys from inside the panel — otherwise
@@ -103,30 +105,18 @@ export function SettingsDialog({
     return options.find((option) => option.id === defaultFolderId)?.name ?? null;
   }, [options, defaultFolderId]);
 
-  /* The custom colour's ratio against the surface it would sit on. `effective`
-     picks the pair, because the whole point is that one hex is measured against
-     the theme actually in use. */
-  const customRatio = useMemo(() => {
-    const surface = effective === 'dark' ? '#1d1d20' : '#f7f7f8';
-    return contrastBetween(custom, surface);
-  }, [custom, effective]);
-
-  /* One string rather than a conditional in the markup: a half-typed hex in the
-     colour input is not a colour, and the readout has to say something rather
-     than print `null` or leave the line blank. */
+  /* §10: colour is never the only signal. The ring on the swatch is the
+     selected state, and this says which preset is in use so the ring is not
+     carrying the meaning alone. A custom colour shows no readout at all. */
   const accentReadout = useMemo(() => {
     if (accent === null) {
       return `Default accent for the ${effective === 'dark' ? 'dark' : 'light'} theme`;
     }
-    const hex = accent.kind === 'custom' ? accent.hex : ACCENT_PRESETS[accent.index - 1]?.[effective === 'dark' ? 'dark' : 'light'];
+    if (accent.kind === 'custom') return '';
+    const hex = ACCENT_PRESETS[accent.index - 1]?.[effective === 'dark' ? 'dark' : 'light'];
     if (hex === undefined) return 'Accent';
-    if (accent.kind === 'preset') return `${ACCENT_PRESETS[accent.index - 1]?.name} — ${hex}`;
-    if (customRatio === null) return `Custom ${hex}`;
-    if (customRatio < 4.5) {
-      return `Custom ${hex} — ${customRatio.toFixed(1)}:1, below the 4.5:1 needed for text`;
-    }
-    return `Custom ${hex} — ${customRatio.toFixed(1)}:1`;
-  }, [accent, customRatio, effective]);
+    return `${ACCENT_PRESETS[accent.index - 1]?.name} — ${hex}`;
+  }, [accent, effective]);
 
   const customHsl = useMemo(
     () => hexToHsl(custom) ?? hexToHsl('#2f6fed') ?? { h: 222, s: 83, l: 59 },
@@ -219,6 +209,7 @@ export function SettingsDialog({
                   selected ? 0 : accent === null && index === 1 ? 0 : -1
                 }
                     onClick={() => {
+                      setCustomOpen(false);
                       onAccentChange({ kind: 'preset', index });
                     }}
                     style={{ background: value }}
@@ -242,6 +233,7 @@ export function SettingsDialog({
                 }
                 onClick={() => {
                   const next = normalizeHexInput(draft) ?? custom;
+                  setCustomOpen(true);
                   applyCustom(next);
                 }}
                 className={`grid h-7 w-7 place-items-center rounded-full bg-[var(--surface)] text-[var(--text-muted)] shadow-[inset_0_0_0_1px_var(--border-strong)] ${
@@ -254,6 +246,7 @@ export function SettingsDialog({
               </button>
             </div>
 
+            {customOpen ? (
             <div className="mt-3 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] p-3">
               <div className="flex items-center gap-2">
                 <span
@@ -360,13 +353,13 @@ export function SettingsDialog({
                 </label>
               </div>
             </div>
+            ) : null}
 
-            {/* §10: colour is never the only signal. The ring on the swatch is
-                the selected state, and this says which preset is in use so the
-                ring is not carrying the meaning alone. */}
+            {accent !== null && accent.kind === 'custom' ? null : (
             <p className="mt-2 text-[12px] text-[var(--text-subtle)]" aria-live="polite">
               {accentReadout}
             </p>
+            )}
           </div>
 
           <div>

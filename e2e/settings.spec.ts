@@ -122,15 +122,17 @@ test.describe('settings', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   });
 
-  test('a weak custom colour says so rather than failing silently', async ({ page }) => {
+  test('a custom colour shows no readout string at all', async ({ page }) => {
     await page.getByRole('button', { name: 'More' }).click();
     await page.getByTestId('topbar-overflow-settings').click();
     await expect(page.locator(DIALOG)).toBeVisible();
 
-    /* `#4a4a4a` clears 4.5:1 on light and fails on dark. The readout has to
-       change with the theme, or it is warning about nothing. */
+    /* The editor opens from the palette swatch alone, and a custom colour
+       carries no "Custom #hex" string — ratio included. */
+    await expect(page.locator('#settings-accent-custom')).toBeHidden();
+    await page.getByRole('radio', { name: 'Custom colour' }).click();
     await page.locator('#settings-accent-custom').fill('#4a4a4a');
-    await expect(page.locator(DIALOG)).toContainText('Custom #4a4a4a');
+    await expect(page.locator(DIALOG)).not.toContainText('Custom #');
     await expect(page.locator(DIALOG)).not.toContainText('below the 4.5:1');
   });
 
