@@ -542,6 +542,14 @@ body {
 .dialog .dtitle { font-size: 15px; font-weight: 600; }
 .dialog .settings { padding: 16px 20px; display: flex; flex-direction: column; gap: 18px; }
 .field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; }
+.field .pick {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font); font-size: 13px; color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  background: var(--surface); padding: 8px; cursor: pointer;
+}
+.field .pick .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field .pick .chev { color: var(--text-subtle); display: flex; }
 .swatches { display: flex; gap: 8px; align-items: center; }
 .swatch {
   width: 28px; height: 28px; border-radius: 50%;
@@ -878,12 +886,13 @@ body {
   <!-- ==================================================================== -->
   <div class="section">
     <h2>2 · Status bar editors — folder picker and tag editor</h2>
-    <div class="note">Both open upward from the status bar at the bottom of the editor pane, portalled so the pane's own stacking context cannot clip them. Both are listboxes: the folder picker over the tree flattened and indented by depth, the tag editor multi-select with a filter field that is also the input.</div>
+    <div class="note">Both open upward from the status bar at the bottom of the editor pane, portalled so the pane's own stacking context cannot clip them. Both are listboxes: the folder picker over the tree flattened and indented by depth, the tag editor multi-select with a filter field that is also the input. The folder picker carries the same filter field — filter only, folders are still created in the sidebar — and its "None" row sits at the same indent as a top-level folder, with no icon either way.</div>
     <div class="frames">
       <div class="frame">
         <div class="frame-label">folder picker · a note in Work</div>
         <div style="position:relative;height:360px">
           <div class="popover" style="left:24px;bottom:0">
+            <div class="pop-input"><svg class="icon i-16" aria-hidden="true"><use href="#i-search"/></svg>Filter folders…</div>
             <div class="pop-list">
               <div class="opt" role="option" aria-selected="false"><span style="width:24px"></span>None</div>
               <div class="opt" role="option" aria-selected="true"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg>Work<span class="tick"><svg class="icon i-16" aria-hidden="true"><use href="#i-check"/></svg></span></div>
@@ -1110,7 +1119,7 @@ body {
           </div>
           <div class="field">
             <label>Default folder for new notes</label>
-            <div style="font-size:13px;color:var(--text-subtle)">None — notes start unfiled</div>
+            <div class="pick"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg><span class="grow">None — notes start unfiled</span><span class="chev"><svg class="icon i-16" aria-hidden="true"><use href="#i-chevron-down"/></svg></span></div>
           </div>
         </div>
         <div class="dlg-btns">

@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Folder, Hash } from 'lucide-react';
+import { Check, Hash } from 'lucide-react';
 import { flattenFolders } from './popoverPlacement';
 import type { FolderNode } from '../types/folder';
 import type { TagWithCount } from '../types/tag';
 import type { Uuid } from '../types/note';
+
+/* The "no folder" choice, worded once: it labels the picker's first option and
+   the settings dialog's button for the same value, so the two can never read
+   as two different meanings. */
+export const NONE_LABEL = 'None — notes start unfiled';
 
 
 type PopoverProps = {
@@ -85,17 +90,47 @@ export function FolderPicker({
   onClose,
 }: FolderPickerProps): React.ReactElement {
   const options = useMemo(() => flattenFolders(folders), [folders]);
+  const [query, setQuery] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
+
+  /* Case-insensitive substring, like the tag editor's filter: a large library
+     is narrowed by typing rather than scrolled. The "None" choice filters by
+     its own label too, so an active filter never shows a stale first row. */
+  const needle = query.trim().toLowerCase();
+  const matches =
+    needle.length === 0
+      ? options
+      : options.filter((option) => option.name.toLowerCase().includes(needle));
+  const showNone = needle.length === 0 || NONE_LABEL.toLowerCase().includes(needle);
 
   return (
     <Popover anchor={anchor} placement={placement} label="Folder" onClose={onClose}>
+      <div className="border-b border-[var(--border)] p-2">
+        <input
+          type="text"
+          aria-label="Filter folders"
+          data-testid="folder-picker-filter"
+          placeholder="Filter folders…"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+          }}
+          /* Explicitly selectable: the popover root carries `select-none`, and
+             a field the user types in must keep its selection toolbar. */
+          className="h-[26px] w-full rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text)] outline-none select-text"
+        />
+      </div>
       <div
         ref={listRef}
         role="listbox"
         aria-label="Folder"
         data-testid="folder-picker-list"
         tabIndex={0}
-        className="max-h-[220px] overflow-y-auto p-1 outline-none"
+        /* Capped so the whole panel stays within the height `popoverPlacement`
+           assumes (280): label + filter + list must fit above the anchor with
+           room to spare, or the panel would cover the button that toggles it —
+           and then the list could only be dismissed by clicking elsewhere. */
+        className="max-h-[190px] overflow-y-auto p-1 outline-none"
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
@@ -109,24 +144,35 @@ export function FolderPicker({
           }
         }}
       >
-        <Option
-          id={null}
-          name="None — notes stay unfiled"
-          depth={0}
-          selected={current === null}
-          icon={<Folder className="icon i-16" aria-hidden="true" />}
-          onPick={onPick}
-        />
-        {options.map((option) => (
-          <Option
-            key={option.id}
-            id={option.id}
-            name={option.name}
-            depth={option.depth + 1}
-            selected={current === option.id}
-            onPick={onPick}
-          />
-        ))}
+        {matches.length === 0 && !showNone ? (
+          <p className="px-2 py-2 text-[12px] text-[var(--text-subtle)]">No matching folders</p>
+        ) : (
+          <>
+            {showNone ? (
+              <Option
+                id={null}
+                name={NONE_LABEL}
+                /* Depth one with no icon, exactly like a top-level folder: the
+                   old row carried a folder glyph none of the other rows has,
+                   which read as emphasis on the default rather than a choice
+                   among equals. */
+                depth={1}
+                selected={current === null}
+                onPick={onPick}
+              />
+            ) : null}
+            {matches.map((option) => (
+              <Option
+                key={option.id}
+                id={option.id}
+                name={option.name}
+                depth={option.depth + 1}
+                selected={current === option.id}
+                onPick={onPick}
+              />
+            ))}
+          </>
+        )}
       </div>
     </Popover>
   );
@@ -137,14 +183,12 @@ function Option({
   name,
   depth,
   selected,
-  icon,
   onPick,
 }: {
   id: Uuid | null;
   name: string;
   depth: number;
   selected: boolean;
-  icon?: React.ReactNode;
   onPick: (id: Uuid | null) => void;
 }): React.ReactElement {
   return (
@@ -172,7 +216,6 @@ function Option({
           : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
       }`}
     >
-      {icon ?? null}
       <span className="flex-1 truncate">{name}</span>
       {selected ? <Check className="icon i-16 flex-none" aria-hidden="true" /> : null}
     </div>

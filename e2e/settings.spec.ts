@@ -133,5 +133,69 @@ test.describe('settings', () => {
     await expect(page.locator(DIALOG)).toContainText('Custom #4a4a4a');
     await expect(page.locator(DIALOG)).not.toContainText('below the 4.5:1');
   });
+
+  test('the default folder uses the app picker, not the platform popup', async ({ page }) => {
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('topbar-overflow-settings').click();
+    await expect(page.locator(DIALOG)).toBeVisible();
+
+    /* The app's own listbox, portalled like the status-bar picker — not a
+       native select, which on Android opens the platform's radio-list popup. */
+    await page.getByRole('button', { name: 'Default folder for new notes' }).click();
+    const picker = page.getByTestId('folder-picker-list');
+    await expect(picker).toBeVisible();
+    await picker.getByRole('option', { name: 'Work', exact: true }).click();
+    await expect(picker).toBeHidden();
+    await expect(
+      page.getByRole('button', { name: 'Default folder for new notes' }),
+    ).toContainText('Work');
+
+    /* And the pick survives a relaunch: settings live in the store. */
+    await page.getByTestId('settings-done').click();
+    await page.reload();
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('topbar-overflow-settings').click();
+    await expect(
+      page.getByRole('button', { name: 'Default folder for new notes' }),
+    ).toContainText('Work');
+  });
+
+  test('Escape in the folder picker closes the picker, not the dialog', async ({ page }) => {
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('topbar-overflow-settings').click();
+    await expect(page.locator(DIALOG)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Default folder for new notes' }).click();
+    const picker = page.getByTestId('folder-picker-list');
+    await expect(picker).toBeVisible();
+
+    /* Focus the listbox first: the picker's document listener answers for
+       keys from inside it, and the dialog trap ignores the rest. */
+    await picker.focus();
+    await page.keyboard.press('Escape');
+    await expect(picker).toBeHidden();
+    await expect(page.locator(DIALOG)).toBeVisible();
+  });
+
+  test('the folder picker filters by typing and toggles off the button', async ({ page }) => {
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('topbar-overflow-settings').click();
+    await expect(page.locator(DIALOG)).toBeVisible();
+
+    const field = page.getByRole('button', { name: 'Default folder for new notes' });
+    await field.click();
+    const picker = page.getByTestId('folder-picker-list');
+    await expect(picker).toBeVisible();
+
+    await page.getByPlaceholder('Filter folders…').fill('meet');
+    await expect(picker.getByRole('option', { name: 'Meetings', exact: true })).toBeVisible();
+    await expect(picker.getByRole('option', { name: 'Work', exact: true })).toBeHidden();
+
+    /* Pressing the button again dismisses the list: the panel never covers
+       it, so this way out is always in reach. */
+    await field.click();
+    await expect(picker).toBeHidden();
+    await expect(page.locator(DIALOG)).toBeVisible();
+  });
 });
 

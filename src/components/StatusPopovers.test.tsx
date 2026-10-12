@@ -83,6 +83,44 @@ describe('FolderPicker', () => {
     expect(options).toHaveLength(4);
   });
 
+  it('indents the None choice like a top-level folder, with no icon', () => {
+    renderPicker();
+
+    const options = screen.getAllByTestId('folder-picker-option');
+    /* Depth one, exactly like Work below it: the old row carried a folder
+       glyph none of the other rows has. */
+    expect(options[0]?.style.paddingLeft).toBe('20px');
+    expect(options[1]?.style.paddingLeft).toBe('20px');
+    expect(options[0]?.querySelector('svg')).toBeNull();
+  });
+
+  it('narrows options as you type, like the tag editor filter', () => {
+    renderPicker();
+
+    fireEvent.change(screen.getByTestId('folder-picker-filter'), { target: { value: 'proj' } });
+
+    const options = screen.getAllByRole('option').map((option) => option.textContent);
+    expect(options).toHaveLength(1);
+    expect(options[0]).toContain('Projects');
+  });
+
+  it('says so when nothing matches, without offering to create', () => {
+    /* Folder creation lives in the sidebar behind `+`, not in a picker: an
+       Enter-to-create here would be a second implementation of it. */
+    renderPicker();
+
+    fireEvent.change(screen.getByTestId('folder-picker-filter'), { target: { value: 'zzz' } });
+
+    expect(screen.queryByRole('option')).toBeNull();
+    expect(screen.getByText('No matching folders')).toBeDefined();
+  });
+
+  it('keeps the filter input selectable under the unselectable popover', () => {
+    renderPicker();
+
+    expect(screen.getByTestId('folder-picker-filter').className).toContain('select-text');
+  });
+
   it('marks the note\'s current folder, so the choice is visible before it is made', () => {
     renderPicker();
 

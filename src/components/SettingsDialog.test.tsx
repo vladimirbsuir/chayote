@@ -214,23 +214,81 @@ it('a preset click names that preset, and the first one is the theme default', (
 
   it('offers "None" for the default folder and indents children', () => {
     /* §6.1 resolves a new note's folder from this, and ADR-014 means "None" is
-       the state first launch is in. */
+       the state first launch is in. The picker is the shared `FolderPicker` —
+       flattened depth-first and indented by depth, as the status-bar one is. */
     open();
-    const select: HTMLSelectElement = screen.getByLabelText('Default folder for new notes');
-    const options = Array.from(select.options);
-    expect(options[0]?.textContent).toBe('None — notes start unfiled');
-    /* Flattened depth-first and indented by depth, as the folder picker in the
-       status bar is — a picker is a list of choices, not a tree. */
-    expect(options.map((option) => option.textContent.trim())).toEqual([
+
+    expect(
+      screen.getByRole('button', { name: 'Default folder for new notes' }).textContent,
+    ).toContain('None — notes start unfiled');
+    fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
+
+    const options = screen.getAllByTestId('folder-picker-option');
+    expect(options.map((option) => option.textContent)).toEqual([
       'None — notes start unfiled',
       'Work',
       'Projects',
     ]);
-    const projects = options[2];
-    /* Non-breaking, not ordinary: `<select>` collapses leading whitespace, so an
-       indent written with spaces renders flat and depth is lost in the popup. */
-    expect(projects?.textContent.startsWith('\u00a0\u00a0')).toBe(true);
-    expect(projects?.value).toBe('f-projects');
+    /* Indented by depth in the option's own padding, not by whitespace: Work
+       sits one level in at 20 px, its child Projects two at 34 px — the None
+       option occupies depth zero. */
+    expect(options[1]?.style.paddingLeft).toBe('20px');
+    expect(options[2]?.style.paddingLeft).toBe('34px');
+  });
+
+  it('picks a folder through the shared picker and closes it', () => {
+    const { onDefaultFolderChange } = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
+
+    fireEvent.click(screen.getByRole('option', { name: 'Work' }));
+
+    expect(onDefaultFolderChange).toHaveBeenCalledWith('f-work');
+    expect(screen.queryByTestId('folder-picker-list')).toBeNull();
+  });
+
+  it('names the picked folder on the button', () => {
+    open({ defaultFolderId: 'f-work' });
+
+    expect(
+      screen.getByRole('button', { name: 'Default folder for new notes' }).textContent,
+    ).toContain('Work');
+  });
+
+  it('picks "None" back to unfiled', () => {
+    const { onDefaultFolderChange } = open({ defaultFolderId: 'f-work' });
+    fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
+
+    fireEvent.click(screen.getByRole('option', { name: 'None — notes start unfiled' }));
+
+    expect(onDefaultFolderChange).toHaveBeenCalledWith(null);
+  });
+
+  it('closes the picker on Escape without closing the dialog', () => {
+    const { onClose } = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
+    expect(screen.getByTestId('folder-picker-list')).toBeDefined();
+
+    /* The picker's own document listener consumes the key; the panel trap
+       ignores keys from outside the panel's DOM, so the dialog stays. */
+    fireEvent.keyDown(screen.getByTestId('folder-picker-list'), { key: 'Escape' });
+
+    expect(screen.queryByTestId('folder-picker-list')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeDefined();
+  });
+
+  it('closes the picker by pressing the button again', () => {
+    /* The panel never covers the button, so pressing it again is always the
+       fastest way to dismiss the list. */
+    open();
+    const button = screen.getByRole('button', { name: 'Default folder for new notes' });
+
+    fireEvent.click(button);
+    expect(screen.queryByTestId('folder-picker-list')).not.toBeNull();
+
+    fireEvent.click(button);
+    expect(screen.queryByTestId('folder-picker-list')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeDefined();
   });
 
   it('says so when there are no folders, rather than showing an empty select', () => {

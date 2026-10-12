@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Check, Palette, RotateCw, Settings as SettingsIcon } from 'lucide-react';
+import { Check, ChevronDown, Folder, Palette, RotateCw, Settings as SettingsIcon } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { useDialogFocus } from './useDialogFocus';
-import { flattenFolders } from './popoverPlacement';
+import { flattenFolders, popoverPlacement } from './popoverPlacement';
+import { FolderPicker, NONE_LABEL } from './StatusPopovers';
 import { contrastBetween } from '../lib/contrast';
 import { ACCENT_PRESETS, presetValue } from '../lib/settings';
 import type { AccentChoice, Theme } from '../lib/settings';
@@ -21,11 +22,14 @@ import type { Uuid } from '../types/note';
    that out while choosing the colour, instead of discovering it on an active row
    afterwards. It is the only place in the app that computes a ratio.
 
-   **A native `select` for the default folder.** §6.4's listbox requirement is
-   about the two popovers anchored to a status-bar slot, which have to match each
-   other; this is a form field, and a native select is operable by keyboard and
-   announced correctly without a second listbox to keep consistent. The prototype
-   draws this row as static text rather than a control at all. */
+    **The default folder uses the shared `FolderPicker`, not a native select.**
+    An earlier revision used a native `<select>` here on the grounds that a form
+    field needs nothing custom. On Android that opens the platform's own
+    radio-list popup — a second visual language for "choose a value" beside the
+    popover the status bar already uses — which the user reported on a phone.
+    This is the same component with the same options (flattened depth-first,
+    indented by depth, "None" included), so the two pickers cannot drift apart.
+    The prototype draws this row as static text rather than a control at all. */
 
 type SettingsDialogProps = {
   theme: Theme;
@@ -58,13 +62,34 @@ export function SettingsDialog({
   onClose,
   confirmReset,
 }: SettingsDialogProps) {
-  const { panelRef, onKeyDown } = useDialogFocus(onClose);
+  const { panelRef, onKeyDown: trapKeyDown } = useDialogFocus(onClose);
   const [custom, setCustom] = useState<string>(() =>
     accent !== null && accent.kind === 'custom' ? accent.hex : '#2f6fed',
   );
   const [confirming, setConfirming] = useState(false);
+  /* The folder picker portals to the body, outside the panel's DOM. The trap
+     and the Esc handling only apply to keys from inside the panel — otherwise
+     Esc in the picker would close the dialog behind it, and Tab there would be
+     yanked back into the panel mid-choice. */
+  const [picker, setPicker] = useState<{
+    anchor: HTMLElement;
+    placement: { top: number; left: number };
+  } | null>(null);
+
+  const onPanelKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.target instanceof Node && panelRef.current?.contains(event.target) !== true) return;
+    trapKeyDown(event);
+  };
 
   const options = useMemo(() => flattenFolders(folders), [folders]);
+
+  /* A deleted folder leaves a stale id behind; the button falls back to the
+     None copy rather than showing a blank, and the id itself is replaced on
+     the next pick. */
+  const currentName = useMemo(() => {
+    if (defaultFolderId === null) return null;
+    return options.find((option) => option.id === defaultFolderId)?.name ?? null;
+  }, [options, defaultFolderId]);
 
   /* The custom colour's ratio against the surface it would sit on. `effective`
      picks the pair, because the whole point is that one hex is measured against
@@ -107,7 +132,7 @@ export function SettingsDialog({
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
         data-testid="settings-dialog"
-        onKeyDown={onKeyDown}
+        onKeyDown={onPanelKeyDown}
         /* Dialog copy is chrome, not content: read, never copied. The colour
            input below is a picker, not a text field, so nothing opts back in. */
         className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
@@ -232,31 +257,38 @@ export function SettingsDialog({
           </div>
 
           <div>
-            <label
-              htmlFor="settings-default-folder"
+            <span
+              id="settings-default-folder-label"
               className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]"
             >
               Default folder for new notes
-            </label>
-            <select
-              id="settings-default-folder"
-              value={defaultFolderId ?? ''}
-              onChange={(event) => {
-                onDefaultFolderChange(event.target.value === '' ? null : event.target.value);
+            </span>
+            <button
+              type="button"
+              data-testid="settings-default-folder"
+              aria-label="Default folder for new notes"
+              aria-haspopup="listbox"
+              aria-expanded={picker !== null}
+              onClick={(event) => {
+                /* A toggle, not just an opener: the panel never covers this
+                   button, so pressing it again is always the fastest way to
+                   dismiss the list. */
+                if (picker !== null) {
+                  setPicker(null);
+                  return;
+                }
+                /* Geometry is in hand at the click; measuring later is a second
+                   render for a value already known. */
+                setPicker({ anchor: event.currentTarget, placement: popoverPlacement(event.currentTarget) });
               }}
-              className="w-full rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 text-[13px] text-[var(--text)]"
+              className="flex w-full items-center gap-2 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 text-left text-[13px] text-[var(--text)]"
             >
-              <option value="">None — notes start unfiled</option>
-{options.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {/* Non-breaking spaces, not ordinary ones: a `<select>`
-                      collapses leading whitespace, so a depth indent written
-                      with spaces renders flat and two folders called "Work"
-                      become indistinguishable by depth. */}
-                  {`${'\u00a0\u00a0'.repeat(option.depth)}${option.name}`}
-                </option>
-              ))}
-            </select>
+              <Folder className="icon i-16 flex-none opacity-70" aria-hidden="true" />
+              <span className="flex-1 truncate">
+                {currentName ?? NONE_LABEL}
+              </span>
+              <ChevronDown className="icon i-16 flex-none text-[var(--text-subtle)]" aria-hidden="true" />
+            </button>
             {/* ADR-014: nothing is pre-created, so "None" is the default and a
                 note filed into it is unfiled rather than lost. */}
             {options.length === 0 ? (
@@ -305,6 +337,23 @@ export function SettingsDialog({
             dialog would give the inner one a focus trap inside the outer one's,
             and `Esc` would reach the wrong one. */}
         {confirming ? confirmReset : null}
+        {/* The picker portals to the body but is a React child of the panel, so
+            `onPanelKeyDown` above is what keeps the trap out of it. */}
+        {picker !== null ? (
+          <FolderPicker
+            anchor={picker.anchor}
+            placement={picker.placement}
+            folders={folders}
+            current={defaultFolderId}
+            onPick={(next) => {
+              onDefaultFolderChange(next);
+              setPicker(null);
+            }}
+            onClose={() => {
+              setPicker(null);
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );
