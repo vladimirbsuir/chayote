@@ -25,9 +25,15 @@ export type SectionCollapse = {
   tags: boolean;
 };
 
+/** The palette's fallback before the user has ever picked a colour of their own. */
+export const DEFAULT_CUSTOM_HEX = '#2f6fed';
+
 export type Settings = {
   theme: Theme;
   accent: AccentChoice;
+  /** The last custom colour the palette held, remembered even while a preset
+      is in use so reopening the editor restores it rather than the fallback. */
+  lastCustomHex: string;
   /** `null` means notes start unfiled; nothing is pre-created. */
   defaultFolderId: Uuid | null;
   sidebarWidth: number;
@@ -43,6 +49,7 @@ export type Settings = {
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   accent: null,
+  lastCustomHex: DEFAULT_CUSTOM_HEX,
   defaultFolderId: null,
   sidebarWidth: 320,
   sidebarCollapsed: false,
@@ -88,7 +95,12 @@ async function read(): Promise<Settings> {
   /* The accent is the one field whose stored shape has changed, and the only one
      that can be a bare hex, an object or absent. Parsed here rather than trusted
      so a file from an earlier build loads as what it meant. */
-  return { ...DEFAULT_SETTINGS, ...stored, accent: parseAccent(stored.accent) };
+  return {
+    ...DEFAULT_SETTINGS,
+    ...stored,
+    accent: parseAccent(stored.accent),
+    lastCustomHex: parseCustomHex(stored.lastCustomHex),
+  };
 }
 
 /// Debounced at 300 ms by the caller (`10-conventions.md` §7).
@@ -204,6 +216,14 @@ function parseAccent(value: unknown): AccentChoice {
   }
 
   return null;
+}
+
+/** A stored custom colour is either a valid hex or the fallback: a file from
+    an earlier build, or a hand-edited one, carries nothing the palette can
+    restore. */
+function parseCustomHex(value: unknown): string {
+  if (typeof value === 'string' && parseHex(value) !== null) return value.toLowerCase();
+  return DEFAULT_CUSTOM_HEX;
 }
 
 export { STORE_FILE, SETTINGS_KEY };

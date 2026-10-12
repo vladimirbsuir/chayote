@@ -136,6 +136,36 @@ test.describe('settings', () => {
     await expect(page.locator(DIALOG)).not.toContainText('below the 4.5:1');
   });
 
+  test('the palette remembers a custom colour behind a preset', async ({ page }) => {
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('topbar-overflow-settings').click();
+    await expect(page.locator(DIALOG)).toBeVisible();
+
+    await page.getByRole('radio', { name: 'Custom colour' }).click();
+    await page.locator('#settings-accent-custom').fill('#4a4a4a');
+    /* A preset takes over, but the palette must not forget what was picked. */
+    await page.getByRole('radio', { name: 'Teal' }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const raw = window.localStorage.getItem('settings.json');
+          if (raw === null) return null;
+          return (JSON.parse(raw) as { lastCustomHex?: unknown }).lastCustomHex ?? null;
+        }),
+      )
+      .toBe('#4a4a4a');
+
+    await page.getByTestId('settings-done').click();
+    await page.reload();
+    await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('topbar-overflow-settings').click();
+    await expect(page.locator(DIALOG)).toBeVisible();
+
+    await page.getByRole('radio', { name: 'Custom colour' }).click();
+    await expect(page.locator('#settings-accent-custom')).toHaveValue('#4a4a4a');
+  });
+
   test('the default folder uses the app picker, not the platform popup', async ({ page }) => {
     await page.getByRole('button', { name: 'More' }).click();
     await page.getByTestId('topbar-overflow-settings').click();

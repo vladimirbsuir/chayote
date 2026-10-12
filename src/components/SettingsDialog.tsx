@@ -46,6 +46,9 @@ type SettingsDialogProps = {
   effective: 'light' | 'dark';
 /** `null` is the first preset, the theme's own default. */
 accent: AccentChoice;
+  /** The last custom colour picked, whatever the accent is now: the palette
+      restores it instead of forgetting it behind a preset. */
+  lastCustomHex: string;
   defaultFolderId: Uuid | null;
   folders: FolderNode[];
   onThemeChange: (theme: Theme) => void;
@@ -61,6 +64,7 @@ export function SettingsDialog({
   theme,
   effective,
   accent,
+  lastCustomHex,
   defaultFolderId,
   folders,
   onThemeChange,
@@ -71,10 +75,10 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const { panelRef, onKeyDown: trapKeyDown } = useDialogFocus(onClose);
   const [custom, setCustom] = useState<string>(() =>
-    accent !== null && accent.kind === 'custom' ? accent.hex : '#2f6fed',
+    accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex,
   );
   const [draft, setDraft] = useState<string>(() =>
-    accent !== null && accent.kind === 'custom' ? accent.hex : '#2f6fed',
+    accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex,
   );
   /* The custom editor opens from the palette swatch alone: with six presets on
      show, an always-visible panel of sliders is clutter for anyone who never
@@ -129,6 +133,22 @@ export function SettingsDialog({
     setDraft(next);
     onAccentChange({ kind: 'custom', hex: next });
   };
+
+  /* Hydration — or a reset — can land after the dialog mounts, leaving the
+     editor on the fallbacks rather than the stored values. Re-sync from props
+     when they change: edits made inside the editor already write through
+     `onAccentChange`, so an outside change is the only thing that reaches
+     here, and the in-editor paths set the same values back. Adjusted during
+     render rather than in an effect, where it would be a cascading render
+     (`10-conventions.md` §8). */
+  const [prevExternal, setPrevExternal] = useState({ accent, lastCustomHex });
+  if (prevExternal.accent !== accent || prevExternal.lastCustomHex !== lastCustomHex) {
+    setPrevExternal({ accent, lastCustomHex });
+    const next = accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex;
+    setCustom(next);
+    setDraft(next);
+    setCustomOpen(accent !== null && accent.kind === 'custom');
+  }
 
   return (
     <div

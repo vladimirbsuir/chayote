@@ -29,6 +29,7 @@ function open(overrides: Partial<Parameters<typeof SettingsDialog>[0]> = {}) {
       theme="light"
       effective="light"
       accent={null}
+      lastCustomHex="#2f6fed"
       defaultFolderId={null}
       folders={FOLDERS}
       onThemeChange={onThemeChange}
@@ -204,12 +205,55 @@ it('a preset click names that preset, and the first one is the theme default', (
     expect(applied.hex).toMatch(/^#[0-9a-f]{6}$/);
   });
 
+  it('restores the remembered custom colour behind a preset', () => {
+    /* Switching to a preset must not forget the custom colour: reopening the
+       palette offers what was picked, not the fallback. */
+    const { onAccentChange } = open({
+      accent: { kind: 'preset', index: 2 },
+      lastCustomHex: '#123456',
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
+    expect(onAccentChange).toHaveBeenCalledWith({ kind: 'custom', hex: '#123456' });
+    expect(screen.getByLabelText<HTMLInputElement>('Custom accent colour as hex').value).toBe(
+      '#123456',
+    );
+  });
+
+  it('syncs the editor when the stored accent lands after mount', () => {
+    /* On a cold start hydration can resolve after the dialog mounts: the ring
+       follows the live prop but the editor flag was snapshotted shut. */
+    const props = {
+      theme: 'light' as const,
+      effective: 'light' as const,
+      accent: null,
+      lastCustomHex: '#123456',
+      defaultFolderId: null,
+      folders: FOLDERS,
+      onThemeChange: () => {},
+      onAccentChange: () => {},
+      onDefaultFolderChange: () => {},
+      onClose: () => {},
+      confirmReset: null as React.ReactNode,
+    };
+    const { rerender } = render(<SettingsDialog {...props} />);
+    expect(screen.queryByLabelText('Custom accent colour as hex')).toBeNull();
+    rerender(<SettingsDialog {...props} accent={{ kind: 'custom', hex: '#123456' }} />);
+    expect(screen.getByLabelText('Custom accent colour as hex')).toBeDefined();
+  });
+
+  it('falls back only when no custom colour was ever picked', () => {
+    const { onAccentChange } = open({ accent: null });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
+    expect(onAccentChange).toHaveBeenCalledWith({ kind: 'custom', hex: '#2f6fed' });
+  });
+
   it('names the theme the accent will be seen against', () => {
     const { unmount } = render(
       <SettingsDialog
         theme="dark"
         effective="dark"
         accent={null}
+        lastCustomHex="#2f6fed"
         defaultFolderId={null}
         folders={[]}
         onThemeChange={() => {}}
@@ -243,6 +287,7 @@ it('a preset click names that preset, and the first one is the theme default', (
         theme="light"
         effective="light"
         accent={{ kind: 'preset', index: 1 }}
+        lastCustomHex="#2f6fed"
         defaultFolderId={null}
         folders={[]}
         onThemeChange={() => {}}
@@ -260,6 +305,7 @@ it('a preset click names that preset, and the first one is the theme default', (
         theme="dark"
         effective="dark"
         accent={{ kind: 'preset', index: 1 }}
+        lastCustomHex="#2f6fed"
         defaultFolderId={null}
         folders={[]}
         onThemeChange={() => {}}

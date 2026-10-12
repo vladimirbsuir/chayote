@@ -76,6 +76,7 @@ function Shell() {
   const theme = useSettingsStore((state) => resolveTheme(state.theme, systemDark));
   const themeSetting = useSettingsStore((state) => state.theme);
   const accent = useSettingsStore((state) => state.accent);
+  const lastCustomHex = useSettingsStore((state) => state.lastCustomHex);
   const sidebarWidth = useSettingsStore((state) => state.sidebarWidth);
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
   const collapsedFolders = useSettingsStore((state) => state.collapsedFolders);
@@ -732,13 +733,18 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
           theme={themeSetting}
           effective={theme}
           accent={accent}
+          lastCustomHex={lastCustomHex}
           defaultFolderId={defaultFolderId}
           folders={folders ?? []}
           onThemeChange={(next) => {
             useSettingsStore.getState().setTheme(next);
           }}
           onAccentChange={(next) => {
-            useSettingsStore.getState().setAccent(next);
+            const store = useSettingsStore.getState();
+            store.setAccent(next);
+            /* Every custom pick is recorded, so the palette restores it even
+               after a preset takes over. */
+            if (next !== null && next.kind === 'custom') store.setLastCustomHex(next.hex);
           }}
           onDefaultFolderChange={(next) => {
             useSettingsStore.getState().setDefaultFolderId(next);
