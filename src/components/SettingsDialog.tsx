@@ -5,6 +5,7 @@ import { useDialogFocus } from './useDialogFocus';
 import { flattenFolders, popoverPlacement } from './popoverPlacement';
 import { FolderPicker, NONE_LABEL } from './StatusPopovers';
 import { contrastBetween } from '../lib/contrast';
+import { hexToHsl, hslToHex, normalizeHexInput } from '../lib/color';
 import { ACCENT_PRESETS, presetValue } from '../lib/settings';
 import type { AccentChoice, Theme } from '../lib/settings';
 import type { FolderNode } from '../types/folder';
@@ -22,14 +23,22 @@ import type { Uuid } from '../types/note';
    that out while choosing the colour, instead of discovering it on an active row
    afterwards. It is the only place in the app that computes a ratio.
 
-    **The default folder uses the shared `FolderPicker`, not a native select.**
-    An earlier revision used a native `<select>` here on the grounds that a form
-    field needs nothing custom. On Android that opens the platform's own
-    radio-list popup — a second visual language for "choose a value" beside the
-    popover the status bar already uses — which the user reported on a phone.
-    This is the same component with the same options (flattened depth-first,
-    indented by depth, "None" included), so the two pickers cannot drift apart.
-    The prototype draws this row as static text rather than a control at all. */
+     **The default folder uses the shared `FolderPicker`, not a native select.**
+     An earlier revision used a native `<select>` here on the grounds that a form
+     field needs nothing custom. On Android that opens the platform's own
+     radio-list popup — a second visual language for "choose a value" beside the
+     popover the status bar already uses — which the user reported on a phone.
+     This is the same component with the same options (flattened depth-first,
+     indented by depth, "None" included), so the two pickers cannot drift apart.
+     The prototype draws this row as static text rather than a control at all.
+
+    **The custom accent uses an in-app editor, not a native colour input.**
+    An earlier revision used `<input type="color">` here. On Android the WebView
+    hands that to the platform's own palette plus its Hue/Saturation/Value sheet —
+    two system windows in a second visual language — which the user reported on a
+    phone. The replacement is a hex field plus Hue/Saturation/Lightness sliders
+    built from text and range inputs, so no system dialog can open. Range inputs
+    stay in the DOM where the dialog trap already reaches them. */
 
 type SettingsDialogProps = {
   theme: Theme;
@@ -64,6 +73,9 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const { panelRef, onKeyDown: trapKeyDown } = useDialogFocus(onClose);
   const [custom, setCustom] = useState<string>(() =>
+    accent !== null && accent.kind === 'custom' ? accent.hex : '#2f6fed',
+  );
+  const [draft, setDraft] = useState<string>(() =>
     accent !== null && accent.kind === 'custom' ? accent.hex : '#2f6fed',
   );
   const [confirming, setConfirming] = useState(false);
@@ -115,6 +127,18 @@ export function SettingsDialog({
     }
     return `Custom ${hex} — ${customRatio.toFixed(1)}:1`;
   }, [accent, customRatio, effective]);
+
+  const customHsl = useMemo(
+    () => hexToHsl(custom) ?? hexToHsl('#2f6fed') ?? { h: 222, s: 83, l: 59 },
+    [custom],
+  );
+  const draftValid = normalizeHexInput(draft) !== null;
+
+  const applyCustom = (next: string): void => {
+    setCustom(next);
+    setDraft(next);
+    onAccentChange({ kind: 'custom', hex: next });
+  };
 
   return (
     <div
@@ -217,7 +241,8 @@ export function SettingsDialog({
                   accent !== null && accent.kind === 'custom' ? 0 : accent === null ? -1 : -1
                 }
                 onClick={() => {
-                  onAccentChange({ kind: 'custom', hex: custom });
+                  const next = normalizeHexInput(draft) ?? custom;
+                  applyCustom(next);
                 }}
                 className={`grid h-7 w-7 place-items-center rounded-full bg-[var(--surface)] text-[var(--text-muted)] shadow-[inset_0_0_0_1px_var(--border-strong)] ${
                   accent !== null && accent.kind === 'custom'
@@ -227,25 +252,113 @@ export function SettingsDialog({
               >
                 <Palette className="icon i-16" aria-hidden="true" />
               </button>
+            </div>
 
-              <label className="sr-only" htmlFor="settings-accent-custom">
-                Custom accent colour
-              </label>
-              <input
-                id="settings-accent-custom"
-                type="color"
-                aria-label="Custom accent colour"
-                value={custom}
-                onChange={(event) => {
-                  setCustom(event.target.value);
-                  /* Applied as it is typed rather than on blur: this is the one
-                     setting with an immediate visible effect elsewhere in the
-                     window, and making it wait for a close button would mean
-                     the swatch shows a colour the app is not using. */
-                  onAccentChange({ kind: 'custom', hex: event.target.value });
-                }}
-                className="h-7 w-9 cursor-pointer rounded border border-[var(--border-strong)] bg-transparent p-0.5"
-              />
+            <div className="mt-3 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] p-3">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  style={{ background: draftValid ? custom : 'transparent' }}
+                  className="h-7 w-7 flex-none rounded-full border-2 border-[var(--text)] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]"
+                />
+                <label
+                  htmlFor="settings-accent-custom"
+                  className="text-[12px] font-medium text-[var(--text-muted)]"
+                >
+                  Custom colour
+                </label>
+                <input
+                  id="settings-accent-custom"
+                  type="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  maxLength={7}
+                  placeholder="#rrggbb"
+                  aria-label="Custom accent colour as hex"
+                  aria-invalid={!draftValid}
+                  value={draft}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setDraft(value);
+                    const next = normalizeHexInput(value);
+                    if (next !== null) {
+                      setCustom(next);
+                      onAccentChange({ kind: 'custom', hex: next });
+                    }
+                  }}
+                  onBlur={() => {
+                    if (normalizeHexInput(draft) === null) setDraft(custom);
+                  }}
+                  className="ml-auto w-28 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 font-mono text-[13px] text-[var(--text)]"
+                />
+              </div>
+              {!draftValid ? (
+                <p className="mt-1.5 text-[12px] text-[var(--danger)]" role="alert">
+                  Enter a colour as #rrggbb.
+                </p>
+              ) : null}
+              <div className="mt-2 flex flex-col gap-1">
+                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                  <span className="w-20 flex-none">Hue {customHsl.h}°</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    step={1}
+                    value={customHsl.h}
+                    aria-label="Custom colour hue"
+                    onChange={(event) => {
+                      const next = hslToHex(Number(event.target.value), customHsl.s, customHsl.l);
+                      applyCustom(next);
+                    }}
+                    style={{
+                      background:
+                        'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
+                    }}
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                  />
+                </label>
+                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                  <span className="w-20 flex-none">Saturation {customHsl.s}%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={customHsl.s}
+                    aria-label="Custom colour saturation"
+                    onChange={(event) => {
+                      const next = hslToHex(customHsl.h, Number(event.target.value), customHsl.l);
+                      applyCustom(next);
+                    }}
+                    style={{
+                      background: `linear-gradient(to right, hsl(${customHsl.h}, 0%, ${customHsl.l}%), hsl(${customHsl.h}, 100%, ${customHsl.l}%))`,
+                    }}
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                  />
+                </label>
+                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                  <span className="w-20 flex-none">Lightness {customHsl.l}%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={customHsl.l}
+                    aria-label="Custom colour lightness"
+                    onChange={(event) => {
+                      const next = hslToHex(customHsl.h, customHsl.s, Number(event.target.value));
+                      applyCustom(next);
+                    }}
+                    style={{
+                      background: `linear-gradient(to right, #000, hsl(${customHsl.h}, ${customHsl.s}%, 50%), #fff)`,
+                    }}
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                  />
+                </label>
+              </div>
             </div>
 
             {/* §10: colour is never the only signal. The ring on the swatch is

@@ -142,6 +142,44 @@ it('a preset click names that preset, and the first one is the theme default', (
     expect(onAccentChange).toHaveBeenCalledWith({ kind: 'custom', hex: '#2f6fed' });
   });
 
+  it('uses an in-app editor, never the native colour input', () => {
+    open({ accent: null });
+    expect(document.querySelector('input[type="color"]')).toBeNull();
+    expect(screen.getByLabelText('Custom accent colour as hex')).toBeDefined();
+    expect(screen.getByLabelText('Custom colour hue')).toBeDefined();
+    expect(screen.getByLabelText('Custom colour saturation')).toBeDefined();
+    expect(screen.getByLabelText('Custom colour lightness')).toBeDefined();
+  });
+
+  it('typing a valid hex applies it as a custom accent', () => {
+    const { onAccentChange } = open({ accent: null });
+    fireEvent.change(screen.getByLabelText('Custom accent colour as hex'), {
+      target: { value: '#4a4a4a' },
+    });
+    expect(onAccentChange).toHaveBeenCalledWith({ kind: 'custom', hex: '#4a4a4a' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('typing an invalid hex warns and applies nothing', () => {
+    const { onAccentChange } = open({ accent: null });
+    fireEvent.change(screen.getByLabelText('Custom accent colour as hex'), {
+      target: { value: '#12' },
+    });
+    expect(onAccentChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('#rrggbb');
+  });
+
+  it('moving a slider applies a custom accent without any native dialog', () => {
+    const { onAccentChange } = open({ accent: null });
+    fireEvent.change(screen.getByLabelText('Custom colour hue'), {
+      target: { value: '120' },
+    });
+    expect(onAccentChange).toHaveBeenCalled();
+    const applied = onAccentChange.mock.calls[0]?.[0] as { kind: string; hex: string };
+    expect(applied.kind).toBe('custom');
+    expect(applied.hex).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
   it('names the theme the accent will be seen against', () => {
     const { unmount } = render(
       <SettingsDialog

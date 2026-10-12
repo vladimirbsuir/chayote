@@ -563,6 +563,35 @@ body {
   color: var(--text-muted);
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
+.custom-editor {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--surface-raised);
+  padding: 12px;
+}
+.custom-editor .cedit-head { display: flex; align-items: center; gap: 8px; }
+.custom-editor .cedit-preview {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid var(--text);
+  background: #2f6fed;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.custom-editor .cedit-name { font-size: 13px; color: var(--text); flex: 1; }
+.custom-editor .cedit-hex {
+  font-family: var(--mono); font-size: 13px; color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  background: var(--surface); padding: 8px;
+  width: 112px; text-align: left;
+}
+.custom-editor .cedit-slider { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: var(--text-muted); }
+.custom-editor .cedit-slider .lab { width: 110px; flex: none; }
+.custom-editor .cedit-track { position: relative; flex: 1; height: 8px; border-radius: 999px; }
+.custom-editor .cedit-thumb {
+  position: absolute; top: 50%; width: 20px; height: 20px; border-radius: 50%;
+  background: #2f6fed; transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
+}
 .dlg-btns {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 14px 20px;
@@ -1087,7 +1116,7 @@ body {
   <!-- ==================================================================== -->
   <div class="section">
     <h2>5 · Settings dialog</h2>
-    <div class="note">Six accent presets plus a custom colour. Settings live in the Tauri store, never in the notes database. The swatch ring is the only selected state — it is never colour alone.</div>
+    <div class="note">Six accent presets plus an in-app custom colour editor (hex field with Hue / Saturation / Lightness sliders) — never the platform colour picker. Settings live in the Tauri store, never in the notes database. The swatch ring is the only selected state — it is never colour alone.</div>
     <div class="dialog-wrap">
       <div class="dialog">
         <div class="dhead">
@@ -1112,9 +1141,34 @@ body {
               <span class="swatch" style="background:#c2410c" title="Rust"></span>
               <span class="swatch" style="background:#b91c5c" title="Magenta"></span>
               <span class="swatch" style="background:#0f766e" title="Teal"></span>
-              <span class="swatch custom active" title="Custom colour">
+              <span class="swatch custom" title="Custom colour">
                 <svg class="icon i-16" aria-hidden="true"><use href="#i-palette"/></svg>
               </span>
+            </div>
+            <div class="custom-editor">
+              <div class="cedit-head">
+                <span class="cedit-preview" title="Custom colour preview"></span>
+                <span class="cedit-name">Custom colour</span>
+                <span class="cedit-hex">#2f6fed</span>
+              </div>
+              <div class="cedit-slider">
+                <span class="lab">Hue 220°</span>
+                <div class="cedit-track" style="background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)">
+                  <span class="cedit-thumb" style="left: 61%"></span>
+                </div>
+              </div>
+              <div class="cedit-slider">
+                <span class="lab">Saturation 84%</span>
+                <div class="cedit-track" style="background: linear-gradient(to right, hsl(220, 0%, 56%), hsl(220, 100%, 56%))">
+                  <span class="cedit-thumb" style="left: 84%"></span>
+                </div>
+              </div>
+              <div class="cedit-slider">
+                <span class="lab">Lightness 56%</span>
+                <div class="cedit-track" style="background: linear-gradient(to right, #000, hsl(220, 84%, 50%), #fff)">
+                  <span class="cedit-thumb" style="left: 56%"></span>
+                </div>
+              </div>
             </div>
           </div>
           <div class="field">
