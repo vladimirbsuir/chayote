@@ -418,9 +418,20 @@ status={
           folderName={folderId === null ? null : (folderNames.get(folderId) ?? null)}
           tagNames={tagNames}
           onPickFolder={(anchor) => {
+            /* A toggle, like the settings default-folder button: the panel never
+               covers its own anchor, so pressing it again is the fastest way out.
+               Outside press and Esc keep working through the popover itself. */
+            if (popover?.kind === 'folder') {
+              setPopover(null);
+              return;
+            }
             setPopover({ kind: 'folder', anchor, placement: popoverPlacement(anchor) });
           }}
           onEditTags={(anchor) => {
+            if (popover?.kind === 'tags') {
+              setPopover(null);
+              return;
+            }
             setPopover({ kind: 'tags', anchor, placement: popoverPlacement(anchor) });
           }}
           variant={onClose === undefined ? 'desktop' : 'mobile'}

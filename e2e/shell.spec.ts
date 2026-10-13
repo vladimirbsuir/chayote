@@ -1147,6 +1147,27 @@ test.describe('trash', () => {
     await expect(toast).toContainText(title);
   });
 
+  test('the undo toast clears the system navigation bar', async ({ page }) => {
+    await open(page);
+
+    const card = page.getByTestId('note-card').first();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+
+    /* The wrapper is viewport-fixed, so it cannot inherit `#root`'s inset
+       padding — the inset is added back into its own offset. A desktop browser
+       reports a zero inset; forcing one proves the wiring a screenshot on the
+       phone shows. */
+    const wrap = page.getByTestId('undo-toast-wrap');
+    await expect(wrap).toBeVisible();
+    await expect(wrap).toHaveCSS('bottom', '20px');
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--inset-bottom', '48px');
+    });
+    await expect(wrap).toHaveCSS('bottom', '68px');
+  });
+
   test('undo brings the note back where it was in the list', async ({ page }) => {
     await open(page);
 
@@ -1336,6 +1357,25 @@ test.describe('editor status bar', () => {
     await expect(
       page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }),
     ).toBeVisible();
+  });
+
+  test('pressing a slot button again dismisses its popover', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }).click();
+
+    /* The panel never covers its own anchor, so the button is always reachable
+       and is the fastest way out; outside press and Esc are unchanged. */
+    const folder = page.getByTestId('status-folder');
+    await folder.click();
+    await expect(page.getByTestId('folder-picker-list')).toBeVisible();
+    await folder.click();
+    await expect(page.getByTestId('folder-picker-list')).toBeHidden();
+
+    const tags = page.getByTestId('status-tags');
+    await tags.click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await tags.click();
+    await expect(page.getByTestId('tag-editor-list')).toBeHidden();
   });
 
   test('clears the folder back to unfiled', async ({ page }) => {
