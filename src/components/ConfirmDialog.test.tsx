@@ -73,6 +73,12 @@ describe('ConfirmDialog', () => {
     expect(screen.getByText('Delete “Work”?')).toBeDefined();
   });
 
+  it('renders its copy unselectable, so a hold never selects the warning', () => {
+    renderDialog();
+
+    expect(screen.getByRole('dialog').className).toContain('select-none');
+  });
+
   it('names the consequence and its count', () => {
     renderDialog();
 

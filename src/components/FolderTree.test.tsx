@@ -249,4 +249,23 @@ describe('FolderTree', () => {
 
     expect(screen.getByText('No folders yet')).toBeDefined();
   });
+
+  it('renders rows unselectable so a hold reaches the menu, not a text selection', () => {
+    /* `05-ui-ux.md` §6.3: on the device the name selected instead and no menu
+       opened. Copying happens in the editor, not in the tree. */
+    renderTree();
+
+    expect(allRows().length).toBeGreaterThan(0);
+    for (const element of allRows()) {
+      expect(element.className).toContain('select-none');
+    }
+  });
+
+  it('renders the menu itself unselectable so a hold presses, never selects', () => {
+    renderTree();
+
+    fireEvent.contextMenu(row('a'));
+
+    expect(screen.getByTestId('folder-menu').className).toContain('select-none');
+  });
 });

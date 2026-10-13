@@ -18,6 +18,7 @@ describe('settings store', () => {
   it('starts from the documented defaults, with nothing pre-created', () => {
     expect(DEFAULT_SETTINGS.theme).toBe('system');
     expect(DEFAULT_SETTINGS.accent).toBeNull();
+    expect(DEFAULT_SETTINGS.lastCustomHex).toBe('#2f6fed');
     // ADR-014: first launch creates no folders, so the default folder is none.
     expect(DEFAULT_SETTINGS.defaultFolderId).toBeNull();
     expect(DEFAULT_SETTINGS.collapsedFolders).toEqual([]);
@@ -131,6 +132,24 @@ describe('settings store', () => {
   it('keeps a genuinely custom accent', async () => {
     window.localStorage.setItem(STORE_FILE, JSON.stringify({ accent: '#123456' }));
     expect((await loadSettings()).accent).toEqual({ kind: 'custom', hex: '#123456' });
+  });
+
+  it('remembers the last custom colour behind a preset', async () => {
+    window.localStorage.setItem(
+      STORE_FILE,
+      JSON.stringify({ accent: { kind: 'preset', index: 2 }, lastCustomHex: '#123456' }),
+    );
+    const loaded = await loadSettings();
+    expect(loaded.accent).toEqual({ kind: 'preset', index: 2 });
+    expect(loaded.lastCustomHex).toBe('#123456');
+  });
+
+  it('falls back when the remembered custom colour is missing or malformed', async () => {
+    for (const stored of [{}, { lastCustomHex: 'blue' }, { lastCustomHex: '#12' }, { lastCustomHex: 42 }]) {
+      window.localStorage.setItem(STORE_FILE, JSON.stringify(stored));
+      resetSettingsCache();
+      expect((await loadSettings()).lastCustomHex, JSON.stringify(stored)).toBe('#2f6fed');
+    }
   });
 
   it('reads a stored preset object, and falls back on anything malformed', async () => {

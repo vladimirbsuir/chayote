@@ -97,6 +97,15 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('list-count').textContent).toBe('2 notes');
   });
 
+  it('renders its chrome unselectable so a hold is a gesture, never a selection', () => {
+    /* The whole aside: filters, headers, folder and tag rows. Text inputs opt
+       back in with `select-text`, so the inline create/rename fields keep
+       their selection toolbar. */
+    renderSidebar();
+
+    expect(screen.getByTestId('sidebar').className).toContain('select-none');
+  });
+
   it('names the folder in the list header once a folder is selected', () => {
     renderSidebar({ selection: { kind: 'folder', id: 'f-work' } });
     expect(screen.getByTestId('list-header').textContent).toBe('Work');

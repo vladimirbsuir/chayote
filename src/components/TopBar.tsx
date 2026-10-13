@@ -95,7 +95,10 @@ export function TopBar({
        for a second control. */
     return (
       <>
-        <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2">
+        {/* Bar chrome is not selectable: brand, field box and buttons are read
+            and pressed, never copied. The search input opts back in with
+            `select-text`, so it keeps its selection toolbar. */}
+        <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 select-none">
           <IconButton label="Open settings" onClick={onOpenOverflow} size="mobile">
             <SettingsIcon className="icon i-24" aria-hidden="true" />
           </IconButton>
@@ -126,7 +129,9 @@ export function TopBar({
               onSearchChange(event.target.value);
             }}
             onKeyDown={onFieldKeyDown}
-            className="min-w-0 flex-1 bg-transparent text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
+            /* Explicitly selectable: an ancestor may carry `select-none`, and a
+               field the user types in must keep its selection toolbar. */
+            className="min-w-0 flex-1 bg-transparent text-[var(--text)] outline-none select-text placeholder:text-[var(--text-subtle)]"
           />
           {searchValue.length > 0 ? <ClearButton onClear={() => { onSearchChange(''); }} /> : null}
         </div>
@@ -135,7 +140,10 @@ export function TopBar({
   }
 
   return (
-    <header className="flex h-[52px] flex-none items-center gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-4">
+    /* Bar chrome is not selectable: brand, field box, buttons and the Ctrl-F
+       hint are read and pressed, never copied. The search input opts back in
+       with `select-text`, so it keeps its selection toolbar. */
+    <header className="flex h-[52px] flex-none items-center gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-4 select-none">
       {/* `05-ui-ux.md` §2.3 puts a toggle in the top bar for the tablet drawer.
           The prototype's desktop bar has no such control, so it is rendered only
           in the tablet band: on desktop the sidebar is always shown, and a button
@@ -161,7 +169,9 @@ export function TopBar({
             onSearchChange(event.target.value);
           }}
           onKeyDown={onFieldKeyDown}
-          className="min-w-0 flex-1 bg-transparent text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
+          /* Explicitly selectable: an ancestor may carry `select-none`, and a
+             field the user types in must keep its selection toolbar. */
+          className="min-w-0 flex-1 bg-transparent text-[var(--text)] outline-none select-text placeholder:text-[var(--text-subtle)]"
         />
         {searchValue.length > 0 ? (
           <ClearButton onClear={() => { onSearchChange(''); }} />
@@ -200,7 +210,7 @@ export function TopBar({
           <div
             role="menu"
             data-testid="topbar-overflow"
-            className="absolute right-0 top-[36px] z-40 w-[200px] overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-pop)]"
+            className="absolute right-0 top-[36px] z-40 w-[200px] overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-pop)] select-none"
           >
             <button
               type="button"

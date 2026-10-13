@@ -50,6 +50,17 @@
   padding-left: 24px;
 }
 
+/* Tailwind's preflight sets every `ul` and `ol` to `list-style: none`, which
+   the rule above does not undo: the list kept its indent but lost its markers.
+   Restore them here; the task list below keeps `none` and wins by specificity. */
+.note-editor ul {
+  list-style: disc outside;
+}
+
+.note-editor ol {
+  list-style: decimal outside;
+}
+
 .note-editor li {
   margin-bottom: 4px;
 }
@@ -92,13 +103,24 @@
   margin: 28px 0;
 }
 
+/* A node-selected divider is invisible by default: the caret is gone and
+   nothing marks the rule, so the press that selected it reads as losing the
+   cursor. The accent outline speaks the same language as the focus ring. */
+.note-editor hr.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .note-editor strong {
   font-weight: 650;
 }
 
+/* The checkbox is 18 px and the row gap 10 px, so starting the list 4 px left
+   of the column lands the item text on the same 24 px line the bullet and
+   ordered text starts at, with the box sitting where the markers sit. */
 .note-editor ul[data-type='taskList'] {
   list-style: none;
-  margin-left: -22px;
+  margin-left: -4px;
   padding-left: 0;
 }
 

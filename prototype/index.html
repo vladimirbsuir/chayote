@@ -347,7 +347,7 @@ body {
 .editor pre code { background: none; padding: 0; }
 .editor hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 .editor strong { font-weight: 650; }
-.task { list-style: none; margin-left: -22px; }
+.task { list-style: none; margin-left: -4px; }
 .task li { display: flex; gap: 10px; align-items: flex-start; }
 .task .box {
   width: 18px; height: 18px; margin-top: 7px; flex: none;
@@ -356,6 +356,31 @@ body {
 }
 .task li.done .box { background: var(--accent); border-color: var(--accent); color: #fff; }
 .task li.done span { color: var(--text-subtle); text-decoration: line-through; }
+
+/* Formatting toolbar: one static row above the editor content on desktop,
+   below the editor bar on Android. Horizontally scrollable; 32 px targets on
+   desktop, 44 px on the phone. The pressed button carries the accent. */
+.fmtbar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 2px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  height: 40px; padding: 0 8px;
+  color: var(--text-muted);
+}
+.fmtbar .fbtn {
+  width: 32px; height: 32px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--r-input);
+  color: var(--text-muted); cursor: pointer;
+  background: none; border: none; padding: 0;
+}
+.fmtbar .fbtn:hover { background: var(--surface-raised); color: var(--text); }
+.fmtbar .fbtn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.fmtbar .fsep { width: 1px; height: 20px; flex: none; background: var(--border); margin: 0 4px; }
+.phone .fmtbar { height: 48px; padding: 0 4px; gap: 4px; }
+.phone .fmtbar .fbtn { width: 44px; height: 44px; }
 
 .statusbar {
   height: 28px; flex: 0 0 28px;
@@ -517,6 +542,14 @@ body {
 .dialog .dtitle { font-size: 15px; font-weight: 600; }
 .dialog .settings { padding: 16px 20px; display: flex; flex-direction: column; gap: 18px; }
 .field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; }
+.field .pick {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font); font-size: 13px; color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  background: var(--surface); padding: 8px; cursor: pointer;
+}
+.field .pick .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field .pick .chev { color: var(--text-subtle); display: flex; }
 .swatches { display: flex; gap: 8px; align-items: center; }
 .swatch {
   width: 28px; height: 28px; border-radius: 50%;
@@ -529,6 +562,35 @@ body {
   display: grid; place-items: center;
   color: var(--text-muted);
   box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.custom-editor {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  background: var(--surface-raised);
+  padding: 12px;
+}
+.custom-editor .cedit-head { display: flex; align-items: center; gap: 8px; }
+.custom-editor .cedit-preview {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid var(--text);
+  background: #2f6fed;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.custom-editor .cedit-name { font-size: 13px; color: var(--text); flex: 1; }
+.custom-editor .cedit-hex {
+  font-family: var(--mono); font-size: 13px; color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  background: var(--surface); padding: 8px;
+  width: 112px; text-align: left;
+}
+.custom-editor .cedit-slider { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: var(--text-muted); }
+.custom-editor .cedit-slider .lab { width: 110px; flex: none; }
+.custom-editor .cedit-track { position: relative; flex: 1; height: 8px; border-radius: 999px; }
+.custom-editor .cedit-thumb {
+  position: absolute; top: 50%; width: 20px; height: 20px; border-radius: 50%;
+  background: #2f6fed; transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
 }
 .dlg-btns {
   display: flex; justify-content: flex-end; gap: 8px;
@@ -598,6 +660,23 @@ body {
     <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></symbol>
     <symbol id="i-rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-bold" viewBox="0 0 24 24"><path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/></symbol>
+    <symbol id="i-italic" viewBox="0 0 24 24"><line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/></symbol>
+    <symbol id="i-strike" viewBox="0 0 24 24"><path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" x2="20" y1="12" y2="12"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+    <symbol id="i-h1" viewBox="0 0 24 24"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="m17 12 3-2v8"/></symbol>
+    <symbol id="i-h2" viewBox="0 0 24 24"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M21 18h-4c0-4 4-3 4-6 0-1.5-2-2.5-4-1"/></symbol>
+    <symbol id="i-h3" viewBox="0 0 24 24"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17.5 10.5c1.7-1 3.5 0 3.5 1.5a2 2 0 0 1-2 2"/><path d="M17 17.5c2 1.5 4 .3 4-1.5a2 2 0 0 0-2-2"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 5h.01"/><path d="M3 12h.01"/><path d="M3 19h.01"/><path d="M8 5h13"/><path d="M8 12h13"/><path d="M8 19h13"/></symbol>
+    <symbol id="i-list-ordered" viewBox="0 0 24 24"><path d="M11 5h10"/><path d="M11 12h10"/><path d="M11 19h10"/><path d="M4 4h1v5"/><path d="M4 9h2"/><path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02"/></symbol>
+    <symbol id="i-list-todo" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/></symbol>
+    <symbol id="i-indent-increase" viewBox="0 0 24 24"><path d="M21 5H11"/><path d="M21 12H11"/><path d="M21 19H11"/><path d="m3 8 4 4-4 4"/></symbol>
+    <symbol id="i-indent-decrease" viewBox="0 0 24 24"><path d="M21 5H11"/><path d="M21 12H11"/><path d="M21 19H11"/><path d="m7 8-4 4 4 4"/></symbol>
+    <symbol id="i-quote" viewBox="0 0 24 24"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></symbol>
+    <symbol id="i-code-block" viewBox="0 0 24 24"><path d="m10 9-3 3 3 3"/><path d="m14 15 3-3-3-3"/><rect x="3" y="3" width="18" height="18" rx="2"/></symbol>
+    <symbol id="i-hr" viewBox="0 0 24 24"><path d="m16 16-4 4-4-4"/><path d="M3 12h18"/><path d="m8 8 4-4 4 4"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
   </defs>
 </svg>
 
@@ -768,6 +847,29 @@ body {
           </div>
 
           <div class="editor-pane">
+            <div class="fmtbar" role="toolbar" aria-label="Formatting">
+              <button class="fbtn" title="Bold"><svg class="icon i-18" aria-hidden="true"><use href="#i-bold"/></svg></button>
+              <button class="fbtn" title="Italic"><svg class="icon i-18" aria-hidden="true"><use href="#i-italic"/></svg></button>
+              <button class="fbtn" title="Strikethrough"><svg class="icon i-18" aria-hidden="true"><use href="#i-strike"/></svg></button>
+              <button class="fbtn" title="Inline code"><svg class="icon i-18" aria-hidden="true"><use href="#i-code"/></svg></button>
+              <span class="fsep"></span>
+              <button class="fbtn" title="Heading 1"><svg class="icon i-18" aria-hidden="true"><use href="#i-h1"/></svg></button>
+              <button class="fbtn" title="Heading 2"><svg class="icon i-18" aria-hidden="true"><use href="#i-h2"/></svg></button>
+              <button class="fbtn" title="Heading 3"><svg class="icon i-18" aria-hidden="true"><use href="#i-h3"/></svg></button>
+              <span class="fsep"></span>
+              <button class="fbtn" title="Bullet list"><svg class="icon i-18" aria-hidden="true"><use href="#i-list"/></svg></button>
+              <button class="fbtn" title="Ordered list"><svg class="icon i-18" aria-hidden="true"><use href="#i-list-ordered"/></svg></button>
+              <button class="fbtn" title="Task list"><svg class="icon i-18" aria-hidden="true"><use href="#i-list-todo"/></svg></button>
+              <button class="fbtn" title="Increase indent"><svg class="icon i-18" aria-hidden="true"><use href="#i-indent-increase"/></svg></button>
+              <button class="fbtn" title="Decrease indent"><svg class="icon i-18" aria-hidden="true"><use href="#i-indent-decrease"/></svg></button>
+              <span class="fsep"></span>
+              <button class="fbtn" title="Blockquote"><svg class="icon i-18" aria-hidden="true"><use href="#i-quote"/></svg></button>
+              <button class="fbtn" title="Code block"><svg class="icon i-18" aria-hidden="true"><use href="#i-code-block"/></svg></button>
+              <button class="fbtn" title="Horizontal rule"><svg class="icon i-18" aria-hidden="true"><use href="#i-hr"/></svg></button>
+              <span class="fsep"></span>
+              <button class="fbtn" title="Undo"><svg class="icon i-18" aria-hidden="true"><use href="#i-undo"/></svg></button>
+              <button class="fbtn" title="Redo"><svg class="icon i-18" aria-hidden="true"><use href="#i-redo"/></svg></button>
+            </div>
             <div class="editor-scroll">
               <div class="editor">
                 <h1>Meeting notes</h1>
@@ -813,12 +915,13 @@ body {
   <!-- ==================================================================== -->
   <div class="section">
     <h2>2 · Status bar editors — folder picker and tag editor</h2>
-    <div class="note">Both open upward from the status bar at the bottom of the editor pane, portalled so the pane's own stacking context cannot clip them. Both are listboxes: the folder picker over the tree flattened and indented by depth, the tag editor multi-select with a filter field that is also the input.</div>
+    <div class="note">Both open upward from the status bar at the bottom of the editor pane, portalled so the pane's own stacking context cannot clip them. Both are listboxes: the folder picker over the tree flattened and indented by depth, the tag editor multi-select with a filter field that is also the input. The folder picker carries the same filter field — filter only, folders are still created in the sidebar — and its "None" row sits at the same indent as a top-level folder, with no icon either way.</div>
     <div class="frames">
       <div class="frame">
         <div class="frame-label">folder picker · a note in Work</div>
         <div style="position:relative;height:360px">
           <div class="popover" style="left:24px;bottom:0">
+            <div class="pop-input"><svg class="icon i-16" aria-hidden="true"><use href="#i-search"/></svg>Filter folders…</div>
             <div class="pop-list">
               <div class="opt" role="option" aria-selected="false"><span style="width:24px"></span>None</div>
               <div class="opt" role="option" aria-selected="true"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg>Work<span class="tick"><svg class="icon i-16" aria-hidden="true"><use href="#i-check"/></svg></span></div>
@@ -918,6 +1021,29 @@ body {
               <svg class="icon i-24" aria-hidden="true"><use href="#i-more"/></svg>
             </div>
           </div>
+          <div class="fmtbar" role="toolbar" aria-label="Formatting">
+            <button class="fbtn" title="Bold"><svg class="icon i-20" aria-hidden="true"><use href="#i-bold"/></svg></button>
+            <button class="fbtn" title="Italic"><svg class="icon i-20" aria-hidden="true"><use href="#i-italic"/></svg></button>
+            <button class="fbtn" title="Strikethrough"><svg class="icon i-20" aria-hidden="true"><use href="#i-strike"/></svg></button>
+            <button class="fbtn" title="Inline code"><svg class="icon i-20" aria-hidden="true"><use href="#i-code"/></svg></button>
+            <span class="fsep"></span>
+            <button class="fbtn" title="Heading 1"><svg class="icon i-20" aria-hidden="true"><use href="#i-h1"/></svg></button>
+            <button class="fbtn" title="Heading 2"><svg class="icon i-20" aria-hidden="true"><use href="#i-h2"/></svg></button>
+            <button class="fbtn" title="Heading 3"><svg class="icon i-20" aria-hidden="true"><use href="#i-h3"/></svg></button>
+            <span class="fsep"></span>
+            <button class="fbtn" title="Bullet list"><svg class="icon i-20" aria-hidden="true"><use href="#i-list"/></svg></button>
+            <button class="fbtn" title="Ordered list"><svg class="icon i-20" aria-hidden="true"><use href="#i-list-ordered"/></svg></button>
+            <button class="fbtn" title="Task list"><svg class="icon i-20" aria-hidden="true"><use href="#i-list-todo"/></svg></button>
+            <button class="fbtn" title="Increase indent"><svg class="icon i-20" aria-hidden="true"><use href="#i-indent-increase"/></svg></button>
+            <button class="fbtn" title="Decrease indent"><svg class="icon i-20" aria-hidden="true"><use href="#i-indent-decrease"/></svg></button>
+            <span class="fsep"></span>
+            <button class="fbtn" title="Blockquote"><svg class="icon i-20" aria-hidden="true"><use href="#i-quote"/></svg></button>
+            <button class="fbtn" title="Code block"><svg class="icon i-20" aria-hidden="true"><use href="#i-code-block"/></svg></button>
+            <button class="fbtn" title="Horizontal rule"><svg class="icon i-20" aria-hidden="true"><use href="#i-hr"/></svg></button>
+            <span class="fsep"></span>
+            <button class="fbtn" title="Undo"><svg class="icon i-20" aria-hidden="true"><use href="#i-undo"/></svg></button>
+            <button class="fbtn" title="Redo"><svg class="icon i-20" aria-hidden="true"><use href="#i-redo"/></svg></button>
+          </div>
           <div class="m-editor">
             <div class="editor">
               <h1>Meeting notes</h1>
@@ -990,7 +1116,7 @@ body {
   <!-- ==================================================================== -->
   <div class="section">
     <h2>5 · Settings dialog</h2>
-    <div class="note">Six accent presets plus a custom colour. Settings live in the Tauri store, never in the notes database. The swatch ring is the only selected state — it is never colour alone.</div>
+    <div class="note">Six accent presets plus an in-app custom colour editor (hex field with Hue / Saturation / Lightness sliders) — never the platform colour picker. Settings live in the Tauri store, never in the notes database. The swatch ring is the only selected state — it is never colour alone.</div>
     <div class="dialog-wrap">
       <div class="dialog">
         <div class="dhead">
@@ -1009,20 +1135,45 @@ body {
           <div class="field">
             <label>Accent colour</label>
             <div class="swatches">
-              <span class="swatch" style="background:#2769ec" title="Default"></span>
+              <span class="swatch" style="background:#2769ec" title="Blue"></span>
               <span class="swatch" style="background:#1f7a4d" title="Green"></span>
               <span class="swatch" style="background:#814ef5" title="Violet"></span>
               <span class="swatch" style="background:#c2410c" title="Rust"></span>
               <span class="swatch" style="background:#b91c5c" title="Magenta"></span>
               <span class="swatch" style="background:#0f766e" title="Teal"></span>
-              <span class="swatch custom active" title="Custom colour">
+              <span class="swatch custom" title="Custom colour">
                 <svg class="icon i-16" aria-hidden="true"><use href="#i-palette"/></svg>
               </span>
+            </div>
+            <div class="custom-editor">
+              <div class="cedit-head">
+                <span class="cedit-preview" title="Custom colour preview"></span>
+                <span class="cedit-name">Custom colour</span>
+                <span class="cedit-hex">#2f6fed</span>
+              </div>
+              <div class="cedit-slider">
+                <span class="lab">Hue 220°</span>
+                <div class="cedit-track" style="background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)">
+                  <span class="cedit-thumb" style="left: 61%"></span>
+                </div>
+              </div>
+              <div class="cedit-slider">
+                <span class="lab">Saturation 84%</span>
+                <div class="cedit-track" style="background: linear-gradient(to right, hsl(220, 0%, 56%), hsl(220, 100%, 56%))">
+                  <span class="cedit-thumb" style="left: 84%"></span>
+                </div>
+              </div>
+              <div class="cedit-slider">
+                <span class="lab">Lightness 56%</span>
+                <div class="cedit-track" style="background: linear-gradient(to right, #000, hsl(220, 84%, 50%), #fff)">
+                  <span class="cedit-thumb" style="left: 56%"></span>
+                </div>
+              </div>
             </div>
           </div>
           <div class="field">
             <label>Default folder for new notes</label>
-            <div style="font-size:13px;color:var(--text-subtle)">None — notes start unfiled</div>
+            <div class="pick"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg><span class="grow">None</span><span class="chev"><svg class="icon i-16" aria-hidden="true"><use href="#i-chevron-down"/></svg></span></div>
           </div>
         </div>
         <div class="dlg-btns">
@@ -1132,6 +1283,74 @@ body {
         <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-inbox"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-inbox"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-inbox"/></svg></div>
         <div class="nm">inbox<br>empty state</div>
       </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-bold"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-bold"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-bold"/></svg></div>
+        <div class="nm">bold<br>toolbar</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-italic"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-italic"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-italic"/></svg></div>
+        <div class="nm">italic<br>toolbar</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-strike"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-strike"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-strike"/></svg></div>
+        <div class="nm">strikethrough<br>toolbar</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-code"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-code"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-code"/></svg></div>
+        <div class="nm">code<br>toolbar</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-h1"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-h1"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-h1"/></svg></div>
+        <div class="nm">heading-1</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-h2"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-h2"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-h2"/></svg></div>
+        <div class="nm">heading-2</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-h3"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-h3"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-h3"/></svg></div>
+        <div class="nm">heading-3</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-list"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-list"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-list"/></svg></div>
+        <div class="nm">list<br>bullets</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-list-ordered"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-list-ordered"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-list-ordered"/></svg></div>
+        <div class="nm">list-ordered</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-list-todo"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-list-todo"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-list-todo"/></svg></div>
+        <div class="nm">list-todo<br>tasks</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-indent-increase"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-indent-increase"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-indent-increase"/></svg></div>
+        <div class="nm">indent-increase<br>indent</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-indent-decrease"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-indent-decrease"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-indent-decrease"/></svg></div>
+        <div class="nm">indent-decrease<br>outdent</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-quote"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-quote"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-quote"/></svg></div>
+        <div class="nm">quote<br>blockquote</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-code-block"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-code-block"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-code-block"/></svg></div>
+        <div class="nm">square-code<br>code block</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-hr"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-hr"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-hr"/></svg></div>
+        <div class="nm">separator-horizontal<br>rule</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-undo"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-undo"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-undo"/></svg></div>
+        <div class="nm">undo-2</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-redo"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-redo"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-redo"/></svg></div>
+        <div class="nm">redo-2</div>
+      </div>
     </div>
   </div>
 
@@ -1139,6 +1358,7 @@ body {
     <h2>Notes for review</h2>
     <div class="legend">
       <div><code>Ctrl B / I / S / E</code> bold, italic, strike, code · <code>Ctrl N</code> new note · <code>Ctrl D</code> pin · <code>Ctrl F</code> search</div>
+      <div style="margin-top:6px">Formatting toolbar above the editor content on desktop, below the editor bar on Android — every shortcut above has a visible button there. 32 px targets on desktop, 44 px on Android, horizontally scrollable.</div>
       <div style="margin-top:6px">Icon sizes: <code>16</code> inline in text, <code>18</code> controls, <code>20</code> section headers, <code>24</code> mobile top bar. Stroke steps 2, 2, 1.75, 1.5 to hold optical weight.</div>
       <div style="margin-top:6px">Icons inherit <code>currentColor</code> and are never given a hard-coded colour. An icon never carries meaning alone — the pinned note, the empty state, and the error state all have text.</div>
       <div style="margin-top:6px">Note list is <strong>not</strong> drag-reorderable in v1 (ADR-011). Folder tree is.</div>

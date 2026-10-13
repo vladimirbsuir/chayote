@@ -34,6 +34,12 @@ describe('EditorStatusBar folder and tag slots', () => {
     useSelectionStore.setState({ selection: { kind: 'all' }, openNoteId: null });
   });
 
+  it('renders the row itself unselectable, so a hold never selects its text', () => {
+    const { container } = render(bar());
+
+    expect((container.firstChild as HTMLElement).className).toContain('select-none');
+  });
+
   it('shows the note\'s folder by name', () => {
     render(bar({ folderName: 'Work' }));
 

@@ -15,7 +15,8 @@ export function UndoToast({ toast }: { toast: UndoToastModel }): React.ReactElem
       role="status"
       aria-live="polite"
       data-testid="undo-toast"
-      className="pointer-events-auto flex items-center gap-3 rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] px-4 py-[10px] text-[13px] shadow-[var(--shadow-pop)]"
+      /* Toast text is chrome, not content: read, never copied. */
+      className="pointer-events-auto flex items-center gap-3 rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] px-4 py-[10px] text-[13px] shadow-[var(--shadow-pop)] select-none"
     >
       <span className="truncate text-[var(--text-muted)]">“{toast.title}” moved to trash</span>
       <button

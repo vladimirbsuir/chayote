@@ -162,7 +162,23 @@ describe('note row actions', () => {
     expect(screen.getByRole('menu', { name: 'Untitled actions' })).toBeDefined();
   });
 
-  it('paints permanent delete in the danger token and soft delete not', () => {
+  it('paints move to trash in the danger token, like the editor menu', () => {
+    render(<List onPin={noop} onDelete={noop} />);
+
+    openMenuFor('n-1');
+
+    expect(screen.getByTestId('note-menu-delete').className).toContain('var(--danger)');
+  });
+
+  it('renders the menu itself unselectable so a hold presses, never selects', () => {
+    render(<List onPin={noop} onDelete={noop} />);
+
+    openMenuFor('n-1');
+
+    expect(screen.getByTestId('note-menu').className).toContain('select-none');
+  });
+
+  it('paints permanent delete in the danger token and restore not', () => {
     render(<List onRestore={noop} onDestroy={noop} />);
 
     openMenuFor('n-1');
@@ -482,6 +498,13 @@ describe('useUndoToast', () => {
     fireEvent.click(screen.getByTestId('show'));
 
     expect(screen.getByTestId('undo-toast').textContent).toContain('Meeting notes');
+  });
+
+  it('renders the toast itself unselectable, so a hold never selects its text', () => {
+    render(<ToastHarness undo={noop} />);
+    fireEvent.click(screen.getByTestId('show'));
+
+    expect(screen.getByTestId('undo-toast').className).toContain('select-none');
   });
 
   it('runs the callback it was given when Undo is pressed', () => {

@@ -76,6 +76,7 @@ function Shell() {
   const theme = useSettingsStore((state) => resolveTheme(state.theme, systemDark));
   const themeSetting = useSettingsStore((state) => state.theme);
   const accent = useSettingsStore((state) => state.accent);
+  const lastCustomHex = useSettingsStore((state) => state.lastCustomHex);
   const sidebarWidth = useSettingsStore((state) => state.sidebarWidth);
   const sidebarCollapsed = useSettingsStore((state) => state.sidebarCollapsed);
   const collapsedFolders = useSettingsStore((state) => state.collapsedFolders);
@@ -720,9 +721,14 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
       {/* The undo toast floats above the whole app rather than living in the
           sidebar: a delete can be triggered from the editor's keyboard shortcut, and
           a toast pinned to the sidebar would then be off-screen from where the user
-          is looking. Bottom-centred, out of the way of both panes. */}
+          is looking. Bottom-centred, out of the way of both panes, and above the
+          system navigation bar: a viewport-fixed element ignores `#root`'s inset
+          padding, so the inset is added back here (zero on desktop). */}
       {undoToast === null ? null : (
-        <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
+        <div
+          data-testid="undo-toast-wrap"
+          className="pointer-events-none fixed inset-x-0 bottom-[calc(1.25rem+var(--inset-bottom))] z-40 flex justify-center px-4"
+        >
           <UndoToast toast={undoToast} />
         </div>
       )}
@@ -732,13 +738,18 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
           theme={themeSetting}
           effective={theme}
           accent={accent}
+          lastCustomHex={lastCustomHex}
           defaultFolderId={defaultFolderId}
           folders={folders ?? []}
           onThemeChange={(next) => {
             useSettingsStore.getState().setTheme(next);
           }}
           onAccentChange={(next) => {
-            useSettingsStore.getState().setAccent(next);
+            const store = useSettingsStore.getState();
+            store.setAccent(next);
+            /* Every custom pick is recorded, so the palette restores it even
+               after a preset takes over. */
+            if (next !== null && next.kind === 'custom') store.setLastCustomHex(next.hex);
           }}
           onDefaultFolderChange={(next) => {
             useSettingsStore.getState().setDefaultFolderId(next);

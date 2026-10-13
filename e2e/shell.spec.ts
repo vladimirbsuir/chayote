@@ -58,6 +58,29 @@ test.describe('desktop two-pane layout', () => {
     expect(editorBox?.x ?? 0).toBeGreaterThanOrEqual(sidebarBox?.width ?? 0);
   });
 
+  test('chrome text is not selectable; the editor and the fields are', async ({ page }) => {
+    /* `05-ui-ux.md` §9: rows, menus, bars and dialogs carry `select-none` so a
+       hold is always a gesture, never a text selection; text inputs opt back in
+       with `select-text`. Asserted on computed style, which is what the
+       platform's long-press menu actually reads. */
+    await open(page);
+
+    const userSelectOf = (selector: string): Promise<string> =>
+      page.locator(selector).first().evaluate((node) => getComputedStyle(node).userSelect);
+
+    await expect(page.getByTestId('sidebar')).toBeVisible();
+    expect(await userSelectOf('[data-testid="sidebar"]')).toBe('none');
+    expect(await userSelectOf('[data-testid="folder-row"]')).toBe('none');
+    expect(await userSelectOf('[data-testid="tag-row"]')).toBe('none');
+    expect(await userSelectOf('[data-testid="note-card"]')).toBe('none');
+    expect(await userSelectOf('header')).toBe('none');
+    expect(await userSelectOf('[data-testid="save-state"]')).toBe('none');
+
+    /* Fields the user types in keep their selection toolbar. */
+    expect(await userSelectOf('input[aria-label="Search notes"]')).not.toBe('none');
+    expect(await userSelectOf('[role="textbox"][aria-label="Note content"]')).not.toBe('none');
+  });
+
   test('caps the editor column at the 720 px readable measure', async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 900 });
     await open(page);
@@ -1124,6 +1147,27 @@ test.describe('trash', () => {
     await expect(toast).toContainText(title);
   });
 
+  test('the undo toast clears the system navigation bar', async ({ page }) => {
+    await open(page);
+
+    const card = page.getByTestId('note-card').first();
+    await card.hover();
+    await card.getByTestId('note-menu-button').click();
+    await page.getByTestId('note-menu-delete').click();
+
+    /* The wrapper is viewport-fixed, so it cannot inherit `#root`'s inset
+       padding — the inset is added back into its own offset. A desktop browser
+       reports a zero inset; forcing one proves the wiring a screenshot on the
+       phone shows. */
+    const wrap = page.getByTestId('undo-toast-wrap');
+    await expect(wrap).toBeVisible();
+    await expect(wrap).toHaveCSS('bottom', '20px');
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--inset-bottom', '48px');
+    });
+    await expect(wrap).toHaveCSS('bottom', '68px');
+  });
+
   test('undo brings the note back where it was in the list', async ({ page }) => {
     await open(page);
 
@@ -1313,6 +1357,25 @@ test.describe('editor status bar', () => {
     await expect(
       page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }),
     ).toBeVisible();
+  });
+
+  test('pressing a slot button again dismisses its popover', async ({ page }) => {
+    await open(page);
+    await page.getByTestId('note-card').filter({ hasText: 'Meeting notes' }).click();
+
+    /* The panel never covers its own anchor, so the button is always reachable
+       and is the fastest way out; outside press and Esc are unchanged. */
+    const folder = page.getByTestId('status-folder');
+    await folder.click();
+    await expect(page.getByTestId('folder-picker-list')).toBeVisible();
+    await folder.click();
+    await expect(page.getByTestId('folder-picker-list')).toBeHidden();
+
+    const tags = page.getByTestId('status-tags');
+    await tags.click();
+    await expect(page.getByTestId('tag-editor-list')).toBeVisible();
+    await tags.click();
+    await expect(page.getByTestId('tag-editor-list')).toBeHidden();
   });
 
   test('clears the folder back to unfiled', async ({ page }) => {

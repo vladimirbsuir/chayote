@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Check, Palette, RotateCw, Settings as SettingsIcon } from 'lucide-react';
+import { Check, ChevronDown, Folder, Palette, RotateCw, Settings as SettingsIcon } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { useDialogFocus } from './useDialogFocus';
-import { flattenFolders } from './popoverPlacement';
-import { contrastBetween } from '../lib/contrast';
+import { flattenFolders, popoverPlacement } from './popoverPlacement';
+import { FolderPicker, NONE_LABEL } from './StatusPopovers';
+import { hexToHsl, hslToHex, normalizeHexInput } from '../lib/color';
 import { ACCENT_PRESETS, presetValue } from '../lib/settings';
 import type { AccentChoice, Theme } from '../lib/settings';
 import type { FolderNode } from '../types/folder';
@@ -16,16 +17,26 @@ import type { Uuid } from '../types/note';
    Two things here are decisions rather than transcriptions of the prototype.
 
    **The accent readout.** ADR-019 resolves a preset through the cascade but takes
-   a custom colour verbatim, in both themes, and a custom colour is the one thing
-   that can fall under 4.5:1. Showing the measured ratio here means the user finds
-   that out while choosing the colour, instead of discovering it on an active row
-   afterwards. It is the only place in the app that computes a ratio.
+   a custom colour verbatim, in both themes. The readout names the preset in use
+   so the swatch ring is not carrying the meaning alone; a custom colour shows
+   no readout at all.
 
-   **A native `select` for the default folder.** §6.4's listbox requirement is
-   about the two popovers anchored to a status-bar slot, which have to match each
-   other; this is a form field, and a native select is operable by keyboard and
-   announced correctly without a second listbox to keep consistent. The prototype
-   draws this row as static text rather than a control at all. */
+     **The default folder uses the shared `FolderPicker`, not a native select.**
+     An earlier revision used a native `<select>` here on the grounds that a form
+     field needs nothing custom. On Android that opens the platform's own
+     radio-list popup — a second visual language for "choose a value" beside the
+     popover the status bar already uses — which the user reported on a phone.
+     This is the same component with the same options (flattened depth-first,
+     indented by depth, "None" included), so the two pickers cannot drift apart.
+     The prototype draws this row as static text rather than a control at all.
+
+    **The custom accent uses an in-app editor, not a native colour input.**
+    An earlier revision used `<input type="color">` here. On Android the WebView
+    hands that to the platform's own palette plus its Hue/Saturation/Value sheet —
+    two system windows in a second visual language — which the user reported on a
+    phone. The replacement is a hex field plus Hue/Saturation/Lightness sliders
+    built from text and range inputs, so no system dialog can open. Range inputs
+    stay in the DOM where the dialog trap already reaches them. */
 
 type SettingsDialogProps = {
   theme: Theme;
@@ -35,6 +46,9 @@ type SettingsDialogProps = {
   effective: 'light' | 'dark';
 /** `null` is the first preset, the theme's own default. */
 accent: AccentChoice;
+  /** The last custom colour picked, whatever the accent is now: the palette
+      restores it instead of forgetting it behind a preset. */
+  lastCustomHex: string;
   defaultFolderId: Uuid | null;
   folders: FolderNode[];
   onThemeChange: (theme: Theme) => void;
@@ -50,6 +64,7 @@ export function SettingsDialog({
   theme,
   effective,
   accent,
+  lastCustomHex,
   defaultFolderId,
   folders,
   onThemeChange,
@@ -58,38 +73,82 @@ export function SettingsDialog({
   onClose,
   confirmReset,
 }: SettingsDialogProps) {
-  const { panelRef, onKeyDown } = useDialogFocus(onClose);
+  const { panelRef, onKeyDown: trapKeyDown } = useDialogFocus(onClose);
   const [custom, setCustom] = useState<string>(() =>
-    accent !== null && accent.kind === 'custom' ? accent.hex : '#2f6fed',
+    accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex,
   );
+  const [draft, setDraft] = useState<string>(() =>
+    accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex,
+  );
+  /* The custom editor opens from the palette swatch alone: with six presets on
+     show, an always-visible panel of sliders is clutter for anyone who never
+     picks a colour of their own. */
+  const [customOpen, setCustomOpen] = useState(accent !== null && accent.kind === 'custom');
   const [confirming, setConfirming] = useState(false);
+  /* The folder picker portals to the body, outside the panel's DOM. The trap
+     and the Esc handling only apply to keys from inside the panel — otherwise
+     Esc in the picker would close the dialog behind it, and Tab there would be
+     yanked back into the panel mid-choice. */
+  const [picker, setPicker] = useState<{
+    anchor: HTMLElement;
+    placement: { top: number; left: number };
+  } | null>(null);
+
+  const onPanelKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.target instanceof Node && panelRef.current?.contains(event.target) !== true) return;
+    trapKeyDown(event);
+  };
 
   const options = useMemo(() => flattenFolders(folders), [folders]);
 
-  /* The custom colour's ratio against the surface it would sit on. `effective`
-     picks the pair, because the whole point is that one hex is measured against
-     the theme actually in use. */
-  const customRatio = useMemo(() => {
-    const surface = effective === 'dark' ? '#1d1d20' : '#f7f7f8';
-    return contrastBetween(custom, surface);
-  }, [custom, effective]);
+  /* A deleted folder leaves a stale id behind; the button falls back to the
+     None copy rather than showing a blank, and the id itself is replaced on
+     the next pick. */
+  const currentName = useMemo(() => {
+    if (defaultFolderId === null) return null;
+    return options.find((option) => option.id === defaultFolderId)?.name ?? null;
+  }, [options, defaultFolderId]);
 
-  /* One string rather than a conditional in the markup: a half-typed hex in the
-     colour input is not a colour, and the readout has to say something rather
-     than print `null` or leave the line blank. */
+  /* §10: colour is never the only signal. The ring on the swatch is the
+     selected state, and this says which preset is in use so the ring is not
+     carrying the meaning alone. A custom colour shows no readout at all. */
   const accentReadout = useMemo(() => {
     if (accent === null) {
       return `Default accent for the ${effective === 'dark' ? 'dark' : 'light'} theme`;
     }
-    const hex = accent.kind === 'custom' ? accent.hex : ACCENT_PRESETS[accent.index - 1]?.[effective === 'dark' ? 'dark' : 'light'];
+    if (accent.kind === 'custom') return '';
+    const hex = ACCENT_PRESETS[accent.index - 1]?.[effective === 'dark' ? 'dark' : 'light'];
     if (hex === undefined) return 'Accent';
-    if (accent.kind === 'preset') return `${ACCENT_PRESETS[accent.index - 1]?.name} — ${hex}`;
-    if (customRatio === null) return `Custom ${hex}`;
-    if (customRatio < 4.5) {
-      return `Custom ${hex} — ${customRatio.toFixed(1)}:1, below the 4.5:1 needed for text`;
-    }
-    return `Custom ${hex} — ${customRatio.toFixed(1)}:1`;
-  }, [accent, customRatio, effective]);
+    return `${ACCENT_PRESETS[accent.index - 1]?.name} — ${hex}`;
+  }, [accent, effective]);
+
+  const customHsl = useMemo(
+    () => hexToHsl(custom) ?? hexToHsl('#2f6fed') ?? { h: 222, s: 83, l: 59 },
+    [custom],
+  );
+  const draftValid = normalizeHexInput(draft) !== null;
+
+  const applyCustom = (next: string): void => {
+    setCustom(next);
+    setDraft(next);
+    onAccentChange({ kind: 'custom', hex: next });
+  };
+
+  /* Hydration — or a reset — can land after the dialog mounts, leaving the
+     editor on the fallbacks rather than the stored values. Re-sync from props
+     when they change: edits made inside the editor already write through
+     `onAccentChange`, so an outside change is the only thing that reaches
+     here, and the in-editor paths set the same values back. Adjusted during
+     render rather than in an effect, where it would be a cascading render
+     (`10-conventions.md` §8). */
+  const [prevExternal, setPrevExternal] = useState({ accent, lastCustomHex });
+  if (prevExternal.accent !== accent || prevExternal.lastCustomHex !== lastCustomHex) {
+    setPrevExternal({ accent, lastCustomHex });
+    const next = accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex;
+    setCustom(next);
+    setDraft(next);
+    setCustomOpen(accent !== null && accent.kind === 'custom');
+  }
 
   return (
     <div
@@ -107,8 +166,10 @@ export function SettingsDialog({
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
         data-testid="settings-dialog"
-        onKeyDown={onKeyDown}
-        className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
+        onKeyDown={onPanelKeyDown}
+        /* Dialog copy is chrome, not content: read, never copied. The colour
+           input below is a picker, not a text field, so nothing opts back in. */
+        className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
       >
         <div className="flex items-center gap-2 px-5 pt-[18px]">
           <span className="flex text-[var(--text-muted)]">
@@ -168,6 +229,7 @@ export function SettingsDialog({
                   selected ? 0 : accent === null && index === 1 ? 0 : -1
                 }
                     onClick={() => {
+                      setCustomOpen(false);
                       onAccentChange({ kind: 'preset', index });
                     }}
                     style={{ background: value }}
@@ -190,7 +252,9 @@ export function SettingsDialog({
                   accent !== null && accent.kind === 'custom' ? 0 : accent === null ? -1 : -1
                 }
                 onClick={() => {
-                  onAccentChange({ kind: 'custom', hex: custom });
+                  const next = normalizeHexInput(draft) ?? custom;
+                  setCustomOpen(true);
+                  applyCustom(next);
                 }}
                 className={`grid h-7 w-7 place-items-center rounded-full bg-[var(--surface)] text-[var(--text-muted)] shadow-[inset_0_0_0_1px_var(--border-strong)] ${
                   accent !== null && accent.kind === 'custom'
@@ -200,61 +264,157 @@ export function SettingsDialog({
               >
                 <Palette className="icon i-16" aria-hidden="true" />
               </button>
-
-              <label className="sr-only" htmlFor="settings-accent-custom">
-                Custom accent colour
-              </label>
-              <input
-                id="settings-accent-custom"
-                type="color"
-                aria-label="Custom accent colour"
-                value={custom}
-                onChange={(event) => {
-                  setCustom(event.target.value);
-                  /* Applied as it is typed rather than on blur: this is the one
-                     setting with an immediate visible effect elsewhere in the
-                     window, and making it wait for a close button would mean
-                     the swatch shows a colour the app is not using. */
-                  onAccentChange({ kind: 'custom', hex: event.target.value });
-                }}
-                className="h-7 w-9 cursor-pointer rounded border border-[var(--border-strong)] bg-transparent p-0.5"
-              />
             </div>
 
-            {/* §10: colour is never the only signal. The ring on the swatch is
-                the selected state, and this says which preset is in use so the
-                ring is not carrying the meaning alone. */}
+            {customOpen ? (
+            <div className="mt-3 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] p-3">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  style={{ background: draftValid ? custom : 'transparent' }}
+                  className="h-7 w-7 flex-none rounded-full border-2 border-[var(--text)] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]"
+                />
+                <label
+                  htmlFor="settings-accent-custom"
+                  className="text-[12px] font-medium text-[var(--text-muted)]"
+                >
+                  Custom colour
+                </label>
+                <input
+                  id="settings-accent-custom"
+                  type="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  maxLength={7}
+                  placeholder="#rrggbb"
+                  aria-label="Custom accent colour as hex"
+                  aria-invalid={!draftValid}
+                  value={draft}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setDraft(value);
+                    const next = normalizeHexInput(value);
+                    if (next !== null) {
+                      setCustom(next);
+                      onAccentChange({ kind: 'custom', hex: next });
+                    }
+                  }}
+                  onBlur={() => {
+                    if (normalizeHexInput(draft) === null) setDraft(custom);
+                  }}
+                  className="ml-auto w-28 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 font-mono text-[13px] text-[var(--text)]"
+                />
+              </div>
+              {!draftValid ? (
+                <p className="mt-1.5 text-[12px] text-[var(--danger)]" role="alert">
+                  Enter a colour as #rrggbb.
+                </p>
+              ) : null}
+              <div className="mt-2 flex flex-col gap-1">
+                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                  <span className="w-20 flex-none">Hue {customHsl.h}°</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    step={1}
+                    value={customHsl.h}
+                    aria-label="Custom colour hue"
+                    onChange={(event) => {
+                      const next = hslToHex(Number(event.target.value), customHsl.s, customHsl.l);
+                      applyCustom(next);
+                    }}
+                    style={{
+                      background:
+                        'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
+                    }}
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                  />
+                </label>
+                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                  <span className="w-20 flex-none">Saturation {customHsl.s}%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={customHsl.s}
+                    aria-label="Custom colour saturation"
+                    onChange={(event) => {
+                      const next = hslToHex(customHsl.h, Number(event.target.value), customHsl.l);
+                      applyCustom(next);
+                    }}
+                    style={{
+                      background: `linear-gradient(to right, hsl(${customHsl.h}, 0%, ${customHsl.l}%), hsl(${customHsl.h}, 100%, ${customHsl.l}%))`,
+                    }}
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                  />
+                </label>
+                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                  <span className="w-20 flex-none">Lightness {customHsl.l}%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={customHsl.l}
+                    aria-label="Custom colour lightness"
+                    onChange={(event) => {
+                      const next = hslToHex(customHsl.h, customHsl.s, Number(event.target.value));
+                      applyCustom(next);
+                    }}
+                    style={{
+                      background: `linear-gradient(to right, #000, hsl(${customHsl.h}, ${customHsl.s}%, 50%), #fff)`,
+                    }}
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                  />
+                </label>
+              </div>
+            </div>
+            ) : null}
+
+            {accent !== null && accent.kind === 'custom' ? null : (
             <p className="mt-2 text-[12px] text-[var(--text-subtle)]" aria-live="polite">
               {accentReadout}
             </p>
+            )}
           </div>
 
           <div>
-            <label
-              htmlFor="settings-default-folder"
+            <span
+              id="settings-default-folder-label"
               className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]"
             >
               Default folder for new notes
-            </label>
-            <select
-              id="settings-default-folder"
-              value={defaultFolderId ?? ''}
-              onChange={(event) => {
-                onDefaultFolderChange(event.target.value === '' ? null : event.target.value);
+            </span>
+            <button
+              type="button"
+              data-testid="settings-default-folder"
+              aria-label="Default folder for new notes"
+              aria-haspopup="listbox"
+              aria-expanded={picker !== null}
+              onClick={(event) => {
+                /* A toggle, not just an opener: the panel never covers this
+                   button, so pressing it again is always the fastest way to
+                   dismiss the list. */
+                if (picker !== null) {
+                  setPicker(null);
+                  return;
+                }
+                /* Geometry is in hand at the click; measuring later is a second
+                   render for a value already known. */
+                setPicker({ anchor: event.currentTarget, placement: popoverPlacement(event.currentTarget) });
               }}
-              className="w-full rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 text-[13px] text-[var(--text)]"
+              className="flex w-full items-center gap-2 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 text-left text-[13px] text-[var(--text)]"
             >
-              <option value="">None — notes start unfiled</option>
-{options.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {/* Non-breaking spaces, not ordinary ones: a `<select>`
-                      collapses leading whitespace, so a depth indent written
-                      with spaces renders flat and two folders called "Work"
-                      become indistinguishable by depth. */}
-                  {`${'\u00a0\u00a0'.repeat(option.depth)}${option.name}`}
-                </option>
-              ))}
-            </select>
+              <Folder className="icon i-16 flex-none opacity-70" aria-hidden="true" />
+              <span className="flex-1 truncate">
+                {currentName ?? NONE_LABEL}
+              </span>
+              <ChevronDown className="icon i-16 flex-none text-[var(--text-subtle)]" aria-hidden="true" />
+            </button>
             {/* ADR-014: nothing is pre-created, so "None" is the default and a
                 note filed into it is unfiled rather than lost. */}
             {options.length === 0 ? (
@@ -303,6 +463,23 @@ export function SettingsDialog({
             dialog would give the inner one a focus trap inside the outer one's,
             and `Esc` would reach the wrong one. */}
         {confirming ? confirmReset : null}
+        {/* The picker portals to the body but is a React child of the panel, so
+            `onPanelKeyDown` above is what keeps the trap out of it. */}
+        {picker !== null ? (
+          <FolderPicker
+            anchor={picker.anchor}
+            placement={picker.placement}
+            folders={folders}
+            current={defaultFolderId}
+            onPick={(next) => {
+              onDefaultFolderChange(next);
+              setPicker(null);
+            }}
+            onClose={() => {
+              setPicker(null);
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

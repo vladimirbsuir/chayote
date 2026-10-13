@@ -17,6 +17,7 @@ import type { Note, NoteFilter, NoteSummary, SaveNoteInput } from '../types/ipc'
 import { applySaveToList } from '../lib/noteOrder';
 import { NoteEditor } from '../editor/NoteEditor';
 import { EditorStatusBar } from './EditorStatusBar';
+import { FormattingToolbar } from './FormattingToolbar';
 import { EmptyState } from './EmptyState';
 import { summaryOf } from './summaryOf';
 import { FolderPicker, TagEditor } from './StatusPopovers';
@@ -86,6 +87,11 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
      document belongs to TipTap (`10-conventions.md` §7) and nothing else reads it
      during render. */
   const editorRef = useRef<Editor | null>(null);
+  /* The same instance as state for the formatting toolbar. The toolbar reads
+     `isActive`/`can` during render, and a ref write renders nothing — without
+     the mirror its pressed states would freeze at the mount value. Set and
+     cleared beside the ref so both always point at the mounted editor. */
+  const [toolbarEditor, setToolbarEditor] = useState<Editor | null>(null);
 
   /* `04-editor.md` §9: folder and tags are "click to change". Which of the two
      popovers is open, and the element each was opened from — the menu needs the
@@ -187,6 +193,7 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
       setFolderId(data.folderId);
       setTagIds(ids);
       editorRef.current = editor;
+      setToolbarEditor(editor);
       autosave.setBaseline(targetOf(editor) as SaveNoteInput);
     },
     [autosave, noteId, queryClient, targetOf],
@@ -210,6 +217,7 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
   );
 
   const onDispose = useCallback((): void => {
+    setToolbarEditor(null);
     void autosave.flush();
   }, [autosave]);
 
@@ -410,9 +418,20 @@ status={
           folderName={folderId === null ? null : (folderNames.get(folderId) ?? null)}
           tagNames={tagNames}
           onPickFolder={(anchor) => {
+            /* A toggle, like the settings default-folder button: the panel never
+               covers its own anchor, so pressing it again is the fastest way out.
+               Outside press and Esc keep working through the popover itself. */
+            if (popover?.kind === 'folder') {
+              setPopover(null);
+              return;
+            }
             setPopover({ kind: 'folder', anchor, placement: popoverPlacement(anchor) });
           }}
           onEditTags={(anchor) => {
+            if (popover?.kind === 'tags') {
+              setPopover(null);
+              return;
+            }
             setPopover({ kind: 'tags', anchor, placement: popoverPlacement(anchor) });
           }}
           variant={onClose === undefined ? 'desktop' : 'mobile'}
@@ -459,6 +478,10 @@ status={
               isPinned={pinned}
               onTogglePin={togglePin}
               onTrash={onTrash ?? NOOP}
+            />
+            <FormattingToolbar
+              editor={toolbarEditor}
+              variant={onClose === undefined ? 'desktop' : 'mobile'}
             />
             <NoteEditor
               key={data.id}
@@ -528,7 +551,9 @@ function MobileEditorBar({
 }) {
   if (onBack === undefined) return null;
   return (
-    <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2">
+    /* Bar chrome is not selectable: the title is read, never copied — copying
+       happens in the editor below it. */
+    <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 select-none">
       <IconButton label="Back to list" onClick={onBack} size="mobile">
         <ArrowLeft className="icon i-24" aria-hidden="true" />
       </IconButton>

@@ -227,6 +227,23 @@ Every icon used in v1, and nothing else. Adding an icon to the UI means adding i
 | `alert-circle` | Error and warning states |
 | `rotate-cw` | Retry a failed save, reset settings |
 | `inbox` | Empty state for a selection with no notes |
+| `bold` | Formatting toolbar: bold mark |
+| `italic` | Formatting toolbar: italic mark |
+| `strikethrough` | Formatting toolbar: strikethrough mark |
+| `code` | Formatting toolbar: inline code mark |
+| `heading-1` | Formatting toolbar: heading level 1 |
+| `heading-2` | Formatting toolbar: heading level 2 |
+| `heading-3` | Formatting toolbar: heading level 3 |
+| `list` | Formatting toolbar: bullet list |
+| `list-ordered` | Formatting toolbar: ordered list |
+| `list-todo` | Formatting toolbar: task list |
+| `indent-increase` | Formatting toolbar: increase indent (nests lists, indents prose and quotes) |
+| `indent-decrease` | Formatting toolbar: decrease indent (unnests lists, outdents prose and quotes) |
+| `quote` | Formatting toolbar: blockquote |
+| `square-code` | Formatting toolbar: code block |
+| `separator-horizontal` | Formatting toolbar: horizontal rule |
+| `undo-2` | Formatting toolbar: undo |
+| `redo-2` | Formatting toolbar: redo |
 
 #### Bundle and rendering
 
@@ -250,6 +267,7 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 | `NoteCard` | Title, excerpt, timestamp, pinned indicator. Optional folder name when the selection is All or Pinned. Every card carries its own border and surface with an 8 px gap, so adjacent notes read as separate cards; the open card's border is the accent. |
 | `EditorOverflowMenu` | Mobile three-dots menu: pin and trash for the open note. |
 | `EditorPane` | Owns the TipTap instance, autosave state machine, status bar. |
+| `FormattingToolbar` | Static formatting row above the editor content (desktop and mobile): the four marks, H1–H3, bullet / ordered / task lists, increase / decrease indent, blockquote, code block, horizontal rule, undo / redo. Horizontally scrollable; 32 px targets on desktop, 44 px on Android. No paragraph button: pressing an active block button toggles it back to a paragraph, so a dedicated control would duplicate every one of them. The indent buttons are context-sensitive: inside a list they nest / unnest (a nested ordered list restarts at 1), elsewhere they indent / outdent the paragraph, heading, or whole blockquote in 24 px steps up to 7 levels (`04-editor.md` §1.2). |
 | `EditorStatusBar` | Folder, tags, word count, save state (`04-editor.md` §9). |
 | `StatusPopovers` | One listbox component behind both popovers: `TagEditor` for adding and removing tags, `FolderPicker` for changing a note's folder. |
 | `ConfirmDialog` | Destructive confirmation only. Used by permanent delete and empty trash. Never for save or navigation. |
@@ -327,7 +345,7 @@ Creating a folder is inline: a single text input in place, `Enter` commits, `Esc
 
 **A childless folder deletes without a dialog.** The confirmation exists to warn about a subtree; warning about nothing is the interrupt `01-product.md` principle 1 warns against. The dialog names the count of folders that go with it, and says that notes inside are kept and become unfiled — `notes.folder_id` is `ON DELETE SET NULL` (`03-data-model.md` §3.3), so "and its notes" would describe data the app does not delete.
 
-**Folder actions live in a per-row overflow menu**, not in three always-visible controls: a 26 px row has room for the twisty, the folder glyph, the name, and a count, and three more controls would leave the name about forty pixels wide. The menu is `more-horizontal` from the §3.3 inventory, reachable three ways — the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch. Its items are **text, not icons**: the §3.3 inventory is closed and has no edit glyph, and ADR-015 requires adding an icon there before using it. Three distinct English verbs are also §1's "no icons where a word is clearer" applied to a list of rows where a bare verb would be ambiguous about its target. Like the note rows, a folder or tag row swallows the release click after a hold that opened its menu, so the menu never arrives over a changed selection.
+**Folder actions live in a per-row overflow menu**, not in three always-visible controls: a 26 px row has room for the twisty, the folder glyph, the name, and a count, and three more controls would leave the name about forty pixels wide. The menu is `more-horizontal` from the §3.3 inventory, reachable three ways — the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch. Its items are **text, not icons**: the §3.3 inventory is closed and has no edit glyph, and ADR-015 requires adding an icon there before using it. Three distinct English verbs are also §1's "no icons where a word is clearer" applied to a list of rows where a bare verb would be ambiguous about its target. Like the note rows, a folder or tag row swallows the release click after a hold that opened its menu, so the menu never arrives over a changed selection. Like the note rows, the folder rows are not selectable either: a hold over the name must reach the row's `contextmenu`, not the platform's text selection — on the device the name selected instead and no menu opened.
 
 **`F2` renames and `Delete` removes** the focused folder (§7), and both route through the same handler as the menu items. A second implementation of "delete a folder" is how the confirmation ends up counting descendants in one path only.
 
@@ -353,9 +371,9 @@ A tag is created from the sidebar's `+` — an inline input like the folder one,
 
 **Tag actions live in a per-row overflow menu**, like the folder rows': the row's button on hover at `pointer: fine` (§9), right-click (§2.2), and long-press on touch. Its items are **Rename** and **Delete**, text rather than icons for the inventory's reason. Renaming is the same inline input as creating; deleting confirms with the note count and detaches the tag from every note carrying it while the notes themselves survive, returning the selection to All.
 
-**The editor and the picker are one visual language.** Both are portalled popovers anchored to their status-bar slot, and both are listboxes. They are the same component with different options, because a tag editor that looked different from the folder picker would be two visual languages for "choose a value" in a 28 px row. The picker is portalled rather than rendered in place because the status bar sits at the bottom of a `flex` column with its own stacking contexts: in place, the popover would be clipped by the editor pane and could not be raised above it. Its position is measured in the click handler rather than in an effect — the geometry is in hand at the click, and an effect that reads the DOM and then sets state is a second render for a value already known.
+**The editor and the picker are one visual language.** Both are portalled popovers anchored to the control that opened them — a status-bar slot or the settings dialog's default-folder button — and both are listboxes. They are the same component with different options, because a tag editor that looked different from the folder picker would be two visual languages for "choose a value" in a 28 px row. The picker is portalled rather than rendered in place because the status bar sits at the bottom of a `flex` column with its own stacking contexts: in place, the popover would be clipped by the editor pane and could not be raised above it. Its position is measured in the click handler rather than in an effect — the geometry is in hand at the click, and an effect that reads the DOM and then sets state is a second render for a value already known. The panel never covers its own anchor, so pressing the button again always dismisses the list; the list scrolls internally rather than growing over it.
 
-**A `listbox`, not a menu.** Both are choose-one-or-more from a list, and the ARIA pattern for that is a listbox: arrow keys, `Home`/`End` and type-ahead come with it, and the tags listbox is `aria-multiselectable`. The folder picker is a listbox over the tree flattened depth-first, indented by depth — a picker is not a tree, and reusing the folder tree's nested `role="treeitem"` rendering would be neither correct nor reusable.
+**A `listbox`, not a menu.** Both are choose-one-or-more from a list, and the ARIA pattern for that is a listbox: arrow keys, `Home`/`End` and type-ahead come with it, and the tags listbox is `aria-multiselectable`. The folder picker is a listbox over the tree flattened depth-first, indented by depth — a picker is not a tree, and reusing the folder tree's nested `role="treeitem"` rendering would be neither correct nor reusable. The "None" choice sits at the same indent as a top-level folder with no icon, exactly like one. Both pickers carry a filter field for large libraries; the folder one filters only, while the tag one also creates — folder creation stays in the sidebar behind `+`, and a picker that created folders would be a second implementation of it.
 
 **Enter toggles rather than duplicating.** A typed name that matches an existing tag exactly (case-insensitively) adds that tag, because `tags_create` normalises to the first-created spelling and asking it to create `Work` again would be asking for a second `work`. A name that matches nothing creates it, and the hint says so rather than leaving an empty list. When nothing matches and the field is empty, nothing happens.
 
@@ -443,7 +461,7 @@ A modal dialog with:
 | Setting | Control | Default |
 |---------|---------|---------|
 | Theme | Segmented: Light / Dark / System | System |
-| Accent colour | **Six preset swatches plus a custom colour input** | Each theme's own preset 1 |
+| Accent colour | **Six preset swatches plus a custom colour editor behind the palette swatch** | Each theme's own preset 1 |
 | Default folder for new notes | Folder picker, "None" allowed | None — everything starts unfiled |
 | Reset settings | Destructive button with confirmation | — |
 
@@ -453,16 +471,16 @@ A modal dialog with:
 
 | Preset | Light | Dark |
 |--------|-------|------|
-| Default | `#2769ec` | `#4881ef` |
+| Blue | `#2769ec` | `#4881ef` |
 | Green | `#1f7a4d` | `#26975f` |
 | Violet | `#814ef5` | `#9469f7` |
 | Rust | `#c2410c` | `#ea4f0e` |
 | Magenta | `#b91c5c` | `#e44a88` |
 | Teal | `#0f766e` | `#13948a` |
 
-Each value is its hue at the lightness that clears **4.5:1 against its own theme's `--surface-raised`**, held in HSL so the hue and saturation are the preset's and only the lightness moves. Four of the six light values are the reviewed palette unchanged; Default and Violet are the two that did not hold. `src/styles/tokens.test.ts` asserts the ratio over both token tables, which is what makes the claim above true rather than aspirational.
+Each value is its hue at the lightness that clears **4.5:1 against its own theme's `--surface-raised`**, held in HSL so the hue and saturation are the preset's and only the lightness moves. Four of the six light values are the reviewed palette unchanged; Blue and Violet are the two that did not hold. `src/styles/tokens.test.ts` asserts the ratio over both token tables, which is what makes the claim above true rather than aspirational.
 
-**A custom accent is used verbatim, in both themes.** It cannot be a curated pair, and deriving one at runtime was rejected: it puts colour maths and a second rendering of the same colour in the app, for a control that is by definition off the preset list. The custom input therefore shows the colour's contrast against the current theme's surfaces and warns when it is below 4.5:1, so the consequence is visible at the moment of choosing it rather than afterwards. This is the one place the accent can fail the contrast bar, and it is the user's own colour doing it.
+**A custom accent is used verbatim, in both themes.** It cannot be a curated pair, and deriving one at runtime was rejected: it puts colour maths and a second rendering of the same colour in the app, for a control that is by definition off the preset list. A custom colour shows no readout and no contrast warning. This is the one place the accent can fail the contrast bar, and it is the user's own colour doing it.
 
 Reached from the top-bar overflow menu on desktop and tablet, and from the gear on the mobile list bar (§2.4) — every breakpoint has a path to it, which mobile lacked until the dead hamburger became the gear.
 
@@ -484,10 +502,11 @@ Settings live in the Tauri store, never in the notes database, so resetting or s
 | Toggle task complete | `Ctrl/Cmd+Enter` |
 | Undo / redo | `Ctrl/Cmd+Z` · `Ctrl/Cmd+Shift+Z` |
 | Bold / italic / strike / code | `Ctrl/Cmd+B` · `I` · `Shift+X` · `E` |
+| Increase / decrease indent | `Ctrl/Cmd+]` · `Ctrl/Cmd+[` |
 | Move focus: sidebar → editor | `Ctrl/Cmd+Enter` (from the list) |
 | Dismiss: search, dialog, sidebar | `Esc` |
 
-Inside the editor, `Tab` inserts two spaces inside `codeBlock` and indents list items; `Shift+Tab` outdents; `Tab` in a paragraph inserts two spaces, which keeps focus inside the editor and never cycles focus rings. Escape is deliberately unbound in the editor. Standard text navigation keys are untouched, including `Ctrl/Cmd+A`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`, `Ctrl/Cmd+X`.
+Inside the editor, `Tab` inserts two spaces inside `codeBlock` and indents list items; `Shift+Tab` outdents; `Tab` in a paragraph inserts two spaces, which keeps focus inside the editor and never cycles focus rings. Paragraph, heading and blockquote indent is on the toolbar's increase / decrease buttons and on `Ctrl/Cmd+]` / `Ctrl/Cmd+[` — `Tab` deliberately stays as spaces so prose editing never changes a block's indent by accident. Escape is deliberately unbound in the editor. Standard text navigation keys are untouched, including `Ctrl/Cmd+A`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`, `Ctrl/Cmd+X`.
 
 **Strike is `Ctrl/Cmd+Shift+X`, not `Ctrl/Cmd+S`.** An earlier revision of this
 table assigned `Ctrl/Cmd+S` to both *Save now* and *strike*. Save now wins: it is
@@ -498,7 +517,8 @@ Google Docs uses for the same mark, so the muscle memory is the same.
 The four mark shortcuts need editor commands rather than raw keystrokes, so they
 live in the `EditorShortcuts` extension in `src/editor/extensions.ts` and not in
 `editorProps` (`04-editor.md` §2.1). TipTap 3 ships no default keymap for bold,
-italic, or strike, so all four are bound explicitly.
+italic, or strike, so all four are bound explicitly. The indent shortcuts live
+in the `Indent` extension in `src/editor/indent.ts` for the same reason.
 
 On Android, external keyboards should work. The software keyboard shows a `done` action that closes it rather than a newline, since the editor's block behaviour makes a return key less useful than on desktop.
 
@@ -548,6 +568,8 @@ expanding restores the width the user chose rather than snapping back to the
 default.
 
 Hover styling exists only at `pointer: fine`. Every hover affordance has a tap equivalent. Touch targets are at least 44 × 44 px on Android. Long-press opens the context menu on Android; hover shows it on desktop.
+
+**Chrome text is not selectable — only text inputs and the editor content are.** A hold anywhere in the UI is therefore always a gesture (open, menu, edit) and never a text selection: rows, menus, popovers, bars, dialogs, toasts and empty states all carry `select-none`, while text inputs opt back in with `select-text` so they keep their selection toolbar. Copying happens in the editor, not in the chrome around it.
 
 **The sidebar resize separator is a 1 px rule with a wider hit area.** §3.3 sets
 32 × 32 px for icon buttons; a drag handle one pixel wide is correct to look at

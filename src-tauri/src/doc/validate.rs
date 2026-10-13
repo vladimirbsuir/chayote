@@ -127,6 +127,17 @@ fn visit(node: &Value, depth: usize, counter: &mut Counter) -> Result<(), AppErr
         }
     }
 
+    // `04-editor.md` §1.2: `paragraph`, `heading` and `blockquote` carry an
+    // `indent` level of 0–7. Absent means zero; anything else is rejected.
+    if node_type == "paragraph" || node_type == "heading" || node_type == "blockquote" {
+        if let Some(indent) = obj.get("attrs").and_then(|a| a.get("indent")) {
+            match indent.as_i64() {
+                Some(0..=7) => {}
+                _ => return Err(AppError::DocInvalid),
+            }
+        }
+    }
+
     if let Some(children) = obj.get("content").and_then(Value::as_array) {
         for child in children {
             visit(child, depth + 1, counter)?;

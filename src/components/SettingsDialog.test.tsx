@@ -29,6 +29,7 @@ function open(overrides: Partial<Parameters<typeof SettingsDialog>[0]> = {}) {
       theme="light"
       effective="light"
       accent={null}
+      lastCustomHex="#2f6fed"
       defaultFolderId={null}
       folders={FOLDERS}
       onThemeChange={onThemeChange}
@@ -50,6 +51,12 @@ describe('SettingsDialog', () => {
     expect(screen.getByText('Settings')).toBeDefined();
   });
 
+  it('renders its copy unselectable, so a hold never selects a label', () => {
+    open();
+
+    expect(screen.getByTestId('settings-dialog').className).toContain('select-none');
+  });
+
   it('offers the three themes and reports the change', () => {
     const { onThemeChange } = open();
     expect(screen.getAllByRole('radio', { name: /Light|Dark|System/ }).length).toBe(3);
@@ -64,7 +71,7 @@ describe('SettingsDialog', () => {
       .map((node) => node.getAttribute('aria-label'))
       .filter((label): label is string => label !== null);
     expect(names).toEqual([
-      'Default',
+      'Blue',
       'Green',
       'Violet',
       'Rust',
@@ -86,7 +93,7 @@ it('a preset click names that preset, and the first one is the theme default', (
     expect(onAccentChange).toHaveBeenCalledWith({ kind: 'preset', index: 6 });
 
     onAccentChange.mockClear();
-    fireEvent.click(screen.getByRole('radio', { name: 'Default' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Blue' }));
     expect(onAccentChange).toHaveBeenCalledWith({ kind: 'preset', index: 1 });
   });
 
@@ -96,7 +103,7 @@ it('a preset click names that preset, and the first one is the theme default', (
     open({ accent: { kind: 'preset', index: 4 } });
     expect(screen.getByRole('radio', { name: 'Rust' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('radio', { name: 'Teal' }).getAttribute('aria-checked')).toBe('false');
-    expect(screen.getByRole('radio', { name: 'Default' }).getAttribute('aria-checked')).toBe(
+    expect(screen.getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe(
       'false',
     );
   });
@@ -106,7 +113,7 @@ it('a preset click names that preset, and the first one is the theme default', (
        of `11-verification.md` §4 is for. `null` is the first preset — the theme's
        own default — and the readout says so, but no swatch carried the ring. */
     open({ accent: null });
-    expect(screen.getByRole('radio', { name: 'Default' }).getAttribute('aria-checked')).toBe(
+    expect(screen.getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe(
       'true',
     );
     for (const name of ['Green', 'Violet', 'Rust', 'Magenta', 'Teal', 'Custom colour']) {
@@ -117,20 +124,124 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('is one tab stop across all seven accent choices', () => {
-    /* Six presets, a custom swatch and a colour input in a 28 px row: seven tab
-       stops to get past would be the same mistake §10.1 records for the folder
-       tree. Scoped to the accent group — the dialog has two radiogroups and the
-       theme one legitimately has its own tab stop. */
+    /* Seven radios in one row: seven tab stops to get past would be the same
+       mistake §10.1 records for the folder tree. Scoped to the accent group —
+       the dialog has two radiogroups and the theme one legitimately has its own
+       tab stop. */
     open({ accent: null });
     const group = screen.getByRole('radiogroup', { name: 'Accent colour' });
     const stops = Array.from(group.querySelectorAll('[role="radio"]')).filter(
       (node) => node.getAttribute('tabindex') === '0',
     );
     expect(stops).toHaveLength(1);
-    expect(stops[0]?.getAttribute('aria-label')).toBe('Default');
+    expect(stops[0]?.getAttribute('aria-label')).toBe('Blue');
   });
 
   it('a custom click carries the hex, not a preset index', () => {
+    const { onAccentChange } = open({ accent: null });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
+    expect(onAccentChange).toHaveBeenCalledWith({ kind: 'custom', hex: '#2f6fed' });
+  });
+
+  it('uses an in-app editor, never the native colour input', () => {
+    open({ accent: null });
+    expect(document.querySelector('input[type="color"]')).toBeNull();
+  });
+
+  it('shows the custom editor only once the palette swatch is picked', () => {
+    open({ accent: null });
+    expect(screen.queryByLabelText('Custom accent colour as hex')).toBeNull();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
+    expect(screen.getByLabelText('Custom accent colour as hex')).toBeDefined();
+    expect(screen.getByLabelText('Custom colour hue')).toBeDefined();
+    expect(screen.getByLabelText('Custom colour saturation')).toBeDefined();
+    expect(screen.getByLabelText('Custom colour lightness')).toBeDefined();
+  });
+
+  it('shows the custom editor on open when a custom colour is stored', () => {
+    open({ accent: { kind: 'custom', hex: '#123456' } });
+    expect(screen.getByLabelText('Custom accent colour as hex')).toBeDefined();
+  });
+
+  it('hides the custom editor again when a preset is picked', () => {
+    open({ accent: { kind: 'custom', hex: '#123456' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Teal' }));
+    expect(screen.queryByLabelText('Custom accent colour as hex')).toBeNull();
+  });
+
+  it('typing a valid hex applies it as a custom accent', () => {
+    const { onAccentChange } = open({ accent: null });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
+    onAccentChange.mockClear();
+    fireEvent.change(screen.getByLabelText('Custom accent colour as hex'), {
+      target: { value: '#4a4a4a' },
+    });
+    expect(onAccentChange).toHaveBeenCalledWith({ kind: 'custom', hex: '#4a4a4a' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('typing an invalid hex warns and applies nothing', () => {
+    const { onAccentChange } = open({ accent: null });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
+    onAccentChange.mockClear();
+    fireEvent.change(screen.getByLabelText('Custom accent colour as hex'), {
+      target: { value: '#12' },
+    });
+    expect(onAccentChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('#rrggbb');
+  });
+
+  it('moving a slider applies a custom accent without any native dialog', () => {
+    const { onAccentChange } = open({ accent: null });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
+    onAccentChange.mockClear();
+    fireEvent.change(screen.getByLabelText('Custom colour hue'), {
+      target: { value: '120' },
+    });
+    expect(onAccentChange).toHaveBeenCalled();
+    const applied = onAccentChange.mock.calls[0]?.[0] as { kind: string; hex: string };
+    expect(applied.kind).toBe('custom');
+    expect(applied.hex).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it('restores the remembered custom colour behind a preset', () => {
+    /* Switching to a preset must not forget the custom colour: reopening the
+       palette offers what was picked, not the fallback. */
+    const { onAccentChange } = open({
+      accent: { kind: 'preset', index: 2 },
+      lastCustomHex: '#123456',
+    });
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
+    expect(onAccentChange).toHaveBeenCalledWith({ kind: 'custom', hex: '#123456' });
+    expect(screen.getByLabelText<HTMLInputElement>('Custom accent colour as hex').value).toBe(
+      '#123456',
+    );
+  });
+
+  it('syncs the editor when the stored accent lands after mount', () => {
+    /* On a cold start hydration can resolve after the dialog mounts: the ring
+       follows the live prop but the editor flag was snapshotted shut. */
+    const props = {
+      theme: 'light' as const,
+      effective: 'light' as const,
+      accent: null,
+      lastCustomHex: '#123456',
+      defaultFolderId: null,
+      folders: FOLDERS,
+      onThemeChange: () => {},
+      onAccentChange: () => {},
+      onDefaultFolderChange: () => {},
+      onClose: () => {},
+      confirmReset: null as React.ReactNode,
+    };
+    const { rerender } = render(<SettingsDialog {...props} />);
+    expect(screen.queryByLabelText('Custom accent colour as hex')).toBeNull();
+    rerender(<SettingsDialog {...props} accent={{ kind: 'custom', hex: '#123456' }} />);
+    expect(screen.getByLabelText('Custom accent colour as hex')).toBeDefined();
+  });
+
+  it('falls back only when no custom colour was ever picked', () => {
     const { onAccentChange } = open({ accent: null });
     fireEvent.click(screen.getByRole('radio', { name: 'Custom colour' }));
     expect(onAccentChange).toHaveBeenCalledWith({ kind: 'custom', hex: '#2f6fed' });
@@ -142,6 +253,7 @@ it('a preset click names that preset, and the first one is the theme default', (
         theme="dark"
         effective="dark"
         accent={null}
+        lastCustomHex="#2f6fed"
         defaultFolderId={null}
         folders={[]}
         onThemeChange={() => {}}
@@ -155,28 +267,27 @@ it('a preset click names that preset, and the first one is the theme default', (
     unmount();
   });
 
-  it('reports a custom colour that is too weak, with its ratio', () => {
-    /* §6.6 and ADR-019: a custom accent is the one thing that can fall under
-       4.5:1, and the user should learn that while choosing it. */
+  it('shows no readout at all for a custom colour, weak or not', () => {
+    /* A custom colour carries no "Custom #hex — ratio" string, whatever its
+       contrast. */
     open({ accent: { kind: 'custom', hex: '#cccccc' } });
-    expect(screen.getByText(/below the 4\.5:1/)).toBeDefined();
+    expect(screen.queryByText(/below the 4\.5:1/)).toBeNull();
+    expect(screen.queryByText(/Custom #/)).toBeNull();
   });
 
-  it('does not warn about a custom colour that passes', () => {
+  it('shows no readout for a custom colour that passes either', () => {
     open({ accent: { kind: 'custom', hex: '#1a3fa8' } });
     expect(screen.queryByText(/below the 4\.5:1/)).toBeNull();
-    expect(screen.getByText(/Custom #1a3fa8 — \d+\.\d:1$/)).toBeDefined();
+    expect(screen.queryByText(/Custom #/)).toBeNull();
   });
 
-  it('measures against the raised surface of the theme in effect', () => {
-    /* `#4a4a4a` clears 4.5:1 on the light raised surface and fails it on the
-       dark one. Reading the wrong surface would make the warning either silent
-       or constant, and either way the user would stop believing it. */
+  it('names a preset with its own name, in either theme', () => {
     const { unmount } = render(
       <SettingsDialog
         theme="light"
         effective="light"
-        accent={{ kind: 'custom', hex: '#4a4a4a' }}
+        accent={{ kind: 'preset', index: 1 }}
+        lastCustomHex="#2f6fed"
         defaultFolderId={null}
         folders={[]}
         onThemeChange={() => {}}
@@ -186,14 +297,15 @@ it('a preset click names that preset, and the first one is the theme default', (
         confirmReset={null}
       />,
     );
-    expect(screen.queryByText(/below the 4\.5:1/)).toBeNull();
+    expect(screen.getByText('Blue — #2769ec')).toBeDefined();
     unmount();
 
     render(
       <SettingsDialog
         theme="dark"
         effective="dark"
-        accent={{ kind: 'custom', hex: '#4a4a4a' }}
+        accent={{ kind: 'preset', index: 1 }}
+        lastCustomHex="#2f6fed"
         defaultFolderId={null}
         folders={[]}
         onThemeChange={() => {}}
@@ -203,28 +315,86 @@ it('a preset click names that preset, and the first one is the theme default', (
         confirmReset={null}
       />,
     );
-    expect(screen.getByText(/below the 4\.5:1/)).toBeDefined();
+    expect(screen.getByText('Blue — #4881ef')).toBeDefined();
   });
 
   it('offers "None" for the default folder and indents children', () => {
     /* §6.1 resolves a new note's folder from this, and ADR-014 means "None" is
-       the state first launch is in. */
+       the state first launch is in. The picker is the shared `FolderPicker` —
+       flattened depth-first and indented by depth, as the status-bar one is. */
     open();
-    const select: HTMLSelectElement = screen.getByLabelText('Default folder for new notes');
-    const options = Array.from(select.options);
-    expect(options[0]?.textContent).toBe('None — notes start unfiled');
-    /* Flattened depth-first and indented by depth, as the folder picker in the
-       status bar is — a picker is a list of choices, not a tree. */
-    expect(options.map((option) => option.textContent.trim())).toEqual([
-      'None — notes start unfiled',
+
+    expect(
+      screen.getByRole('button', { name: 'Default folder for new notes' }).textContent,
+    ).toContain('None');
+    fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
+
+    const options = screen.getAllByTestId('folder-picker-option');
+    expect(options.map((option) => option.textContent)).toEqual([
+      'None',
       'Work',
       'Projects',
     ]);
-    const projects = options[2];
-    /* Non-breaking, not ordinary: `<select>` collapses leading whitespace, so an
-       indent written with spaces renders flat and depth is lost in the popup. */
-    expect(projects?.textContent.startsWith('\u00a0\u00a0')).toBe(true);
-    expect(projects?.value).toBe('f-projects');
+    /* Indented by depth in the option's own padding, not by whitespace: Work
+       sits one level in at 20 px, its child Projects two at 34 px — the None
+       option occupies depth zero. */
+    expect(options[1]?.style.paddingLeft).toBe('20px');
+    expect(options[2]?.style.paddingLeft).toBe('34px');
+  });
+
+  it('picks a folder through the shared picker and closes it', () => {
+    const { onDefaultFolderChange } = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
+
+    fireEvent.click(screen.getByRole('option', { name: 'Work' }));
+
+    expect(onDefaultFolderChange).toHaveBeenCalledWith('f-work');
+    expect(screen.queryByTestId('folder-picker-list')).toBeNull();
+  });
+
+  it('names the picked folder on the button', () => {
+    open({ defaultFolderId: 'f-work' });
+
+    expect(
+      screen.getByRole('button', { name: 'Default folder for new notes' }).textContent,
+    ).toContain('Work');
+  });
+
+  it('picks "None" back to unfiled', () => {
+    const { onDefaultFolderChange } = open({ defaultFolderId: 'f-work' });
+    fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
+
+    fireEvent.click(screen.getByRole('option', { name: 'None' }));
+
+    expect(onDefaultFolderChange).toHaveBeenCalledWith(null);
+  });
+
+  it('closes the picker on Escape without closing the dialog', () => {
+    const { onClose } = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
+    expect(screen.getByTestId('folder-picker-list')).toBeDefined();
+
+    /* The picker's own document listener consumes the key; the panel trap
+       ignores keys from outside the panel's DOM, so the dialog stays. */
+    fireEvent.keyDown(screen.getByTestId('folder-picker-list'), { key: 'Escape' });
+
+    expect(screen.queryByTestId('folder-picker-list')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeDefined();
+  });
+
+  it('closes the picker by pressing the button again', () => {
+    /* The panel never covers the button, so pressing it again is always the
+       fastest way to dismiss the list. */
+    open();
+    const button = screen.getByRole('button', { name: 'Default folder for new notes' });
+
+    fireEvent.click(button);
+    expect(screen.queryByTestId('folder-picker-list')).not.toBeNull();
+
+    fireEvent.click(button);
+    expect(screen.queryByTestId('folder-picker-list')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeDefined();
   });
 
   it('says so when there are no folders, rather than showing an empty select', () => {

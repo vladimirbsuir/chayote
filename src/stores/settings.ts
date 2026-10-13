@@ -19,6 +19,7 @@ export type SettingsState = Settings & {
   hydrated: boolean;
   setTheme: (theme: Theme) => void;
   setAccent: (accent: AccentChoice) => void;
+  setLastCustomHex: (hex: string) => void;
   setDefaultFolderId: (id: Uuid | null) => void;
   setSidebarWidth: (width: number) => void;
   sidebarCollapsed: boolean;
@@ -37,6 +38,7 @@ export type SettingsState = Settings & {
 const PERSISTED: ReadonlyArray<keyof Settings> = [
   'theme',
   'accent',
+  'lastCustomHex',
   'defaultFolderId',
   'sidebarWidth',
   'sidebarCollapsed',
@@ -75,6 +77,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     },
     setAccent: (accent) => {
       update({ accent });
+    },
+    setLastCustomHex: (lastCustomHex) => {
+      update({ lastCustomHex });
     },
     setDefaultFolderId: (defaultFolderId) => {
       update({ defaultFolderId });

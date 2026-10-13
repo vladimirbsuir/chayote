@@ -703,6 +703,45 @@ fn nesting_deeper_than_twelve_is_rejected() {
     );
 }
 
+#[test]
+fn indent_levels_zero_to_seven_save_and_eight_is_rejected() {
+    let f = fixture("doc-indent");
+    let repo = notes(&f.db);
+    let created = repo.create(None).expect("create");
+
+    // `04-editor.md` §1.2: paragraph, heading and blockquote carry 0–7.
+    let indented = json!({"type": "doc", "content": [
+        {"type": "paragraph", "attrs": {"indent": 3},
+         "content": [{"type": "text", "text": "indented"}]},
+        {"type": "heading", "attrs": {"level": 2, "indent": 7},
+         "content": [{"type": "text", "text": "deep"}]},
+        {"type": "blockquote", "attrs": {"indent": 1}, "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "quoted"}]}]},
+    ]});
+    let attempt = SaveNoteInput {
+        id: created.summary.id.clone(),
+        doc: indented,
+        folder_id: None,
+        tag_ids: vec![],
+        is_pinned: false,
+    };
+    repo.save(&attempt).expect("indent 0–7 saves");
+
+    let attempt = SaveNoteInput {
+        id: created.summary.id.clone(),
+        doc: json!({"type": "doc", "content": [
+            {"type": "paragraph", "attrs": {"indent": 8},
+             "content": [{"type": "text", "text": "too far"}]}]}),
+        folder_id: None,
+        tag_ids: vec![],
+        is_pinned: false,
+    };
+    assert_eq!(
+        repo.save(&attempt).expect_err("must reject").code(),
+        "DOC_INVALID"
+    );
+}
+
 // ------------------------------------------------------- selection and order
 
 #[test]
@@ -1066,7 +1105,7 @@ fn tag_counts_exclude_notes_in_the_trash_and_show_empty_tags() {
     }
 
     /* ADR-021: a tag with no live notes stays listed at a zero count, so tags
-       can be created before any note carries them. Ordered by name. */
+    can be created before any note carries them. Ordered by name. */
     let listed = tags.list().expect("list");
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].id, lonely.id);
@@ -1117,7 +1156,7 @@ fn removing_a_tag_from_a_note_leaves_the_tag_alone() {
     let reloaded = repo.get(&note.summary.id).expect("note");
     assert!(reloaded.summary.tags.is_empty(), "detached from the note");
     /* ADR-021: detaching the last note leaves a visible zero-count tag rather
-       than hiding the row — the tag itself survives either way. */
+    than hiding the row — the tag itself survives either way. */
     let listed = tags.list().expect("list");
     assert_eq!(listed.len(), 1, "the tag itself survives");
     assert_eq!(listed[0].count, 0);

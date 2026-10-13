@@ -54,7 +54,8 @@ export function ConfirmDialog({
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-body"
         onKeyDown={onKeyDown}
-        className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
+        /* Dialog copy is chrome, not content: read, never copied. */
+        className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
       >
         {/* No close button: `Esc` and a scrim click both dismiss, and the two
             buttons at the foot are the whole of the decision. The prototype's
