@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
+  AlertCircle,
   ChevronDown,
   ChevronRight,
   FilePlus,
@@ -118,6 +119,10 @@ type SidebarProps = {
   onDeleteTag: (id: Uuid) => Promise<void>;
   /** Shown where a tag write failed. Same contract as `onFolderError`. */
   onTagError?: (message: string) => void;
+  /** Parked remote documents awaiting a keep-mine/use-theirs choice (§5.1).
+      Optional so callers without sync — tests — render no badge. */
+  conflictCount?: number;
+  onOpenConflicts?: () => void;
 };
 
 export function Sidebar({
@@ -159,6 +164,8 @@ export function Sidebar({
   onTagError,
   onToggleFoldersCollapsed: onToggleFoldersCollapsedProp,
   onToggleTagsCollapsed: onToggleTagsCollapsedProp,
+  conflictCount,
+  onOpenConflicts,
 }: SidebarProps) {
   const header = useMemo(
     () => headerFor(selection, notes ?? EMPTY_NOTES, folderNames, tags, search),
@@ -223,8 +230,7 @@ export function Sidebar({
   const openTagMenu = (id: Uuid, anchor: HTMLElement): void => {
     const rect = anchor.getBoundingClientRect();
     const up =
-      rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight &&
-      rect.top > MENU_ESTIMATED_HEIGHT;
+      rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight && rect.top > MENU_ESTIMATED_HEIGHT;
     setTagMenu({
       id,
       placement: {
@@ -386,134 +392,138 @@ export function Sidebar({
         />
         {tagsIsCollapsed ? null : (
           <div id="sidebar-tags" className="max-h-[25vh] overflow-y-auto px-2 pb-[10px]">
-          {tags === undefined || tags.length === 0 ? (
-            <p className="px-[6px] py-1 text-[13px] text-[var(--text-subtle)]">No tags yet</p>
-          ) : (
-            tags.map((tag) => {
-              const active = selection.kind === 'tag' && selection.id === tag.id;
-              /* A row being renamed is not a row any more: it is an input, the
+            {tags === undefined || tags.length === 0 ? (
+              <p className="px-[6px] py-1 text-[13px] text-[var(--text-subtle)]">No tags yet</p>
+            ) : (
+              tags.map((tag) => {
+                const active = selection.kind === 'tag' && selection.id === tag.id;
+                /* A row being renamed is not a row any more: it is an input, the
                  same swap the folder rows make, so the old name is not left in
                  the list beside a second control in the tab order. */
-              if (renamingTag !== null && renamingTag.id === tag.id) {
+                if (renamingTag !== null && renamingTag.id === tag.id) {
+                  return (
+                    <div key={tag.id}>
+                      <InlineNameInput
+                        label={`Rename ${tag.name}`}
+                        placeholder="Tag name"
+                        testId="tag-name-input"
+                        value={renamingTag.name}
+                        error={tagError}
+                        onChange={(name) => {
+                          setRenamingTag({ id: tag.id, name });
+                          setTagError(null);
+                        }}
+                        onCommit={commitTagRename}
+                        onCancel={closeTagEditing}
+                      />
+                    </div>
+                  );
+                }
                 return (
-                  <div key={tag.id}>
-                    <InlineNameInput
-                      label={`Rename ${tag.name}`}
-                      placeholder="Tag name"
-                      testId="tag-name-input"
-                      value={renamingTag.name}
-                      error={tagError}
-                      onChange={(name) => {
-                        setRenamingTag({ id: tag.id, name });
-                        setTagError(null);
-                      }}
-                      onCommit={commitTagRename}
-                      onCancel={closeTagEditing}
-                    />
-                  </div>
-                );
-              }
-              return (
-                <div
-                  key={tag.id}
-                  data-testid="tag-row"
-                  data-tag-id={tag.id}
-                  aria-current={active ? 'true' : undefined}
-                  onClick={() => {
-                    if (suppressTagOpenRef.current) {
-                      suppressTagOpenRef.current = false;
-                      return;
-                    }
-                    onSelect({ kind: 'tag', id: tag.id });
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
+                  <div
+                    key={tag.id}
+                    data-testid="tag-row"
+                    data-tag-id={tag.id}
+                    aria-current={active ? 'true' : undefined}
+                    onClick={() => {
+                      if (suppressTagOpenRef.current) {
+                        suppressTagOpenRef.current = false;
+                        return;
+                      }
                       onSelect({ kind: 'tag', id: tag.id });
-                    }
-                    /* §7: `ContextMenu` opens the focused row's menu — the
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onSelect({ kind: 'tag', id: tag.id });
+                      }
+                      /* §7: `ContextMenu` opens the focused row's menu — the
                        application key on a Windows keyboard, and the standard
                        way to ask for a menu. */
-                    if (event.key === 'ContextMenu') {
-                      event.preventDefault();
-                      openTagMenu(tag.id, event.currentTarget);
-                    }
-                  }}
-                  /* §2.2 and §9: right-click on desktop, long-press on touch,
+                      if (event.key === 'ContextMenu') {
+                        event.preventDefault();
+                        openTagMenu(tag.id, event.currentTarget);
+                      }
+                    }}
+                    /* §2.2 and §9: right-click on desktop, long-press on touch,
                      and the row's own button, all reach the same menu. The row
                      is not selectable: on a text-rich row a hold becomes a
                      text selection and no `contextmenu` fires at all — measured
                      on the note cards, where a hold grabbed a header two rows
                      up. Copying happens in the editor, not in the list. */
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    /* Only a fresh open can precede a release click: when a
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      /* Only a fresh open can precede a release click: when a
                        menu is already up the press replaces it, and no click
                        follows that. */
-                    if (tagMenu === null) suppressTagOpenRef.current = true;
-                    openTagMenu(tag.id, event.currentTarget);
-                  }}
-                  className={`group relative flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] py-0 pr-2 pl-1 text-[13px] transition-colors select-none ${
-                    active
-                      ? 'bg-[var(--accent-soft)] font-medium text-[var(--accent)]'
-                      : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
-                  }`}
-                >
-                  {/* The header chevron's width as a spacer, mirroring the folder
+                      if (tagMenu === null) suppressTagOpenRef.current = true;
+                      openTagMenu(tag.id, event.currentTarget);
+                    }}
+                    className={`group relative flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[var(--r-input)] py-0 pr-2 pl-1 text-[13px] transition-colors select-none ${
+                      active
+                        ? 'bg-[var(--accent-soft)] font-medium text-[var(--accent)]'
+                        : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
+                    }`}
+                  >
+                    {/* The header chevron's width as a spacer, mirroring the folder
                       rows: the tag glyph hangs under the section glyph the way a
                       folder glyph hangs under its header's, at any root size. */}
-                  <span aria-hidden="true" className="w-5 flex-none" />
-                  <Hash
-                    data-testid="tag-icon"
-                    className="icon i-16 flex-none opacity-70"
-                    aria-hidden="true"
-                  />
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">{tag.name}</span>
-                  <span className="ml-auto pl-1 text-[11px] text-[var(--text-subtle)]">{tag.count}</span>
-                  {tagMenu !== null && tagMenu.id === tag.id ? (
-                    <TagRowMenu
-                      tagId={tag.id}
-                      tagName={tag.name}
-                      placement={tagMenu.placement}
-                      onAction={runTagMenuAction}
-                      onClose={closeTagMenu}
+                    <span aria-hidden="true" className="w-5 flex-none" />
+                    <Hash
+                      data-testid="tag-icon"
+                      className="icon i-16 flex-none opacity-70"
+                      aria-hidden="true"
                     />
-                  ) : (
-                    /* `pointer-fine:group-hover:flex`, in that order: `hidden`
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                      {tag.name}
+                    </span>
+                    <span className="ml-auto pl-1 text-[11px] text-[var(--text-subtle)]">
+                      {tag.count}
+                    </span>
+                    {tagMenu !== null && tagMenu.id === tag.id ? (
+                      <TagRowMenu
+                        tagId={tag.id}
+                        tagName={tag.name}
+                        placement={tagMenu.placement}
+                        onAction={runTagMenuAction}
+                        onClose={closeTagMenu}
+                      />
+                    ) : (
+                      /* `pointer-fine:group-hover:flex`, in that order: `hidden`
                        first so the button is absent by default, then the two
                        variants that turn it on. §9 says hover styling exists at
                        `pointer: fine` and nowhere else. On touch the menu opens
                        by long-press instead. */
-                    <span className="ml-auto hidden flex-none pointer-fine:group-hover:flex">
-                      <TagMenuButton
-                        tagName={tag.name}
-                        onOpen={(button) => {
-                          openTagMenu(tag.id, button);
-                        }}
-                      />
-                    </span>
-                  )}
-                </div>
-              );
-            })
-          )}
-          {/* The create input sits after the list, where the root folder input
+                      <span className="ml-auto hidden flex-none pointer-fine:group-hover:flex">
+                        <TagMenuButton
+                          tagName={tag.name}
+                          onOpen={(button) => {
+                            openTagMenu(tag.id, button);
+                          }}
+                        />
+                      </span>
+                    )}
+                  </div>
+                );
+              })
+            )}
+            {/* The create input sits after the list, where the root folder input
               sits after the tree: a new tag joins the top level (§6.4). */}
-          {creatingTag ? (
-            <InlineNameInput
-              label="New tag name"
-              placeholder="Tag name"
-              testId="tag-name-input"
-              value={tagName}
-              error={tagError}
-              onChange={(name) => {
-                setTagName(name);
-                setTagError(null);
-              }}
-              onCommit={commitTagCreate}
-              onCancel={closeTagEditing}
-            />
-          ) : null}
+            {creatingTag ? (
+              <InlineNameInput
+                label="New tag name"
+                placeholder="Tag name"
+                testId="tag-name-input"
+                value={tagName}
+                error={tagError}
+                onChange={(name) => {
+                  setTagName(name);
+                  setTagError(null);
+                }}
+                onCommit={commitTagCreate}
+                onCancel={closeTagEditing}
+              />
+            ) : null}
           </div>
         )}
       </section>
@@ -544,7 +554,9 @@ export function Sidebar({
             {/* §6.2: emptying the trash is destructive and irreversible, so it is
                 here rather than on a card, and only when there is something to
                 empty. */}
-            {selection.kind === 'trash' && onEmptyTrash !== undefined && (notes?.length ?? 0) > 0 ? (
+            {selection.kind === 'trash' &&
+            onEmptyTrash !== undefined &&
+            (notes?.length ?? 0) > 0 ? (
               <button
                 type="button"
                 data-testid="empty-trash"
@@ -556,6 +568,23 @@ export function Sidebar({
             ) : null}
           </div>
         </header>
+
+        {/* §5.1: a both-sides-changed note never auto-merges — the remote copy
+            is parked and this non-modal badge says so. It opens Settings on
+            the Sync tab, where the choice lives; it never blocks the list. */}
+        {(conflictCount ?? 0) > 0 ? (
+          <button
+            type="button"
+            data-testid="sync-conflict-badge"
+            onClick={onOpenConflicts}
+            className="flex flex-none items-center justify-center gap-1 border-b border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--text)]"
+          >
+            <AlertCircle className="icon i-16" aria-hidden="true" />
+            {conflictCount === 1
+              ? '1 note changed on another device — review'
+              : `${conflictCount} notes changed on another device — review`}
+          </button>
+        ) : null}
 
         {/* ADR-014's first-launch state is a state of the *selection*, so a
             search with no hits is not one. Reaching it with the field full would
@@ -588,13 +617,13 @@ export function Sidebar({
       {pendingDeleteTag === null ? null : (
         <ConfirmDialog
           title={`Delete “${pendingDeleteTag.name}”?`}
-        body={
-          pendingDeleteTag.count === 0
-            ? `The tag is not used by any note.`
-            : pendingDeleteTag.count === 1
-              ? `The tag is removed from 1 note. The note itself is kept.`
-              : `The tag is removed from ${pendingDeleteTag.count} notes. The notes themselves are kept.`
-        }
+          body={
+            pendingDeleteTag.count === 0
+              ? `The tag is not used by any note.`
+              : pendingDeleteTag.count === 1
+                ? `The tag is removed from 1 note. The note itself is kept.`
+                : `The tag is removed from ${pendingDeleteTag.count} notes. The notes themselves are kept.`
+          }
           confirmLabel="Delete tag"
           onCancel={() => {
             setPendingDeleteTag(null);
@@ -707,9 +736,12 @@ function SectionHead({
 }) {
   const expanded = collapsed !== true;
   return (
-    <div className="flex items-center gap-[6px] px-3 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
+    <div className="flex items-center gap-[6px] px-3 pt-3 pb-2 text-[11px] font-semibold tracking-[0.06em] text-[var(--text-muted)] uppercase">
       {onToggleCollapsed === undefined ? (
-        <span data-testid={`section-icon-${label.toLowerCase()}`} className="flex text-[var(--text-subtle)]">
+        <span
+          data-testid={`section-icon-${label.toLowerCase()}`}
+          className="flex text-[var(--text-subtle)]"
+        >
           {icon}
         </span>
       ) : (

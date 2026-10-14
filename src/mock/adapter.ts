@@ -49,6 +49,7 @@ function foldCase(value: string): string {
 
 export function createMockBackend(db: MockDatabase): Backend {
   const state = db;
+  const syncState = { connectionString: '', enabled: false };
 
   const liveNotes = (): MockNote[] => state.notes;
 
@@ -111,7 +112,7 @@ export function createMockBackend(db: MockDatabase): Backend {
       return toNote(existing, state);
     },
 
-notes_move: ({ id, folderId }) => {
+    notes_move: ({ id, folderId }) => {
       const note = requireNote(id);
       if (folderId !== null && !state.folders.some((folder) => folder.id === folderId)) {
         throw notFound();
@@ -198,7 +199,10 @@ notes_move: ({ id, folderId }) => {
       if (newParentId !== null && collectSubtree(state, id).includes(newParentId)) {
         throw cycleDetected();
       }
-      if (newParentId !== null && !state.folders.some((candidate) => candidate.id === newParentId)) {
+      if (
+        newParentId !== null &&
+        !state.folders.some((candidate) => candidate.id === newParentId)
+      ) {
         throw notFound();
       }
       // `position` is sibling-local and densified, matching the Rust side.
@@ -305,6 +309,45 @@ notes_move: ({ id, folderId }) => {
     },
 
     window_ready: () => undefined,
+
+    /* Sync has no server in the browser fallback: the config round-trips in
+       memory so the Settings Sync tab is drivable, and every other command
+       answers the empty shape. `sync_set_config` validates like the Rust
+       side so a bad string fails in a browser exactly where it fails on a
+       device. */
+    sync_get_status: () => ({
+      configured: syncState.connectionString.length > 0,
+      enabled: syncState.enabled,
+      pendingCount: 0,
+      conflictCount: 0,
+      lastSyncedAt: null,
+      lastAttemptAt: null,
+      lastError: null,
+    }),
+
+    sync_set_config: ({ connectionString, enabled }) => {
+      const clean = connectionString.trim();
+      if (!clean.startsWith('postgresql://') && !clean.startsWith('postgres://')) {
+        throw validation(
+          'That does not look like a Postgres connection string — it should start with postgresql://.',
+        );
+      }
+      syncState.connectionString = clean;
+      syncState.enabled = enabled;
+    },
+
+    sync_now: () => {
+      if (!syncState.enabled || syncState.connectionString.length === 0) {
+        throw validation(
+          'Sync is not configured yet — paste a connection string under Settings → Sync.',
+        );
+      }
+      return { pushed: 0, pulled: 0, conflicts: 0, alreadyRunning: false };
+    },
+
+    sync_list_conflicts: () => [],
+
+    sync_resolve_conflict: () => undefined,
   };
 
   function invoke<C extends CommandName>(
@@ -323,7 +366,12 @@ notes_move: ({ id, folderId }) => {
 
 /// Sibling-local positions are densified on every move, so the list never
 /// accumulates gaps. A no-op move leaves siblings untouched.
-function densifyFolders(db: MockDatabase, parentId: Uuid | null, movingId: Uuid, target: number): void {
+function densifyFolders(
+  db: MockDatabase,
+  parentId: Uuid | null,
+  movingId: Uuid,
+  target: number,
+): void {
   const siblings = db.folders
     .filter((folder) => folder.parentId === parentId && folder.id !== movingId)
     .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));

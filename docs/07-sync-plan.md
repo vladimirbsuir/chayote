@@ -1,6 +1,6 @@
 # 07 — Sync Plan (Supabase / Postgres)
 
-**Status:** Direction frozen, implementation **not started**. Last updated 2026-10-07.
+**Status:** Direction frozen; MVP implemented on branch `feat/sync-mvp` (single general Postgres engine, no Auth, Settings → Sync tab, status + conflict UI). Last updated 2026-10-13.
 
 **v1 ships without sync.** This document exists so the v1 code does not paint us into a corner, and so the later phase has a design instead of a blank page. Nothing here is implemented in v1. What *is* implemented in v1 is the outbox table and the schema fields that this plan depends on — see `03-data-model.md` §3.7.
 
@@ -22,46 +22,39 @@
 └──────┬───────┘
        │ repository trait
 ┌──────▼──────────┐         ┌─────────────────────┐
-│ SQLite + outbox │◄───────►│ Supabase            │
-│ (always)       │  drain  │ Postgres + RLS      │
-└─────────────────┘         │ Realtime (optional) │
-                            └─────────────────────┘
+│ SQLite + outbox │◄───────►│ Any Postgres        │
+│ (always)        │  drain  │ (connection string) │
+└─────────────────┘         └─────────────────────┘
 ```
 
-The same repository trait has two implementations: `SqliteNotesRepo` (v1) and `SupabaseNotesRepo` (later). The sync layer is a coordinator above the trait that drains the outbox and applies inbound changes. It is not a third data path.
+One general Postgres implementation, no provider-specific code: the sync
+layer above the repository trait drains the outbox and applies inbound
+changes. It is not a third data path, and there is no second trait
+implementation. There are no accounts: the connection string is the
+credential, and sync is settings-gated rather than feature-flagged — a user
+who never configures it runs exactly the v1 build.
 
 ## 3. Phase plan
 
-| Phase | Scope | Milestone |
-|-------|-------|-----------|
-| A | Schema in Postgres, RLS policies, Supabase Auth, nothing wired | post-v1.0 |
-| B | Push: outbox drain loop, one entity type at a time, tags → folders → notes | post-v1.1 |
-| C | Pull: incremental fetch by `rev` watermark, apply with conflict checks | post-v1.1 |
-| D | Bootstrap: first sign-in uploads the local database | post-v1.1 |
-| E | Background sync, retry, status UI, per-device settings | post-v1.2 |
-| F | Search across devices (`tsvector`) | post-v1.2 |
-| G | Optional realtime push | not planned |
+| Phase | Scope | Status |
+|-------|-------|--------|
+| A | Server schema (`postgres/schema.sql`), single-user, no RLS, no Auth | done on `feat/sync-mvp` |
+| B | Push: outbox drain loop, tags → folders → notes | done |
+| C | Pull: incremental fetch by `rev` watermark, apply with conflict checks | done |
+| D | Bootstrap: falls out of the drain; switching servers re-queues everything | done |
+| E | Retry/backoff polish, open-editor guard | open |
 
-Each phase ships behind a feature flag and is disabled by default. A user who never signs in runs exactly the v1 build.
+Phases F (cross-device search) and G (realtime push) were dropped, not
+deferred: there is no server search and no live updates, by decision.
 
-## 4. Postgres schema and RLS
+## 4. Server schema
 
-Every table carries `user_id uuid NOT NULL REFERENCES auth.users(id)`, plus `rev bigint NOT NULL DEFAULT 0`, `updated_at bigint NOT NULL`, `deleted_at timestamptz`.
-
-RLS, enabled on every table, with no policy that grants access across users:
-
-```sql
-ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY notes_own ON notes
-  FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
-```
-
-The same four statements repeat for `folders`, `tags`, `note_tags`. There is no shared-note model in v1, so `USING` and `WITH CHECK` are the same predicate. Security-definer functions are avoided; service-role keys never reach the client.
-
-`user_id` is the only column the local database does not have. Adding it later is a migration, not a redesign, because no local query filters on it.
+Authoritative SQL lives in `postgres/schema.sql`, applied once per server.
+Single user: no `user_id` column, no RLS, no Auth — the connection string is
+the credential. Every table carries `rev bigint` from one global sequence
+(`sync_rev_seq`), assigned by the server on every accepted write and echoed
+back to the device (R4); timestamps are epoch-ms bigints, exactly like the
+device, so there is no timezone mapping anywhere.
 
 ## 5. Conflict policy
 
@@ -104,91 +97,85 @@ This asymmetry is a known, accepted cost of using a relational model for somethi
 
 ### 5.4 Deletes
 
-Soft deletes propagate as tombstone writes. Tombstones are retained server-side for 90 days before hard deletion, and locally until every device has acknowledged past the tombstone's `rev`. Permanent delete is refused while `rev` has never been synced, so a never-pushed note cannot vanish from another device without ever existing there.
+Soft deletes propagate as tombstone writes. Tombstones are retained
+**indefinitely** — there is intentionally no GC: at personal scale a
+tombstone is a few dozen bytes, while deleting them reopens the one real
+hazard, a device offline past the retention window coming back and
+resurrecting what it never saw deleted. Permanent delete is refused while
+`rev` has never been synced, so a never-pushed note cannot vanish from
+another device without ever existing there.
 
 ## 6. Bootstrap
 
-First sign-in on a device with existing local data:
-
-1. Create the user, get `user_id`, set it on all local rows in one transaction.
-2. Push everything through the normal outbox path, in dependency order: tags → folders → notes → `note_tags`.
-3. Only then enable the pull path.
-4. If a row's ID already exists remotely, treat it as a conflict per §5.
-
-Alternative — sign in before creating anything — makes bootstrap trivial but forces an account at first launch, which contradicts principle 1. Bootstrap order stays local-first.
+First sync on a device with existing local data needs no special case: the
+outbox has recorded every local write since day one, so draining it in
+dependency order — tags → folders → notes → `note_tags` — *is* the upload,
+and pull only starts after. If a row's ID already exists remotely, treat it
+as a conflict per §5. Saving a *different* connection string re-queues
+everything and restarts the watermarks, because revisions are meaningless
+against a server that has never seen the device.
 
 ## 7. Authentication
 
-Supabase Auth. Email magic link on desktop; on Android, magic link plus Google sign-in.
-
-- Tokens in the OS keychain via `@tauri-apps/plugin-stronghold`, never in SQLite, never in settings.
-- No `INTERNET` permission until Phase B.
-- Deleting the local account unlinks the device and keeps local data.
-- Deleting the Supabase account deletes remote data. The UI states this plainly, including what happens to local notes, before the action is confirmed.
+There is none, by decision: no accounts, no sign-in, no keychain. The
+connection string is the credential, stored on the device next to the
+database, and sync is settings-gated rather than feature-flagged. Wiping
+the server is one `TRUNCATE` (`postgres/README.md` §5); the device keeps
+its notes regardless.
 
 ## 8. Sync loop
 
 ```
-on app start      → pull since watermark
-on interval (60s) → drain outbox → pull since watermark
-on app background → drain outbox only, best effort
-on local write     → nothing; the outbox already has the row
+on interval (60s, while open) → drain outbox → pull since watermark
+on Sync now                     → drain outbox → pull since watermark
+on local write                  → nothing; the outbox already has the row
 ```
 
 | Concern | Policy |
 |---------|--------|
-| Batch size | 50 rows |
-| Ordering | Within a batch: tags → folders → notes → `note_tags` |
-| Retry | Exponential backoff from 2 s, cap 5 min, jitter ±20 % |
-| `attempts` | Incremented per failure, reset on success |
+| Batch size | 50 distinct rows |
+| Ordering | Within a batch: tags → folders → notes; `note_tags` rides inside its note |
+| Retry | 30 s deadline per round trip; a timed-out row records `attempts`/`last_error` and never blocks the queue. Exponential backoff is open Phase-E polish |
 | Permanently failing row | Kept in the outbox, `last_error` set, surfaced in the sync status UI. Never discarded. |
-| Watermark | `max(rev)` of the last successful pull, persisted in settings |
+| Watermark | `max(rev)` of the last successful pull per table, persisted in `sync_state` |
 | Offline | Detected by request failure. All activity is deferred, never blocked. |
-| Concurrency | One sync cycle at a time, guarded by an in-process lock |
+| Concurrency | One sync cycle at a time, guarded by an in-process lock; a second caller gets `already_running` |
 
 ## 9. Data integrity across the two engines
 
-The two databases will disagree over time. Three scheduled repairs, run from the sync status UI, never automatically:
-
-| Check | Action |
-|-------|--------|
-| `notes.doc_json` fails schema validation | Remote version replaced with local |
-| `title` or `plain_text` disagree with the derivation from `doc_json` | Recompute from `doc_json`, push |
-| Row count differs between local and remote | Full pull for the missing ids, no deletions |
-
-Derivation is deterministic (`03-data-model.md` §4), so these are checks, not guesses. A device that has never synced has no `synced_at` and is skipped entirely.
+Derivation is deterministic (`03-data-model.md` §4), so drift is checkable, not guessable. The three scheduled repairs from the original plan (schema validation, derivation recompute, row-count reconciliation from the sync status UI) are **not implemented** — open Phase-E polish, if drift ever shows in practice.
 
 ## 10. Effort estimate
 
-| Phase | Estimate |
-|-------|----------|
-| A — schema, RLS, Auth | 1.5 days |
-| B — push | 3 days |
-| C — pull | 2 days |
-| D — bootstrap | 1 day |
-| E — background, retry, status UI | 3 days |
-| F — server search | 1 day |
-| **Total** | **~12 days** |
-
-Roughly 12 days of work added to a ~20-day v1. The reason v1 does not include it is not effort: it is that an account gate in front of a notes app is a worse product than no sync at all.
+The original ~12-day estimate (schema + RLS + Auth, push, pull, bootstrap,
+background/retry/UI, server search) no longer describes the work: phases
+A–D and the status/conflict UI shipped as the MVP on `feat/sync-mvp`
+without Auth, RLS, or flags. What remains is Phase E polish, unestimated:
+retry with backoff, the open-editor guard, and the §9 repairs if drift ever
+shows in practice. The reason sync waited past v1 stands: an account gate
+in front of a notes app is a worse product than no sync at all — which is
+also why there is no account at all.
 
 ## 11. Rejected alternatives
 
 | Alternative | Why not |
 |-------------|---------|
-| Supabase Realtime for live updates | A permanent WebSocket contradicts the offline guarantee and adds a connection lifecycle. Polling is sufficient for a personal notes app. |
 | Yjs / CRDT documents | Excellent merge semantics, but it changes the storage model from a JSON document to a CRDT update log, which invalidates FTS5 over `plain_text`, complicates the whole-document save model, and roughly doubles editor complexity. Only justified if real-time collaboration ever becomes a requirement. |
 | A hosted sync service (e.g. a notes vendor's API) | Locks the data model to a third-party schema. Contradicts principle 5. |
 | CouchDB / PouchDB | Correct replication semantics, but a second persistence technology to maintain in a Rust-first app, and no natural Postgres host for it. |
 | WebSocket-free polling with `If-Modified-Since` | Only workable once the data exceeds a few thousand rows; `rev` watermarks are simpler. |
+
+Live updates and cross-device search were dropped outright (see §3), not
+parked here: polling on a 60 s interval is the update model, and search
+stays local-only on FTS5.
 
 ## 12. Risks
 
 | Risk | Likelihood | Mitigation |
 |------|------------|------------|
 | `doc_json` conflicts annoy users | Medium | The conflict badge is non-blocking and rare; conflicts are resolvable in two taps |
-| Two SQLite engines diverge | Medium | §9 integrity checks, on demand |
-| Outbox grows unbounded offline | Low | Rows are pruned after 30 days post-sync; the table is small |
-| The `dirty` flag becomes inconsistent with the outbox | Low | Both are written in one transaction; an integrity check compares counts |
+| Two SQLite engines diverge | Medium | Deterministic derivation makes drift checkable; §9 repairs are unwritten until drift shows |
+| Outbox grows unbounded offline | Low | No pruning is implemented; at one row per write the table stays small at personal scale |
+| The `dirty` flag becomes inconsistent with the outbox | Low | Both are written in one transaction; the drain collapses to the latest row per entity |
 | Device clock skew breaks LWW | Medium | `rev`, not the clock, is authoritative. Clocks only order user-visible timestamps. |
-| Android foreground sync drains battery | Low | Sync is foreground-only; intervals back off when backgrounded |
+| Android foreground sync drains battery | Low | Sync runs on a 60 s interval while open and never in the background |

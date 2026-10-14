@@ -158,11 +158,12 @@ pub struct SearchPage {
     pub next_offset: Option<i64>,
 }
 
-/// The seam where remote storage arrives (ADR-003, ADR-005).
+/// The seam remote storage plugs into (ADR-003, ADR-005).
 ///
-/// `v1` has exactly one implementation, `SqliteNotesRepo`. The post-v1
-/// `SupabaseNotesRepo` implements the same trait, which is what makes sync
-/// additive rather than architectural.
+/// `v1` has exactly one implementation, the SQLite repos below. Sync does
+/// not add a second implementation: `crate::sync` replicates these rows to
+/// any Postgres over the wire protocol, which is what makes sync additive
+/// rather than architectural.
 ///
 /// Every method owns its transaction, and the row write and the outbox append
 /// commit together or not at all (R5).

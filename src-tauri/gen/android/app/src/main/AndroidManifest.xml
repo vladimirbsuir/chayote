@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 06-platform.md §4.2: v1 requests no INTERNET permission, so the offline
-         guarantee is enforced by the platform rather than by convention. The
-         generator adds it unconditionally because `tauri android dev` loads the
-         WebView from a local dev server; it is therefore declared only in
-         src/debug/AndroidManifest.xml. A release APK has no INTERNET. -->
+    <!-- 06-platform.md §4.2 as amended by sync: the app stays fully functional
+         offline, but an explicitly enabled Sync (Settings → Sync) needs the
+         network. The permission is therefore declared here for release builds;
+         with sync disabled or unconfigured no connection is ever opened, so
+         the offline guarantee holds by default rather than by manifest.
+         `tauri android dev` loads the WebView from a local dev server, which
+         is why src/debug/AndroidManifest.xml declares it too. -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

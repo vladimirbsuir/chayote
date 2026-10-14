@@ -122,7 +122,7 @@ Ordered by value per unit of effort. Each needs a scope document before implemen
 | Global quick-capture shortcut | 2 d | Capture flow design, platform UI |
 | iOS | 10 d | Separate build and distribution project |
 | Tables | 4 d | Mobile horizontal-scroll strategy |
-| Sync, Phase A–F | 12 d | `07-sync-plan.md` |
+| Sync polish (retry/backoff, open-editor guard) | 2 d | `07-sync-plan.md` Phase E |
 
 ## 4. Dependencies
 
@@ -151,7 +151,7 @@ Each of these was resolved conservatively. Revisit the moment implementation pro
 | No link mark | No sanitisation surface in v1 | In v1.2, with attachments |
 | Lucide, stroke-only, 4 fixed sizes | Neutral outline style, MIT, tree-shakes | If the visual weight ever fights the type, Heroicons or Tabler are drop-in equivalents |
 | Emoji banned from the UI | Rendering and theming are unreliable across platforms | Never — this is a hard constraint, not a preference |
-| FTS5 for local, `tsvector` remote | Instant offline search | Never — the asymmetry is intentional |
+| FTS5 local only, no remote search | Instant offline search | Dropped with `07-sync-plan.md` Phase F, not deferred |
 | Editor instance per note | Undo history must not leak | Never |
 
 ## 6. Open questions

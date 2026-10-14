@@ -13,6 +13,7 @@ pub struct Services {
     pub folders: Arc<dyn FoldersRepo>,
     pub tags: Arc<dyn TagsRepo>,
     pub search: Arc<crate::services::search::SearchService>,
+    pub sync: Arc<crate::sync::SyncService>,
 }
 
 impl Services {
@@ -22,12 +23,14 @@ impl Services {
             &db,
         )));
         let tags = Arc::new(crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db)));
-        let search = Arc::new(crate::services::search::SearchService::new(db));
+        let search = Arc::new(crate::services::search::SearchService::new(Arc::clone(&db)));
+        let sync = Arc::new(crate::sync::SyncService::new(db));
         Self {
             notes,
             folders,
             tags,
             search,
+            sync,
         }
     }
 }
@@ -59,6 +62,11 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         crate::commands::tags::tags_rename,
         crate::commands::tags::tags_delete,
         crate::commands::search::search_query,
+        crate::commands::sync::sync_get_status,
+        crate::commands::sync::sync_set_config,
+        crate::commands::sync::sync_now,
+        crate::commands::sync::sync_list_conflicts,
+        crate::commands::sync::sync_resolve_conflict,
     ]
 }
 
@@ -77,4 +85,5 @@ pub fn window_ready(app: tauri::AppHandle) -> Result<(), AppError> {
 pub mod folders;
 pub mod notes;
 pub mod search;
+pub mod sync;
 pub mod tags;

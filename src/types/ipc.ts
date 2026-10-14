@@ -2,6 +2,7 @@ import type { Uuid, JsonDoc } from './note';
 import type { FolderNode } from './folder';
 import type { TagWithCount } from './tag';
 import type { SearchInput, SearchPage } from './search';
+import type { SyncConflict, SyncStatus, SyncSummary } from './sync';
 
 /* Domain shapes crossing the IPC boundary. Rust structs carry
    #[serde(rename_all = "camelCase")], so every field is camelCase here.
@@ -87,6 +88,11 @@ export type CommandName =
   | 'tags_rename'
   | 'tags_delete'
   | 'search_query'
+  | 'sync_get_status'
+  | 'sync_set_config'
+  | 'sync_now'
+  | 'sync_list_conflicts'
+  | 'sync_resolve_conflict'
   | 'window_ready';
 
 export type CommandArgs = {
@@ -110,6 +116,11 @@ export type CommandArgs = {
   tags_rename: { id: Uuid; name: string };
   tags_delete: { id: Uuid };
   search_query: { input: SearchInput };
+  sync_get_status: Record<string, never>;
+  sync_set_config: { connectionString: string; enabled: boolean };
+  sync_now: Record<string, never>;
+  sync_list_conflicts: Record<string, never>;
+  sync_resolve_conflict: { id: string; keepLocal: boolean };
   window_ready: Record<string, never>;
 };
 
@@ -134,6 +145,11 @@ export type CommandOutput = {
   tags_rename: TagWithCount;
   tags_delete: undefined;
   search_query: SearchPage;
+  sync_get_status: SyncStatus;
+  sync_set_config: undefined;
+  sync_now: SyncSummary;
+  sync_list_conflicts: SyncConflict[];
+  sync_resolve_conflict: undefined;
   window_ready: undefined;
 };
 

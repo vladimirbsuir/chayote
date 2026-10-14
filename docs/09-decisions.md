@@ -11,7 +11,7 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 001 | Application shell: Tauri 2 | Accepted |
 | 002 | Document format: ProseMirror JSON | Accepted |
 | 003 | Data access: `rusqlite` behind repository traits | Accepted |
-| 004 | Search: FTS5 locally, `tsvector` remotely | Accepted |
+| 004 | Search: FTS5 locally, `tsvector` remotely | Superseded (local-only search) |
 | 005 | Sync direction: Supabase / Postgres | Accepted |
 | 006 | Layout: two panes desktop, single pane mobile | Accepted |
 | 007 | v1 feature set | Accepted |
@@ -199,13 +199,15 @@ a cache is not rendered.
 | Direct SQL from the frontend | No transaction control, no atomic outbox write, and schema leaks into components. The single change that would make sync hardest. |
 | An ORM (Diesel, SeaORM) | Migrations and types are well served by hand-written SQL here. The schema is eleven tables. An ORM adds a layer with no leverage. |
 
-**Consequences.** The remote implementation of each trait is a Supabase-backed struct. The trait is the seam that makes ADR-010 possible. Slight boilerplate cost, paid back once per entity type.
+**Consequences.** The traits are the seam sync replicates through, but there is deliberately no second implementation: `crate::sync` pushes these rows to Postgres over the wire protocol instead of reimplementing the traits against it. Slight boilerplate cost, paid back once per entity type.
 
 ---
 
 ## ADR-004 — Search: FTS5 locally, `tsvector` remotely
 
-**Status:** Accepted · **Date:** 2026-10-07
+**Status:** Superseded · **Date:** 2026-10-07, superseded on `feat/sync-mvp`
+
+The remote half never happened and will not: cross-device search was dropped with `07-sync-plan.md` Phase F. What stands: local search uses SQLite FTS5 with `bm25` and external-content triggers. The rest below is history.
 
 **Context.** Search must be instant and work offline. It will later also need to search across devices.
 
@@ -226,11 +228,11 @@ a cache is not rendered.
 
 ## ADR-005 — Sync direction: Supabase / Postgres
 
-**Status:** Accepted · **Date:** 2026-10-07
+**Status:** Partially superseded · **Date:** 2026-10-07, narrowed on `feat/sync-mvp`
 
 **Context.** Sync will arrive after v1. The architecture must accommodate it without an account gate in front of the writing experience.
 
-**Decision.** Local-first. Sync is a later phase against Supabase (Postgres, Auth, RLS), with every v1 row carrying the fields it needs: client-generated UUIDv7, epoch-ms timestamps, `deleted_at`, `rev`, `dirty`, and an outbox.
+**Decision.** Local-first, single-user, provider-agnostic Postgres over the wire protocol — no Auth, no RLS, no second trait implementation — with every v1 row carrying the fields it needs: client-generated UUIDv7, epoch-ms timestamps, `deleted_at`, `rev`, `dirty`, and an outbox. What stands of the original: local-first, and the sync-friendly fields. What fell away: Supabase-specific Auth and RLS.
 
 **Alternatives rejected.**
 

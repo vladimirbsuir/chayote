@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { foldersApi, installBackHandler, notesApi, tagsApi, windowApi } from './lib/ipc';
+import { foldersApi, installBackHandler, notesApi, syncApi, tagsApi, windowApi } from './lib/ipc';
 import { isInsideSubtree } from './components/folderRows';
 import { useNow, useNotes } from './hooks/useNotes';
 import { useSearch } from './hooks/useSearch';
@@ -8,6 +8,15 @@ import { countByFolder, folderNamesById, useFolders } from './hooks/useFolders';
 import { useTags } from './hooks/useTags';
 import { useTogglePin } from './hooks/useTogglePin';
 import { useTrashActions } from './hooks/useTrashActions';
+import {
+  useAutoSync,
+  useResolveConflict,
+  useSyncConflicts,
+  useSyncNow,
+  useSyncStatus,
+} from './hooks/useSync';
+import type { SettingsTab } from './components/SettingsDialog';
+import type { SyncSummary } from './types/sync';
 import { UndoToast } from './components/UndoToast';
 import { useUndoToast } from './components/useUndoToast';
 import { ConfirmDialog } from './components/ConfirmDialog';
@@ -104,9 +113,7 @@ function Shell() {
      Declared here rather than with the other derived values because the delete
      and pin handlers below resolve a row against it. */
   const listNotes = results.active ? results.hits : (notes ?? EMPTY_NOTES);
-  const searchSummary = results.active
-    ? { query: results.applied, total: results.total }
-    : null;
+  const searchSummary = results.active ? { query: results.applied, total: results.total } : null;
 
   const { folders } = useFolders();
   const { tags } = useTags();
@@ -163,7 +170,40 @@ function Shell() {
     | null
   >(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
   const now = useNow();
+
+  /* Sync owns no UI state of its own: status and conflicts are server state
+     like notes, and the dialog tab is the only navigation state. */
+  const { status: syncStatus, isPending: syncStatusPending } = useSyncStatus();
+  useAutoSync(syncStatus);
+  const { syncNow, isSyncing } = useSyncNow();
+  const { resolve: resolveConflict } = useResolveConflict();
+  const { conflicts: syncConflicts } = useSyncConflicts(settingsOpen && settingsTab === 'sync');
+  const [syncSaving, setSyncSaving] = useState(false);
+  const [syncLastResult, setSyncLastResult] = useState<SyncSummary | null>(null);
+
+  /* Failures surface where they happened: SyncPane shows the thrown message
+     itself (R7 copy), so this only tracks the spinner. */
+  const saveSyncConfig = useCallback(
+    async (connectionString: string, enabled: boolean): Promise<void> => {
+      setSyncSaving(true);
+      try {
+        await syncApi.setConfig(connectionString, enabled);
+        void queryClient.invalidateQueries({ queryKey: ['sync-status'] });
+      } finally {
+        setSyncSaving(false);
+      }
+    },
+    [queryClient],
+  );
+
+  const runSyncNow = useCallback(async (): Promise<SyncSummary> => {
+    const summary = await syncNow();
+    setSyncLastResult(summary);
+    refetch();
+    return summary;
+  }, [syncNow, refetch]);
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
   /* The folder chips on the rows are counted from the selection's own notes, not
@@ -440,7 +480,7 @@ function Shell() {
      a dialog opened from the drawer must close the dialog first, and one
      opened from the overflow menu must close that. Testing the two flags is
      what stops a single `Esc` from closing three things at once. */
-/* `Esc` has to close exactly one thing, and the surfaces nest: the search
+  /* `Esc` has to close exactly one thing, and the surfaces nest: the search
      field, a dialog, the overflow menu and the tablet drawer all dismiss on it.
 
      Two guards, because they cover different cases. `defaultPrevented` catches
@@ -454,17 +494,17 @@ function Shell() {
      Without both, a single `Esc` closes the settings dialog and the drawer
      behind it, and the user who pressed it once to dismiss a dialog finds the
      sidebar has gone too. */
-const overlayOpen = settingsOpen || confirm !== null;
-/* Written in an effect rather than during render: a ref assigned in the render
+  const overlayOpen = settingsOpen || confirm !== null;
+  /* Written in an effect rather than during render: a ref assigned in the render
    body is a write during render, which concurrent React may discard or replay.
    The read side is the important half — it has to be current when the key event
    reaches window, and an effect runs before any user event can. */
-const overlayOpenRef = useRef(overlayOpen);
-useEffect(() => {
-  overlayOpenRef.current = overlayOpen;
-}, [overlayOpen]);
+  const overlayOpenRef = useRef(overlayOpen);
+  useEffect(() => {
+    overlayOpenRef.current = overlayOpen;
+  }, [overlayOpen]);
 
-const confirmRef = useRef(confirm);
+  const confirmRef = useRef(confirm);
   useEffect(() => {
     confirmRef.current = confirm;
   }, [confirm]);
@@ -549,10 +589,7 @@ const confirmRef = useRef(confirm);
       }}
       searchFooter={
         results.nextOffset === null ? null : (
-          <ShowMore
-            pending={results.isFetchingMore}
-            onClick={results.loadMore}
-          />
+          <ShowMore pending={results.isFetchingMore} onClick={results.loadMore} />
         )
       }
       isPending={isPending}
@@ -589,7 +626,7 @@ const confirmRef = useRef(confirm);
      permanent delete and not delete. Passing all three unconditionally would put a
      "Delete permanently" control on every note the user has not deleted yet — the
      one mistake §6.2 is written to prevent. */
-onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
+      onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
       onRestoreNote={
         selection.kind === 'trash'
           ? (id) => {
@@ -617,6 +654,11 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
       onCreateTag={createTag}
       onRenameTag={renameTag}
       onDeleteTag={deleteTag}
+      conflictCount={syncStatus?.conflictCount ?? 0}
+      onOpenConflicts={() => {
+        setSettingsTab('sync');
+        setSettingsOpen(true);
+      }}
     />
   );
 
@@ -741,6 +783,19 @@ onDeleteNote={selection.kind === 'trash' ? undefined : softDeleteWithToast}
           lastCustomHex={lastCustomHex}
           defaultFolderId={defaultFolderId}
           folders={folders ?? []}
+          initialTab={settingsTab}
+          sync={{
+            status: syncStatus,
+            statusPending: syncStatusPending,
+            conflicts: syncConflicts,
+            syncing: isSyncing,
+            saving: syncSaving,
+            saveError: null,
+            lastResult: syncLastResult,
+            onSaveConfig: saveSyncConfig,
+            onSyncNow: runSyncNow,
+            onResolve: (id, keepLocal) => resolveConflict(id, keepLocal),
+          }}
           onThemeChange={(next) => {
             useSettingsStore.getState().setTheme(next);
           }}

@@ -91,8 +91,9 @@ Tauri 2 is the only option that is simultaneously strong on editor maturity, off
 │ Repository trait (src-tauri/src/repo/)                               │
 │   trait NotesRepo { list, get, save, soft_delete, restore, ... }     │
 │   trait FoldersRepo { ... }   trait TagsRepo { ... }                 │
-│        ├── SqliteNotesRepo        ← v1, the only implementation      │
-│        └── SupabaseNotesRepo      ← post-v1, same trait               │
+│        └── SqliteNotesRepo        ← the only implementation             │
+│   Sync replicates these rows to Postgres (`crate::sync`), it does not   │
+│   reimplement the traits. There is no second implementation.            │
 └───────────────────────────────┬──────────────────────────────────────┘
                                 │
 ┌───────────────────────────────▼──────────────────────────────────────┐
@@ -100,7 +101,7 @@ Tauri 2 is the only option that is simultaneously strong on editor maturity, off
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**Rule:** dependencies point downward only. The UI cannot skip a layer. The repository trait is the seam where remote storage is introduced later.
+**Rule:** dependencies point downward only. The UI cannot skip a layer. The repository trait is the seam sync replicates through, without reimplementing it.
 
 ## 4. Why `rusqlite` instead of `tauri-plugin-sql`
 
@@ -122,7 +123,7 @@ The official SQL plugin was rejected for the data layer. Reasons, in order of im
 | Theme, accent, sidebar width, density | Zustand, persisted in settings | settings JSON |
 | Editor contents | Local component state, written through | SQLite (debounced) |
 | Undo/redo history | ProseMirror | not persisted |
-| Auth session | Post-v1 | OS keychain |
+| Sync connection string | Sync engine | `sync_state` in SQLite (write-only from the UI) |
 
 **Loading states:** TanStack Query cache is the single source. A component never holds a copy of a note list in its own state. There is no global "is loading" flag; per-query pending states are used instead.
 
@@ -210,6 +211,11 @@ Tauri commands exposed to the frontend. This is the complete API for v1; adding 
 | `tags_rename` | `{ id, name }` | `TagWithCount` |
 | `tags_delete` | `id` | `()` |
 | `search_query` | `SearchInput { query, filter, limit, offset }` | `SearchPage` |
+| `sync_get_status` | `()` | `SyncStatus` |
+| `sync_set_config` | `{ connectionString, enabled }` | `()` |
+| `sync_now` | `()` | `SyncSummary` |
+| `sync_list_conflicts` | `()` | `SyncConflict[]` |
+| `sync_resolve_conflict` | `{ id, keepLocal }` | `()` |
 | `window_ready` | `()` | `()` |
 
 Settings are read and written with `@tauri-apps/plugin-store`, not with a command.

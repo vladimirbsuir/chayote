@@ -6,6 +6,7 @@ mod doc;
 mod error;
 mod repo;
 mod services;
+mod sync;
 
 #[cfg(test)]
 mod tests;

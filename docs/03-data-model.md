@@ -23,7 +23,7 @@ Authoritative SQL lives in `src-tauri/migrations/`. This document defines the sc
 
 Notes are **not** manually reorderable in v1. The decision is recorded in `09-decisions.md` ADR-011 and the reasoning in §5.4 below. Folders keep `position` because folder trees need explicit order and the drag interaction already exists for re-parenting.
 
-`CHECK` constraints on text length are deliberately omitted. They cause migration pain and give no real benefit at personal-note scale.
+`CHECK` constraints on text length are deliberately omitted. They cause migration pain and give no real benefit at personal-note scale. The one exception is the non-empty guard on folder names (`length(trim(name)) > 0`), which the sync tombstone placeholder `'(deleted)'` exists to satisfy.
 
 ## 2. Connection pragmas
 
@@ -128,10 +128,11 @@ Column-by-column rationale:
 
 **Deliberately absent:** `position` (no manual note order in v1), `is_favorite` (folded into `is_pinned`), `html`, `markdown`, `tags` (as text), `attachments`. Tags live in a join table; content has exactly one serialised form.
 
-**Migration count.** There are three migrations, not four. `title_source` ships
+**Migration count.** There are four migrations. `title_source` ships
 inside `0001_initial.sql` with the rest of the table; the earlier draft of this
 document listed a separate `0004_note_title_source.sql`, which would have been a
-no-op `ALTER TABLE ADD COLUMN` against the schema above.
+no-op `ALTER TABLE ADD COLUMN` against the schema above. The real fourth is
+`0004_sync.sql` — the sync `conflicts` and `sync_state` tables.
 
 ### 3.4 `tags`
 
@@ -403,6 +404,7 @@ src-tauri/migrations/
   0001_initial.sql        -- folders, notes, tags, note_tags
   0002_fts.sql            -- notes_fts + triggers
   0003_outbox.sql         -- outbox, trash_snapshots
+  0004_sync.sql           -- conflicts, sync_state
 ```
 
 Rules:
@@ -411,29 +413,28 @@ Rules:
 2. Every migration is idempotent where SQLite allows it: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE TRIGGER IF NOT EXISTS`. `ALTER TABLE ADD COLUMN` is not idempotent — guard it with a `PRAGMA table_info` check in Rust before running it.
 3. A migration that changes an indexed column must run `INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')` at the end.
 4. A migration must never rewrite the `notes` table with `DROP`/`CREATE`. The FTS triggers reference `notes` by name and `rowid`; recreating the table invalidates the external-content mapping and requires a full rebuild.
-5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: three migrations, not four.
+5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: four migrations, the fourth (`0004_sync.sql`) carrying the sync `conflicts` and `sync_state` tables.
 
 ## 7. Migration path to Postgres
 
-The mapping for the sync phase. `07-sync-plan.md` covers the protocol; this table is the schema contract.
+The mapping for sync, as built on `feat/sync-mvp`. `07-sync-plan.md` covers the protocol; this table is the schema contract, and `postgres/schema.sql` is its executable form.
 
 | SQLite | Postgres | Notes |
 |--------|----------|-------|
-| `TEXT` id (UUIDv7) | `uuid PRIMARY KEY DEFAULT gen_random_uuid()` | Client always supplies the value. The default exists only for server-side tooling. |
-| `INTEGER` epoch ms | `timestamptz(3)` | Convert on the wire as ISO-8601 UTC with milliseconds, or epoch ms — **pick one and pin it**. Recommended: epoch ms as `bigint` to avoid timezone bugs entirely. |
+| `TEXT` id (UUIDv7) | `uuid PRIMARY KEY` | Client always supplies the value. Params travel binary-typed, never as text: there is no `uuid = text` operator, and a `String` cannot serialise into a `uuid` column. |
+| `INTEGER` epoch ms | `bigint` | Pinned: epoch ms everywhere, no timezone mapping (R2). |
 | `INTEGER` 0/1 | `boolean` | |
-| `INTEGER` position (folders only) | `integer` | Notes have no `position` in v1 |
-| `deleted_at INTEGER` | `timestamptz` nullable | |
-| `rev INTEGER` | `bigint NOT NULL DEFAULT 0` | Server-assigned, incremented on every accepted write. |
-| `dirty INTEGER` | *dropped* | Replaced by a `sync_state` view or by comparing `updated_at` against `last_pulled_at`. Dirty is a local-only concept. |
-| `doc_json TEXT` | `jsonb` | Enables partial queries later. |
-| `notes_fts` | `notes_search` with `tsvector GENERATED ALWAYS AS (...) STORED` + GIN index | See below. |
-| `FTS5 MATCH` + `bm25()` | `ts_rank_cd()` + `ts_headline()` | Different ranking, same query surface. |
+| `INTEGER` position (folders only) | `bigint` | Must be 64-bit: the driver rejects `i64` into `integer`. Notes have no `position` in v1 |
+| `deleted_at INTEGER` | `bigint` nullable | Tombstones, retained indefinitely (`07-sync-plan.md` §5.4) |
+| `rev INTEGER` | `bigint NOT NULL DEFAULT nextval('sync_rev_seq')` | One global sequence: two rows pushed together still get distinct revs, so a `max(rev)` watermark never skips. Echoed back to the row (R4). |
+| `dirty INTEGER` | *dropped* | Local-only concept; server state lives in `sync_state` |
+| `doc_json TEXT` | `jsonb` | Sent as typed JSON, never as text |
+| `notes_fts` | *dropped* | No server search, by decision — search stays local-only on FTS5 |
 | Recursive CTE tree | Same recursive CTE | |
 
-**Search is the one component that is not portable.** FTS5 does not exist in Postgres. The server search must be Postgres full-text search with `english` or `simple` config, `to_tsvector('simple', title || ' ' || plain_text)`, a GIN index, and `websearch_to_tsquery` for user input. `websearch_to_tsquery` is the correct replacement for the hand-rolled sanitisation in §3.6 — it accepts user input directly and safely.
-
-This asymmetry is intentional and was accepted knowingly: local search stays on FTS5 because it is instant and offline, and server search exists only to search across devices. See `09-decisions.md` ADR-006.
+Search is local-only. FTS5 does not exist in Postgres and there is no
+`tsvector` column, no GIN index, no `ts_rank_cd()` — cross-device search
+was dropped with `07-sync-plan.md` Phase F, not postponed.
 
 ## 8. Capacity assumptions
 

@@ -11,8 +11,8 @@ use crate::repo::{
 };
 use crate::services::derive;
 
-/// The only implementation in v1. The post-v1 `SupabaseNotesRepo` implements
-/// the same trait without touching anything above it (ADR-003).
+/// The only implementation. Sync replicates its rows to Postgres without
+/// touching anything above this trait (ADR-003).
 pub struct SqliteNotesRepo {
     db: Arc<Database>,
 }

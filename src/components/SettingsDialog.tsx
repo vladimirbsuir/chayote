@@ -1,12 +1,21 @@
 import { useMemo, useState } from 'react';
-import { Check, ChevronDown, Folder, Palette, RotateCw, Settings as SettingsIcon } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  Folder,
+  Palette,
+  RotateCw,
+  Settings as SettingsIcon,
+} from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { useDialogFocus } from './useDialogFocus';
 import { flattenFolders, popoverPlacement } from './popoverPlacement';
 import { FolderPicker, NONE_LABEL } from './StatusPopovers';
+import { SyncPane } from './SyncPane';
 import { hexToHsl, hslToHex, normalizeHexInput } from '../lib/color';
 import { ACCENT_PRESETS, presetValue } from '../lib/settings';
 import type { AccentChoice, Theme } from '../lib/settings';
+import type { SyncConflict, SyncStatus, SyncSummary } from '../types/sync';
 import type { FolderNode } from '../types/folder';
 import type { Uuid } from '../types/note';
 
@@ -44,8 +53,8 @@ type SettingsDialogProps = {
       swatches and the ratio readout describe what is on screen, not what is
       stored — otherwise a system-dark user would be shown light values. */
   effective: 'light' | 'dark';
-/** `null` is the first preset, the theme's own default. */
-accent: AccentChoice;
+  /** `null` is the first preset, the theme's own default. */
+  accent: AccentChoice;
   /** The last custom colour picked, whatever the accent is now: the palette
       restores it instead of forgetting it behind a preset. */
   lastCustomHex: string;
@@ -56,8 +65,28 @@ accent: AccentChoice;
   onDefaultFolderChange: (folderId: Uuid | null) => void;
   onClose: () => void;
   /** Rendered above the dialog; `App` owns the confirmation so only one
-      destructive confirmation can exist at a time (`05-ui-ux.md` §6.2). */
+       destructive confirmation can exist at a time (`05-ui-ux.md` §6.2). */
   confirmReset: React.ReactNode;
+  /** Which tab opens. The sidebar conflict badge opens `sync` directly. */
+  initialTab?: SettingsTab;
+  /* One object, optional so the general tab stays usable wherever sync is
+     not wired (tests, prototype). `App` always provides it. */
+  sync?: SyncTabState;
+};
+
+export type SettingsTab = 'general' | 'sync';
+
+export type SyncTabState = {
+  status: SyncStatus | undefined;
+  statusPending: boolean;
+  conflicts: SyncConflict[] | undefined;
+  syncing: boolean;
+  saving: boolean;
+  saveError: string | null;
+  lastResult: SyncSummary | null;
+  onSaveConfig: (connectionString: string, enabled: boolean) => Promise<void>;
+  onSyncNow: () => Promise<SyncSummary>;
+  onResolve: (id: string, keepLocal: boolean) => Promise<void>;
 };
 
 export function SettingsDialog({
@@ -72,8 +101,14 @@ export function SettingsDialog({
   onDefaultFolderChange,
   onClose,
   confirmReset,
+  initialTab,
+  sync,
 }: SettingsDialogProps) {
   const { panelRef, onKeyDown: trapKeyDown } = useDialogFocus(onClose);
+  /* Two tabs — general settings and sync — so the connection string, status
+     and conflicts do not crowd the theme and folder rows. The dialog mounts
+     fresh on every open, so the initial tab needs no syncing afterwards. */
+  const [tab, setTab] = useState<SettingsTab>(initialTab ?? 'general');
   const [custom, setCustom] = useState<string>(() =>
     accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex,
   );
@@ -180,250 +215,334 @@ export function SettingsDialog({
           </h2>
         </div>
 
-        <div className="flex flex-col gap-[18px] px-5 py-4">
-          <div>
-            <label
-              id="settings-theme-label"
-              className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]"
-            >
-              Theme
-            </label>
-            <ThemeToggle value={theme} onChange={onThemeChange} />
-          </div>
+        <div
+          role="tablist"
+          aria-label="Settings sections"
+          data-testid="settings-tabs"
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+            event.preventDefault();
+            setTab((current) => (current === 'general' ? 'sync' : 'general'));
+          }}
+          className="flex gap-1 px-5 pt-3"
+        >
+          {(['general', 'sync'] as const).map((name) => {
+            const selected = tab === name;
+            return (
+              <button
+                key={name}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`settings-panel-${name}`}
+                id={`settings-tab-${name}`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => {
+                  setTab(name);
+                }}
+                className={`rounded-[var(--r-input)] px-3 py-1.5 text-[13px] font-medium capitalize ${
+                  selected
+                    ? 'bg-[var(--surface-raised)] text-[var(--text)]'
+                    : 'text-[var(--text-muted)]'
+                }`}
+              >
+                {name}
+              </button>
+            );
+          })}
+        </div>
 
-          <div>
-            <span
-              id="settings-accent-label"
-              className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]"
-            >
-              Accent colour
-            </span>
-            <div
-              role="radiogroup"
-              aria-labelledby="settings-accent-label"
-              className="flex items-center gap-2"
-            >
-              {ACCENT_PRESETS.map((preset, offset) => {
-                const value = presetValue(preset, effective === 'dark');
-                const index = offset + 1;
-                /* `null` is the *first* preset, the theme's own default — not "no choice". With
+        {tab === 'general' ? (
+          <div
+            id="settings-panel-general"
+            role="tabpanel"
+            aria-labelledby="settings-tab-general"
+            className="flex flex-col gap-[18px] px-5 py-4"
+          >
+            <div>
+              <label
+                id="settings-theme-label"
+                className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]"
+              >
+                Theme
+              </label>
+              <ThemeToggle value={theme} onChange={onThemeChange} />
+            </div>
+
+            <div>
+              <span
+                id="settings-accent-label"
+                className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]"
+              >
+                Accent colour
+              </span>
+              <div
+                role="radiogroup"
+                aria-labelledby="settings-accent-label"
+                className="flex items-center gap-2"
+              >
+                {ACCENT_PRESETS.map((preset, offset) => {
+                  const value = presetValue(preset, effective === 'dark');
+                  const index = offset + 1;
+                  /* `null` is the *first* preset, the theme's own default — not "no choice". With
                    it excluded, no swatch carried the ring while the readout said
                    "Default accent", and §10 is explicit that the ring must not be
                    the only signal for a state that is in fact selected. */
-                const selected =
-                  accent === null
-                    ? index === 1
-                    : accent.kind === 'preset' && accent.index === index;
-                return (
-                  <button
-                    key={preset.name}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    aria-label={preset.name}
-                    title={preset.name}
-                    /* One tab stop across the seven radios, so the picker costs one `Tab` rather
+                  const selected =
+                    accent === null
+                      ? index === 1
+                      : accent.kind === 'preset' && accent.index === index;
+                  return (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-label={preset.name}
+                      title={preset.name}
+                      /* One tab stop across the seven radios, so the picker costs one `Tab` rather
                    than seven — the same reasoning §10.1 records for the folder
                    tree. The first swatch carries it when the default is in use. */
-                tabIndex={
-                  selected ? 0 : accent === null && index === 1 ? 0 : -1
-                }
-                    onClick={() => {
-                      setCustomOpen(false);
-                      onAccentChange({ kind: 'preset', index });
-                    }}
-                    style={{ background: value }}
-                    className={`h-7 w-7 rounded-full border-2 shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] ${
-                      selected ? 'border-[var(--text)]' : 'border-transparent'
-                    }`}
-                  />
-                );
-              })}
+                      tabIndex={selected ? 0 : accent === null && index === 1 ? 0 : -1}
+                      onClick={() => {
+                        setCustomOpen(false);
+                        onAccentChange({ kind: 'preset', index });
+                      }}
+                      style={{ background: value }}
+                      className={`h-7 w-7 rounded-full border-2 shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] ${
+                        selected ? 'border-[var(--text)]' : 'border-transparent'
+                      }`}
+                    />
+                  );
+                })}
 
-              {/* The custom swatch is `palette`, one of the three inventory
+                {/* The custom swatch is `palette`, one of the three inventory
                   icons §6.6 assigns to the custom colour. */}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={accent !== null && accent.kind === 'custom'}
+                  aria-label="Custom colour"
+                  title="Custom colour"
+                  tabIndex={
+                    accent !== null && accent.kind === 'custom' ? 0 : accent === null ? -1 : -1
+                  }
+                  onClick={() => {
+                    const next = normalizeHexInput(draft) ?? custom;
+                    setCustomOpen(true);
+                    applyCustom(next);
+                  }}
+                  className={`grid h-7 w-7 place-items-center rounded-full bg-[var(--surface)] text-[var(--text-muted)] shadow-[inset_0_0_0_1px_var(--border-strong)] ${
+                    accent !== null && accent.kind === 'custom'
+                      ? 'border-2 border-[var(--text)]'
+                      : 'border-2 border-transparent'
+                  }`}
+                >
+                  <Palette className="icon i-16" aria-hidden="true" />
+                </button>
+              </div>
+
+              {customOpen ? (
+                <div className="mt-3 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] p-3">
+                  <div className="flex items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      style={{ background: draftValid ? custom : 'transparent' }}
+                      className="h-7 w-7 flex-none rounded-full border-2 border-[var(--text)] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]"
+                    />
+                    <label
+                      htmlFor="settings-accent-custom"
+                      className="text-[12px] font-medium text-[var(--text-muted)]"
+                    >
+                      Custom colour
+                    </label>
+                    <input
+                      id="settings-accent-custom"
+                      type="text"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                      maxLength={7}
+                      placeholder="#rrggbb"
+                      aria-label="Custom accent colour as hex"
+                      aria-invalid={!draftValid}
+                      value={draft}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDraft(value);
+                        const next = normalizeHexInput(value);
+                        if (next !== null) {
+                          setCustom(next);
+                          onAccentChange({ kind: 'custom', hex: next });
+                        }
+                      }}
+                      onBlur={() => {
+                        if (normalizeHexInput(draft) === null) setDraft(custom);
+                      }}
+                      className="ml-auto w-28 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 font-mono text-[13px] text-[var(--text)]"
+                    />
+                  </div>
+                  {!draftValid ? (
+                    <p className="mt-1.5 text-[12px] text-[var(--danger)]" role="alert">
+                      Enter a colour as #rrggbb.
+                    </p>
+                  ) : null}
+                  <div className="mt-2 flex flex-col gap-1">
+                    <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                      <span className="w-20 flex-none">Hue {customHsl.h}°</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={360}
+                        step={1}
+                        value={customHsl.h}
+                        aria-label="Custom colour hue"
+                        onChange={(event) => {
+                          const next = hslToHex(
+                            Number(event.target.value),
+                            customHsl.s,
+                            customHsl.l,
+                          );
+                          applyCustom(next);
+                        }}
+                        style={{
+                          background:
+                            'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
+                        }}
+                        className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                      />
+                    </label>
+                    <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                      <span className="w-20 flex-none">Saturation {customHsl.s}%</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={customHsl.s}
+                        aria-label="Custom colour saturation"
+                        onChange={(event) => {
+                          const next = hslToHex(
+                            customHsl.h,
+                            Number(event.target.value),
+                            customHsl.l,
+                          );
+                          applyCustom(next);
+                        }}
+                        style={{
+                          background: `linear-gradient(to right, hsl(${customHsl.h}, 0%, ${customHsl.l}%), hsl(${customHsl.h}, 100%, ${customHsl.l}%))`,
+                        }}
+                        className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                      />
+                    </label>
+                    <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
+                      <span className="w-20 flex-none">Lightness {customHsl.l}%</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={customHsl.l}
+                        aria-label="Custom colour lightness"
+                        onChange={(event) => {
+                          const next = hslToHex(
+                            customHsl.h,
+                            customHsl.s,
+                            Number(event.target.value),
+                          );
+                          applyCustom(next);
+                        }}
+                        style={{
+                          background: `linear-gradient(to right, #000, hsl(${customHsl.h}, ${customHsl.s}%, 50%), #fff)`,
+                        }}
+                        className="h-2 w-full cursor-pointer appearance-none rounded-full"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+
+              {accent !== null && accent.kind === 'custom' ? null : (
+                <p className="mt-2 text-[12px] text-[var(--text-subtle)]" aria-live="polite">
+                  {accentReadout}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <span
+                id="settings-default-folder-label"
+                className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]"
+              >
+                Default folder for new notes
+              </span>
               <button
                 type="button"
-                role="radio"
-                aria-checked={accent !== null && accent.kind === 'custom'}
-                aria-label="Custom colour"
-                title="Custom colour"
-                tabIndex={
-                  accent !== null && accent.kind === 'custom' ? 0 : accent === null ? -1 : -1
-                }
-                onClick={() => {
-                  const next = normalizeHexInput(draft) ?? custom;
-                  setCustomOpen(true);
-                  applyCustom(next);
-                }}
-                className={`grid h-7 w-7 place-items-center rounded-full bg-[var(--surface)] text-[var(--text-muted)] shadow-[inset_0_0_0_1px_var(--border-strong)] ${
-                  accent !== null && accent.kind === 'custom'
-                    ? 'border-2 border-[var(--text)]'
-                    : 'border-2 border-transparent'
-                }`}
-              >
-                <Palette className="icon i-16" aria-hidden="true" />
-              </button>
-            </div>
-
-            {customOpen ? (
-            <div className="mt-3 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] p-3">
-              <div className="flex items-center gap-2">
-                <span
-                  aria-hidden="true"
-                  style={{ background: draftValid ? custom : 'transparent' }}
-                  className="h-7 w-7 flex-none rounded-full border-2 border-[var(--text)] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]"
-                />
-                <label
-                  htmlFor="settings-accent-custom"
-                  className="text-[12px] font-medium text-[var(--text-muted)]"
-                >
-                  Custom colour
-                </label>
-                <input
-                  id="settings-accent-custom"
-                  type="text"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  maxLength={7}
-                  placeholder="#rrggbb"
-                  aria-label="Custom accent colour as hex"
-                  aria-invalid={!draftValid}
-                  value={draft}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setDraft(value);
-                    const next = normalizeHexInput(value);
-                    if (next !== null) {
-                      setCustom(next);
-                      onAccentChange({ kind: 'custom', hex: next });
-                    }
-                  }}
-                  onBlur={() => {
-                    if (normalizeHexInput(draft) === null) setDraft(custom);
-                  }}
-                  className="ml-auto w-28 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 font-mono text-[13px] text-[var(--text)]"
-                />
-              </div>
-              {!draftValid ? (
-                <p className="mt-1.5 text-[12px] text-[var(--danger)]" role="alert">
-                  Enter a colour as #rrggbb.
-                </p>
-              ) : null}
-              <div className="mt-2 flex flex-col gap-1">
-                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
-                  <span className="w-20 flex-none">Hue {customHsl.h}°</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={360}
-                    step={1}
-                    value={customHsl.h}
-                    aria-label="Custom colour hue"
-                    onChange={(event) => {
-                      const next = hslToHex(Number(event.target.value), customHsl.s, customHsl.l);
-                      applyCustom(next);
-                    }}
-                    style={{
-                      background:
-                        'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
-                    }}
-                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
-                  />
-                </label>
-                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
-                  <span className="w-20 flex-none">Saturation {customHsl.s}%</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={customHsl.s}
-                    aria-label="Custom colour saturation"
-                    onChange={(event) => {
-                      const next = hslToHex(customHsl.h, Number(event.target.value), customHsl.l);
-                      applyCustom(next);
-                    }}
-                    style={{
-                      background: `linear-gradient(to right, hsl(${customHsl.h}, 0%, ${customHsl.l}%), hsl(${customHsl.h}, 100%, ${customHsl.l}%))`,
-                    }}
-                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
-                  />
-                </label>
-                <label className="flex min-h-11 items-center gap-2 text-[12px] text-[var(--text-muted)]">
-                  <span className="w-20 flex-none">Lightness {customHsl.l}%</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={customHsl.l}
-                    aria-label="Custom colour lightness"
-                    onChange={(event) => {
-                      const next = hslToHex(customHsl.h, customHsl.s, Number(event.target.value));
-                      applyCustom(next);
-                    }}
-                    style={{
-                      background: `linear-gradient(to right, #000, hsl(${customHsl.h}, ${customHsl.s}%, 50%), #fff)`,
-                    }}
-                    className="h-2 w-full cursor-pointer appearance-none rounded-full"
-                  />
-                </label>
-              </div>
-            </div>
-            ) : null}
-
-            {accent !== null && accent.kind === 'custom' ? null : (
-            <p className="mt-2 text-[12px] text-[var(--text-subtle)]" aria-live="polite">
-              {accentReadout}
-            </p>
-            )}
-          </div>
-
-          <div>
-            <span
-              id="settings-default-folder-label"
-              className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]"
-            >
-              Default folder for new notes
-            </span>
-            <button
-              type="button"
-              data-testid="settings-default-folder"
-              aria-label="Default folder for new notes"
-              aria-haspopup="listbox"
-              aria-expanded={picker !== null}
-              onClick={(event) => {
-                /* A toggle, not just an opener: the panel never covers this
+                data-testid="settings-default-folder"
+                aria-label="Default folder for new notes"
+                aria-haspopup="listbox"
+                aria-expanded={picker !== null}
+                onClick={(event) => {
+                  /* A toggle, not just an opener: the panel never covers this
                    button, so pressing it again is always the fastest way to
                    dismiss the list. */
-                if (picker !== null) {
-                  setPicker(null);
-                  return;
-                }
-                /* Geometry is in hand at the click; measuring later is a second
+                  if (picker !== null) {
+                    setPicker(null);
+                    return;
+                  }
+                  /* Geometry is in hand at the click; measuring later is a second
                    render for a value already known. */
-                setPicker({ anchor: event.currentTarget, placement: popoverPlacement(event.currentTarget) });
-              }}
-              className="flex w-full items-center gap-2 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 text-left text-[13px] text-[var(--text)]"
-            >
-              <Folder className="icon i-16 flex-none opacity-70" aria-hidden="true" />
-              <span className="flex-1 truncate">
-                {currentName ?? NONE_LABEL}
-              </span>
-              <ChevronDown className="icon i-16 flex-none text-[var(--text-subtle)]" aria-hidden="true" />
-            </button>
-            {/* ADR-014: nothing is pre-created, so "None" is the default and a
+                  setPicker({
+                    anchor: event.currentTarget,
+                    placement: popoverPlacement(event.currentTarget),
+                  });
+                }}
+                className="flex w-full items-center gap-2 rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-2 text-left text-[13px] text-[var(--text)]"
+              >
+                <Folder className="icon i-16 flex-none opacity-70" aria-hidden="true" />
+                <span className="flex-1 truncate">{currentName ?? NONE_LABEL}</span>
+                <ChevronDown
+                  className="icon i-16 flex-none text-[var(--text-subtle)]"
+                  aria-hidden="true"
+                />
+              </button>
+              {/* ADR-014: nothing is pre-created, so "None" is the default and a
                 note filed into it is unfiled rather than lost. */}
-            {options.length === 0 ? (
-              <p className="mt-1.5 text-[12px] text-[var(--text-subtle)]">
-                No folders yet. New notes stay unfiled until you make one.
-              </p>
-            ) : null}
+              {options.length === 0 ? (
+                <p className="mt-1.5 text-[12px] text-[var(--text-subtle)]">
+                  No folders yet. New notes stay unfiled until you make one.
+                </p>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
+
+        {tab === 'sync' ? (
+          <div
+            id="settings-panel-sync"
+            role="tabpanel"
+            aria-labelledby="settings-tab-sync"
+            className="px-5 py-4"
+          >
+            {sync !== undefined ? (
+              <SyncPane
+                status={sync.status}
+                statusPending={sync.statusPending}
+                conflicts={sync.conflicts}
+                syncing={sync.syncing}
+                saving={sync.saving}
+                saveError={sync.saveError}
+                lastResult={sync.lastResult}
+                onSaveConfig={sync.onSaveConfig}
+                onSyncNow={sync.onSyncNow}
+                onResolve={sync.onResolve}
+              />
+            ) : (
+              <p className="text-[12px] text-[var(--text-subtle)]">Sync is unavailable here.</p>
+            )}
+          </div>
+        ) : null}
 
         <div className="flex items-center gap-2 border-t border-[var(--border)] bg-[var(--surface-raised)] px-5 py-[14px]">
           <button

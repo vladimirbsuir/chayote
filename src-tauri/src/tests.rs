@@ -96,14 +96,19 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
     let names: Vec<&str> = applied.iter().map(|(_, name)| name.as_str()).collect();
     assert_eq!(
         names,
-        vec!["0001_initial.sql", "0002_fts.sql", "0003_outbox.sql"]
+        vec![
+            "0001_initial.sql",
+            "0002_fts.sql",
+            "0003_outbox.sql",
+            "0004_sync.sql"
+        ]
     );
     assert_eq!(applied[0].0, 1);
 
     // Reopening must apply nothing new (R8).
     let reopened = Arc::new(Database::open(f._dir.path()).expect("reopen"));
     let again = crate::db::migrate::applied_all(&reopened).expect("readable again");
-    assert_eq!(again.len(), 3);
+    assert_eq!(again.len(), 4);
 }
 
 /// An in-memory database cannot do WAL or cascades across connections, so every
