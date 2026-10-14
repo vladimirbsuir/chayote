@@ -224,8 +224,8 @@ Every icon used in v1, and nothing else. Adding an icon to the UI means adding i
 | `palette` | Accent colour control |
 | `check` | Checked task list item |
 | `x` | Clear search, dismiss |
-| `alert-circle` | Error and warning states |
-| `rotate-cw` | Retry a failed save, reset settings |
+| `alert-circle` | Error and warning states, sync conflicts |
+| `rotate-cw` | Retry a failed save, reset settings, Sync now |
 | `inbox` | Empty state for a selection with no notes |
 | `bold` | Formatting toolbar: bold mark |
 | `italic` | Formatting toolbar: italic mark |

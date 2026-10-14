@@ -113,17 +113,28 @@ As built at M7: **minSdk 26, compile/target SDK 37**, NDK `27.2.12479018`, Gradl
 
 ### 4.2 Manifest and permissions
 
-The manifest requests the minimum. No `INTERNET` permission until the sync phase — that makes the offline guarantee enforceable by the platform, not just by convention.
+The manifest requests the minimum. `INTERNET` arrived with the sync phase on
+branch `feat/sync-mvp`: the app stays fully functional offline, but an
+explicitly enabled Sync (Settings → Sync) needs the network. With sync
+disabled or unconfigured no connection is ever opened, so the offline
+guarantee now holds by default rather than by manifest.
 
-| Permission | v1 | Purpose |
-|------------|-----|---------|
-| `INTERNET` | No | Sync only (post-v1) |
-| `WRITE_EXTERNAL_STORAGE` | No | Attachments only (v1.2) |
-| `VIBRATE` | No | |
+| Permission | v1 | Sync MVP | Purpose |
+|------------|-----|---------|---------|
+| `INTERNET` | No | **Yes** | Sync only, and only when enabled |
+| `ACCESS_NETWORK_STATE` | No | **Yes** | Companion to `INTERNET` |
+| `WRITE_EXTERNAL_STORAGE` | No | No | Attachments only (v1.2) |
+| `VIBRATE` | No | No | |
 
 `android:windowSoftInputMode="adjustResize"` is **required**, not optional: without it the on-screen keyboard covers the editor and the app is unusable. `android init` does not add it; it is set in `app/src/main/AndroidManifest.xml`.
 
-**`INTERNET` is declared in `app/src/debug/AndroidManifest.xml`, not the main one.** The generator adds it unconditionally because `tauri android dev` serves the WebView from a local dev server and needs a socket; a release build loads the bundled assets and does not. Splitting it by build type is what makes the guarantee real rather than aspirational — a permission in a debug-only manifest cannot reach a release APK.
+**`INTERNET` is declared in `app/src/main/AndroidManifest.xml` since the sync
+phase**, alongside the debug manifest's copy. The generator adds it to the
+debug manifest unconditionally because `tauri android dev` serves the WebView
+from a local dev server and needs a socket; the main-manifest entry is what
+lets an enabled Sync reach Postgres from a release build. `usesCleartextTraffic`
+stays `false` in release: sync speaks TLS (bundled roots), and `sslmode=disable
+connection strings are honoured for non-public hosts only.
 
 The one permission a release APK *does* carry is `com.chayote.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, injected by `androidx.core` at `protectionLevel="signature"`. It is not a capability and grants the app nothing it does not already have.
 

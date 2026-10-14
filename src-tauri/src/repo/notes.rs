@@ -11,8 +11,8 @@ use crate::repo::{
 };
 use crate::services::derive;
 
-/// The only implementation in v1. The post-v1 `SupabaseNotesRepo` implements
-/// the same trait without touching anything above it (ADR-003).
+/// The only implementation. Sync replicates its rows to Postgres without
+/// touching anything above this trait (ADR-003).
 pub struct SqliteNotesRepo {
     db: Arc<Database>,
 }
@@ -309,6 +309,24 @@ impl NotesRepo for SqliteNotesRepo {
     fn destroy(&self, id: &str) -> Result<(), AppError> {
         let note_id = id.to_owned();
         self.db.with_conn(move |conn| {
+            // `07-sync-plan.md` §5.4: a never-pushed note cannot vanish without
+            // ever existing elsewhere — permanent delete is refused while the
+            // server has never assigned it a `rev`. Soft-delete first and sync:
+            // the tombstone propagates, and *then* the row may go.
+            let rev: i64 = conn
+                .query_row("SELECT rev FROM notes WHERE id = ?1", [&note_id], |row| {
+                    row.get(0)
+                })
+                .map_err(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => AppError::NotFound,
+                    other => AppError::from(other),
+                })?;
+            if rev == 0 {
+                return Err(AppError::Validation(
+                    "This note has not synced yet — sync first so the deletion reaches your other devices."
+                        .into(),
+                ));
+            }
             let base_rev = base_rev(conn, &note_id)?;
             let tx = conn.transaction()?;
             // The FTS row goes with it: AFTER DELETE trigger in 0002_fts.sql.
@@ -321,9 +339,13 @@ impl NotesRepo for SqliteNotesRepo {
 
     fn empty_trash(&self) -> Result<i64, AppError> {
         self.db.with_conn(|conn| {
+            // Same §5.4 guard, per row rather than for the whole call: notes
+            // that have never been pushed stay in the trash until they sync,
+            // and the returned count names only what actually left.
             let trashed: Vec<(String, i64)> = {
-                let mut stmt =
-                    conn.prepare("SELECT id, rev FROM notes WHERE deleted_at IS NOT NULL")?;
+                let mut stmt = conn.prepare(
+                    "SELECT id, rev FROM notes WHERE deleted_at IS NOT NULL AND rev > 0",
+                )?;
                 let rows = stmt.query_map((), |row| Ok((row.get(0)?, row.get(1)?)))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             };
@@ -332,7 +354,10 @@ impl NotesRepo for SqliteNotesRepo {
             for (id, base_rev) in &trashed {
                 append_outbox(&tx, "note", id, "delete", None, *base_rev)?;
             }
-            let removed = tx.execute("DELETE FROM notes WHERE deleted_at IS NOT NULL", ())?;
+            let removed = tx.execute(
+                "DELETE FROM notes WHERE deleted_at IS NOT NULL AND rev > 0",
+                (),
+            )?;
             tx.commit()?;
             Ok(removed as i64)
         })

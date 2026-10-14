@@ -3,12 +3,9 @@ import type { FolderNode } from '../types/folder';
 import type { TagWithCount } from '../types/tag';
 import type { Note, NoteFilter, NoteSummary, SaveNoteInput } from '../types/ipc';
 import type { SearchInput, SearchPage } from '../types/search';
+import type { SyncConflict, SyncStatus, SyncSummary } from '../types/sync';
 import type { Uuid } from '../types/note';
-import {
-  buildEmptyMockDatabase,
-  buildMockDatabase,
-  createMockBackend,
-} from '../mock/adapter';
+import { buildEmptyMockDatabase, buildMockDatabase, createMockBackend } from '../mock/adapter';
 import type { MockDatabase } from '../mock/derive';
 
 export { cycleDetected, MockBackendError, notFound } from '../mock/errors';
@@ -104,6 +101,18 @@ export const tagsApi = {
 
 export const searchApi = {
   query: (input: SearchInput): Promise<SearchPage> => invoke('search_query', { input }),
+};
+
+export const syncApi = {
+  status: (): Promise<SyncStatus> => invoke('sync_get_status', {}),
+  setConfig: (connectionString: string, enabled: boolean): Promise<void> =>
+    invoke('sync_set_config', { connectionString, enabled }),
+  now: (openNoteId: Uuid | null): Promise<SyncSummary> =>
+    invoke('sync_now', { openNoteId }),
+  reupload: (): Promise<number> => invoke('sync_reupload', {}),
+  conflicts: (): Promise<SyncConflict[]> => invoke('sync_list_conflicts', {}),
+  resolve: (id: string, keepLocal: boolean): Promise<void> =>
+    invoke('sync_resolve_conflict', { id, keepLocal }),
 };
 
 export const windowApi = {

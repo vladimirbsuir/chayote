@@ -9,10 +9,13 @@ pub enum AppError {
     #[error("Something went wrong while reading or writing your notes.")]
     Db(#[from] rusqlite::Error),
 
-    /// Contract variants with no constructor in v1. Each is here because the
-    /// frontend branches on its code, and the constructor arrives with the
-    /// milestone that can produce it. `CONFLICT`, `UNAUTHENTICATED` and
-    /// `NETWORK` belong to the sync phase (`07-sync-plan.md`).
+    /// `DbOpen` has no constructor yet: it is here because the frontend
+    /// will branch on its code the day a command can produce it, and the
+    /// constructor arrives with that milestone. `NETWORK` is constructed by
+    /// the sync engine. Dropped variants are not kept for history: `CONFLICT`
+    /// never fired (conflicts resolve through the conflicts table and the
+    /// Sync tab, not through an error), and `UNAUTHENTICATED` died with the
+    /// no-accounts decision — see `07-sync-plan.md` §7.
     #[allow(dead_code)]
     #[error("Your notes could not be read. Try again.")]
     DbOpen(String),
@@ -32,17 +35,8 @@ pub enum AppError {
     #[error("A folder cannot be moved inside itself.")]
     CycleDetected,
 
-    #[allow(dead_code)]
-    #[error("This note changed on another device.")]
-    Conflict,
-
-    #[allow(dead_code)]
-    #[error("You are not signed in.")]
-    Unauthenticated,
-
-    #[allow(dead_code)]
-    #[error("The network request failed.")]
-    Network,
+    #[error("Could not reach the sync server.")]
+    Network(String),
 
     #[error("{0}")]
     Internal(String),
@@ -58,15 +52,35 @@ impl AppError {
             Self::DocInvalid => "DOC_INVALID",
             Self::DocTooLarge => "DOC_TOO_LARGE",
             Self::CycleDetected => "CYCLE_DETECTED",
-            Self::Conflict => "CONFLICT",
-            Self::Unauthenticated => "UNAUTHENTICATED",
-            Self::Network => "NETWORK",
+            Self::Network(_) => "NETWORK",
             Self::Internal(_) => "INTERNAL",
         }
     }
 
     pub fn internal(detail: impl std::fmt::Display) -> Self {
         Self::Internal(detail.to_string())
+    }
+
+    /// Technical detail, if any. `Display` stays user-facing by contract
+    /// (R7); this is what logs and the sync status store.
+    pub fn details(&self) -> Option<String> {
+        match self {
+            Self::Db(source) => Some(source.to_string()),
+            Self::DbOpen(detail)
+            | Self::Validation(detail)
+            | Self::Internal(detail)
+            | Self::Network(detail) => Some(detail.clone()),
+            _ => None,
+        }
+    }
+
+    /// One line for logs and the sync `last_error`: code plus detail, so a
+    /// failure is diagnosable without reproducing it.
+    pub fn log_line(&self) -> String {
+        match self.details() {
+            Some(detail) => format!("{}: {detail}", self.code()),
+            None => self.code().to_owned(),
+        }
     }
 }
 
@@ -84,17 +98,10 @@ pub struct WireError {
 
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let details = match self {
-            Self::Db(source) => Some(source.to_string()),
-            Self::DbOpen(detail) | Self::Validation(detail) | Self::Internal(detail) => {
-                Some(detail.clone())
-            }
-            _ => None,
-        };
         WireError {
             code: self.code(),
             message: self.to_string(),
-            details,
+            details: self.details(),
         }
         .serialize(serializer)
     }

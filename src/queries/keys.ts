@@ -10,4 +10,6 @@ export const qk = {
   folders: () => ['folders'] as const,
   tags: () => ['tags'] as const,
   search: (input: SearchInput) => ['search', input] as const,
+  syncStatus: () => ['sync-status'] as const,
+  syncConflicts: () => ['sync-conflicts'] as const,
 };

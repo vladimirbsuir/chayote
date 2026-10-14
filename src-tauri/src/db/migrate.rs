@@ -19,6 +19,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0003_outbox.sql",
         include_str!("../../migrations/0003_outbox.sql"),
     ),
+    (
+        "0004_sync.sql",
+        include_str!("../../migrations/0004_sync.sql"),
+    ),
+    (
+        "0005_sync_backoff.sql",
+        include_str!("../../migrations/0005_sync_backoff.sql"),
+    ),
 ];
 
 /// Applies every migration not yet recorded in `schema_migrations`.

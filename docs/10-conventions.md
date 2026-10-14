@@ -127,7 +127,8 @@ chayote/
     ├── migrations/
     │   ├── 0001_initial.sql
     │   ├── 0002_fts.sql
-    │   └── 0003_outbox.sql
+    │   ├── 0003_outbox.sql
+    │   └── 0004_sync.sql
     └── src/
         ├── main.rs
         ├── lib.rs
@@ -232,8 +233,6 @@ The mock adapter implements the same command names against in-memory fixtures. I
 | `DOC_INVALID` | Document violates the schema | Recovery screen (`04-editor.md` §8.4) |
 | `DOC_TOO_LARGE` | Document exceeds 5 MB | Keep the buffer, offer export as plain text |
 | `CYCLE_DETECTED` | Folder move into own descendant | Inline explanation |
-| `CONFLICT` | Concurrent modification, sync only | Prompt, do not overwrite |
-| `UNAUTHENTICATED` | Sync operation without a session | Sign-in prompt |
 | `NETWORK` | Sync request failed | Defer, retry with backoff |
 | `INTERNAL` | Anything unclassified | Log with the full chain, show the generic state |
 

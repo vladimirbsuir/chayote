@@ -279,7 +279,7 @@ Autosave is the most important behaviour in the app. A user who loses work will 
 | Trigger | `onUpdate`, debounced 800 ms |
 | Debounce | `useDebounce` over the transaction, keyed on the document, not on a timer over the whole editor |
 | Save unit | Whole document, `JSON.stringify(editor.getJSON())` |
-| Flush conditions | note switch, selection change, editor blur, window blur, window close, app background on Android |
+| Flush conditions | note switch, selection change, editor blur, window blur, window close, app background on Android, sync (manual and 60 s interval — the pull arbitrates on what SQLite holds, so unsaved typing is committed first) |
 | Concurrency | One save in flight; a change arriving during a save schedules exactly one follow-up save |
 | Comparison | Skip the IPC call if the serialised document equals the last-saved string |
 | Error handling | Failure shows a persistent inline status, retries with backoff, keeps the buffer |
