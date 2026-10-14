@@ -51,6 +51,24 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// a fact of life, not a theory.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BATCHES_PER_CYCLE: usize = 20;
+/// Per-row retry backoff (§8, Phase E). A failing row records `attempts` and
+/// the earliest epoch-ms it is due again (`outbox.next_retry_at`); the drain
+/// skips rows that are not due yet, so one dead row neither spins the queue
+/// at full speed nor blocks the rows behind it. Growth is ×4 from a 30 s
+/// base — 30 s, 2 min, 8 min — capped at 30 min so a long outage cannot
+/// stall the tab past the next launch.
+const RETRY_BASE_MS: i64 = 30_000;
+const RETRY_CAP_MS: i64 = 30 * 60_000;
+
+/// Exponential backoff for a row that has just failed `attempts` times
+/// (1-based: the first failure waits out the base delay).
+fn retry_delay_ms(attempts: i64) -> i64 {
+    let mut delay = RETRY_BASE_MS;
+    for _ in 1..attempts.max(1) {
+        delay = delay.saturating_mul(4).min(RETRY_CAP_MS);
+    }
+    delay.min(RETRY_CAP_MS)
+}
 
 const KEY_CONNECTION: &str = "connection_string";
 const KEY_ENDPOINT: &str = "endpoint_id";
@@ -75,13 +93,16 @@ pub struct SyncStatus {
     pub last_error: Option<String>,
 }
 
-/// What one `sync_now` cycle did.
+/// What one `sync_now` cycle did. `deferred` counts remote rows that were
+/// deliberately not applied this cycle: the open note's, while it is being
+/// edited (Phase-E open-editor guard). They are re-fetched next cycle.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSummary {
     pub pushed: i64,
     pub pulled: i64,
     pub conflicts: i64,
+    pub deferred: i64,
     pub already_running: bool,
 }
 
@@ -91,6 +112,7 @@ impl SyncSummary {
             pushed: 0,
             pulled: 0,
             conflicts: 0,
+            deferred: 0,
             already_running: true,
         }
     }
@@ -172,6 +194,28 @@ impl SyncService {
             put_state(&tx, KEY_LAST_ERROR, "")?;
             tx.commit()?;
             Ok(())
+        })
+    }
+
+    /// Re-queues every surviving row and restarts the pull watermarks (§6
+    /// recovery). Without this, a wiped server against clean rows and stale
+    /// watermarks is permanent divergence with no way out: a sync would push
+    /// nothing (empty outbox) and pull nothing (watermarks past every rev),
+    /// and re-saving the same connection string is deliberately a no-op.
+    /// Exposed as "Re-upload everything" in Settings → Sync; the next cycle
+    /// pushes the whole library and pulls since zero. Returns the queued
+    /// row count so the UI can name what happened.
+    pub fn reupload_all(&self) -> Result<i64, AppError> {
+        self.db.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            rebootstrap_tx(&tx)?;
+            let queued: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL",
+                (),
+                |row| row.get(0),
+            )?;
+            tx.commit()?;
+            Ok(queued)
         })
     }
 
@@ -297,7 +341,13 @@ impl SyncService {
     /// One push-then-pull cycle. Bootstrap (§6) needs no special case: the
     /// outbox has recorded every local write since day one, so draining it
     /// in dependency order *is* the upload, and pull only starts after.
-    pub async fn run_cycle(&self) -> Result<SyncSummary, AppError> {
+    ///
+    /// `open_note_id` is the note on screen, if any (Phase-E open-editor
+    /// guard). The frontend flushes the autosave before calling, so SQLite
+    /// holds what the user typed; a remote change for that same note is then
+    /// deferred rather than applied under the cursor, and re-fetched next
+    /// cycle. Nothing is ever clobbered while it is being typed.
+    pub async fn run_cycle(&self, open_note_id: Option<&str>) -> Result<SyncSummary, AppError> {
         let _guard = match self.lock.try_lock() {
             Ok(guard) => guard,
             Err(_) => return Ok(SyncSummary::busy()),
@@ -323,7 +373,9 @@ impl SyncService {
         let mut pulled = 0i64;
 
         for _ in 0..MAX_BATCHES_PER_CYCLE {
-            let batch = self.db.with_conn(pending_batch)?;
+            let batch = self
+                .db
+                .with_conn(|conn| pending_batch(conn, crate::clock::now_ms()))?;
             if batch.is_empty() {
                 break;
             }
@@ -359,7 +411,8 @@ impl SyncService {
             }
         }
 
-        pulled += self.pull_all(&client).await?;
+        let (pulled_pull, deferred) = self.pull_all(&client, open_note_id).await?;
+        pulled += pulled_pull;
         let conflicts = self.db.with_conn(|conn| {
             conn.query_row("SELECT COUNT(*) FROM conflicts", (), |row| row.get(0))
                 .map_err(AppError::from)
@@ -376,15 +429,25 @@ impl SyncService {
             pushed,
             pulled,
             conflicts,
+            deferred,
             already_running: false,
         })
     }
 
     fn record_row_error(&self, outbox_id: i64, detail: &str) -> Result<(), AppError> {
         self.db.with_conn(|conn| {
+            let attempts: i64 = conn
+                .query_row(
+                    "SELECT attempts FROM outbox WHERE id = ?1",
+                    [outbox_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            let next = attempts + 1;
+            let retry_at = crate::clock::now_ms().saturating_add(retry_delay_ms(next));
             conn.execute(
-                "UPDATE outbox SET attempts = attempts + 1, last_error = ?2 WHERE id = ?1",
-                rusqlite::params![outbox_id, detail],
+                "UPDATE outbox SET attempts = ?2, last_error = ?3, next_retry_at = ?4 WHERE id = ?1",
+                rusqlite::params![outbox_id, next, detail, retry_at],
             )?;
             put_state(conn, KEY_LAST_ERROR, detail)?;
             Ok(())
@@ -911,12 +974,17 @@ impl SyncService {
 
     // -- pull -----------------------------------------------------------
 
-    async fn pull_all(&self, client: &Client) -> Result<i64, AppError> {
+    async fn pull_all(
+        &self,
+        client: &Client,
+        open_note_id: Option<&str>,
+    ) -> Result<(i64, i64), AppError> {
         let mut pulled = 0;
         pulled += self.pull_folders(client).await?;
         pulled += self.pull_tags(client).await?;
-        pulled += self.pull_notes(client).await?;
-        Ok(pulled)
+        let (notes_pulled, deferred) = self.pull_notes(client, open_note_id).await?;
+        pulled += notes_pulled;
+        Ok((pulled, deferred))
     }
 
     async fn pull_folders(&self, client: &Client) -> Result<i64, AppError> {
@@ -981,8 +1049,18 @@ impl SyncService {
         Ok(pulled)
     }
 
-    async fn pull_notes(&self, client: &Client) -> Result<i64, AppError> {
+    /// Pulls notes, deferring the open note's row while it is being edited
+    /// (Phase-E open-editor guard). A deferred row is left untouched and the
+    /// watermark is held below it, so the row is re-fetched next cycle rather
+    /// than skipped forever; re-applying the rows around it is idempotent
+    /// (`remote.rev <= local.rev` is a no-op). Returns `(applied, deferred)`.
+    async fn pull_notes(
+        &self,
+        client: &Client,
+        open_note_id: Option<&str>,
+    ) -> Result<(i64, i64), AppError> {
         let mut pulled = 0;
+        let mut deferred = 0;
         for _ in 0..PULL_PAGES_PER_CYCLE {
             let watermark = watermark(&self.db, KEY_NOTES_REV)?;
             let rows: Vec<RemoteNote> = client_query(
@@ -997,9 +1075,16 @@ impl SyncService {
             if rows.is_empty() {
                 break;
             }
-            let mut max_rev = watermark;
+            let mut max_seen = watermark;
+            let mut max_applied = watermark;
+            let mut min_skipped: Option<i64> = None;
             for remote in &rows {
-                max_rev = max_rev.max(remote.rev);
+                max_seen = max_seen.max(remote.rev);
+                if note_pull_skipped(open_note_id, remote, &self.db)? {
+                    min_skipped = Some(min_skipped.map_or(remote.rev, |prev| prev.min(remote.rev)));
+                    deferred += 1;
+                    continue;
+                }
                 let remote_tags = query_remote_note_tags(client, &remote.id).await?;
                 if self
                     .db
@@ -1008,13 +1093,21 @@ impl SyncService {
                 {
                     pulled += 1;
                 }
+                max_applied = max_applied.max(remote.rev);
             }
-            set_watermark(&self.db, KEY_NOTES_REV, max_rev)?;
+            // A skipped row must be re-fetched: hold the watermark below the
+            // lowest skip. Rows applied past it are re-fetched too, harmlessly —
+            // applying an already-seen rev is a no-op.
+            let next = match min_skipped {
+                Some(skipped) => max_applied.min(skipped - 1).max(watermark),
+                None => max_seen,
+            };
+            set_watermark(&self.db, KEY_NOTES_REV, next)?;
             if rows.len() < PULL_LIMIT as usize {
                 break;
             }
         }
-        Ok(pulled)
+        Ok((pulled, deferred))
     }
 }
 
@@ -1471,13 +1564,23 @@ fn entity_rank(entity: &str) -> i64 {
 /// Latest row per (entity, entity_id), in dependency order. Older rows for
 /// the same key are superseded: the push sends full current state, so they
 /// can never contribute anything the latest row does not already carry.
-fn pending_batch(conn: &mut rusqlite::Connection) -> Result<Vec<OutboxRow>, AppError> {
+///
+/// Backoff aware: the "latest" is computed over *all* pending rows first,
+/// and only then filtered by due time. Filtering before collapsing would
+/// promote an older due row past a newer not-due one, and a successful push
+/// of that stale state would supersede the newer row without ever sending
+/// it. A not-due latest row skips the whole entity this cycle.
+/// Collapsed outbox state per (entity, entity_id): latest row id, op,
+/// base_rev and backoff timestamp.
+type CollapsedOutbox = std::collections::HashMap<(String, String), (i64, String, i64, Option<i64>)>;
+
+fn pending_batch(conn: &mut rusqlite::Connection, now_ms: i64) -> Result<Vec<OutboxRow>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, entity, entity_id, op, base_rev
+        "SELECT id, entity, entity_id, op, base_rev, next_retry_at
            FROM outbox WHERE sent_at IS NULL
-       ORDER BY created_at",
+        ORDER BY created_at",
     )?;
-    let all: Vec<(i64, String, String, String, i64)> = stmt
+    let all: Vec<(i64, String, String, String, i64, Option<i64>)> = stmt
         .query_map((), |row| {
             Ok((
                 row.get(0)?,
@@ -1485,19 +1588,21 @@ fn pending_batch(conn: &mut rusqlite::Connection) -> Result<Vec<OutboxRow>, AppE
                 row.get(2)?,
                 row.get(3)?,
                 row.get(4)?,
+                row.get(5)?,
             ))
         })?
         .collect::<Result<_, _>>()?;
     drop(stmt);
 
     use std::collections::HashMap;
-    let mut latest: HashMap<(String, String), (i64, String, i64)> = HashMap::new();
-    for (id, entity, entity_id, op, base_rev) in all {
-        latest.insert((entity, entity_id), (id, op, base_rev));
+    let mut latest: CollapsedOutbox = HashMap::new();
+    for (id, entity, entity_id, op, base_rev, retry_at) in all {
+        latest.insert((entity, entity_id), (id, op, base_rev, retry_at));
     }
     let mut batch: Vec<OutboxRow> = latest
         .into_iter()
-        .map(|((entity, entity_id), (id, op, base_rev))| OutboxRow {
+        .filter(|(_, (_, _, _, retry_at))| retry_at.is_none_or(|at| at <= now_ms))
+        .map(|((entity, entity_id), (id, op, base_rev, _))| OutboxRow {
             outbox_id: id,
             entity,
             entity_id,
@@ -1840,6 +1945,34 @@ async fn update_remote_note(client: &Client, id: &str, local: &LocalNote) -> Res
 }
 
 // -- pull apply ---------------------------------------------------------------
+
+/// Whether the open-editor guard defers this remote row. True only when the
+/// row *would* change the note on screen: the ids match and the remote rev is
+/// newer than the local one. Anything else — a different note, an already-seen
+/// rev, a note that no longer exists locally — flows through the normal path.
+fn note_pull_skipped(
+    open_note_id: Option<&str>,
+    remote: &RemoteNote,
+    db: &Database,
+) -> Result<bool, AppError> {
+    if open_note_id != Some(remote.id.as_str()) {
+        return Ok(false);
+    }
+    let local_rev: Option<i64> = db.with_conn(|conn| {
+        conn.query_row("SELECT rev FROM notes WHERE id = ?1", [&remote.id], |row| {
+            row.get(0)
+        })
+        .map(Some)
+        .or_else(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(AppError::from(other)),
+        })
+    })?;
+    match local_rev {
+        None => Ok(false),
+        Some(rev) => Ok(remote.rev > rev),
+    }
+}
 
 fn apply_remote_folder(
     conn: &mut rusqlite::Connection,
@@ -2281,12 +2414,182 @@ mod tests {
     }
 
     #[test]
+    fn reupload_requeues_everything_after_a_server_wipe() {
+        // Clean rows, empty outbox, stale watermarks: exactly what a wiped
+        // server leaves behind. Without re-queueing, the next sync would
+        // push nothing and pull nothing — permanent divergence.
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let tags = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db));
+        let tag = tags.create("Survivor").expect("tag creates");
+        sync.set_config("postgresql://u:p@a:5432/db?sslmode=disable", true)
+            .expect("config saves");
+        db.with_conn(|conn| {
+            conn.execute("UPDATE outbox SET sent_at = 1 WHERE sent_at IS NULL", ())?;
+            conn.execute(
+                "UPDATE tags SET dirty = 0, rev = 150 WHERE id = ?1",
+                [&tag.id],
+            )?;
+            put_state(conn, KEY_TAGS_REV, "150")?;
+            Ok::<_, AppError>(())
+        })
+        .expect("wipe simulation");
+
+        let queued = sync.reupload_all().expect("re-uploads");
+        assert!(queued >= 1, "every surviving row queued: {queued}");
+        let (dirty, watermark, pending): (i64, String, i64) = db
+            .with_conn(|conn| {
+                let dirty: i64 =
+                    conn.query_row("SELECT COUNT(*) FROM tags WHERE dirty = 1", (), |row| {
+                        row.get(0)
+                    })?;
+                let watermark: String = conn.query_row(
+                    "SELECT value FROM sync_state WHERE key = ?1",
+                    [KEY_TAGS_REV],
+                    |row| row.get(0),
+                )?;
+                let pending: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL",
+                    (),
+                    |row| row.get(0),
+                )?;
+                Ok((dirty, watermark, pending))
+            })
+            .expect("reads");
+        assert_eq!(dirty, 1);
+        assert_eq!(watermark, "0");
+        assert_eq!(pending, queued);
+    }
+
+    #[test]
     fn tag_union_keeps_both_sides() {
         let union = union_sets(
             &["a".to_owned(), "b".to_owned()],
             &["b".to_owned(), "c".to_owned()],
         );
         assert_eq!(union, vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]);
+    }
+
+    #[test]
+    fn retry_backoff_grows_and_caps() {
+        assert_eq!(retry_delay_ms(1), 30_000);
+        assert_eq!(retry_delay_ms(2), 120_000);
+        assert_eq!(retry_delay_ms(3), 480_000);
+        assert_eq!(retry_delay_ms(4), 1_800_000);
+        assert_eq!(retry_delay_ms(40), 1_800_000);
+    }
+
+    #[test]
+    fn pending_batch_skips_rows_that_are_not_due_yet() {
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let tags = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db));
+        let tag = tags.create("Backoff").expect("tag creates");
+
+        let now = crate::clock::now_ms();
+        // A failing row waits out its backoff; the batch is empty meanwhile.
+        db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE outbox SET attempts = 1, next_retry_at = ?1 WHERE sent_at IS NULL",
+                [now + 600_000],
+            )?;
+            Ok::<_, AppError>(())
+        })
+        .expect("backoff set");
+        let batch = db
+            .with_conn(|conn| pending_batch(conn, now))
+            .expect("batch reads");
+        assert!(batch.is_empty(), "not-due rows wait: {batch:?}");
+
+        // Due again once the timestamp passes.
+        let batch = db
+            .with_conn(|conn| pending_batch(conn, now + 600_001))
+            .expect("batch reads");
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].entity_id, tag.id);
+    }
+
+    #[test]
+    fn pending_batch_never_promotes_stale_state_past_a_waiting_latest() {
+        // Two queued rows for one entity, the latest still in backoff: the
+        // entity waits as a whole. Pushing the older row would supersede the
+        // newer one without ever sending it.
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let tags = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db));
+        let tag = tags.create("Stale").expect("tag creates");
+        tags.rename(&tag.id, "Stale2").expect("tag renames");
+
+        let now = crate::clock::now_ms();
+        db.with_conn(|conn| {
+            let latest: i64 = conn.query_row(
+                "SELECT MAX(id) FROM outbox WHERE sent_at IS NULL AND entity_id = ?1",
+                [&tag.id],
+                |row| row.get(0),
+            )?;
+            conn.execute(
+                "UPDATE outbox SET attempts = 1, next_retry_at = ?1 WHERE id = ?2",
+                rusqlite::params![now + 600_000, latest],
+            )?;
+            Ok::<_, AppError>(())
+        })
+        .expect("backoff set");
+        let batch = db
+            .with_conn(|conn| pending_batch(conn, now))
+            .expect("batch reads");
+        assert!(
+            batch.iter().all(|row| row.entity_id != tag.id),
+            "no stale push past the waiting latest: {batch:?}"
+        );
+    }
+
+    #[test]
+    fn open_note_guard_skips_only_what_would_change_the_screen() {
+        use crate::repo::NotesRepo as _;
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let notes = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db));
+        let created = notes.create(None).expect("note creates");
+        let id = created.summary.id.clone();
+        db.with_conn(|conn| {
+            conn.execute("UPDATE notes SET rev = 3 WHERE id = ?1", [&id])?;
+            Ok::<_, AppError>(())
+        })
+        .expect("rev set");
+
+        let newer = RemoteNote {
+            id: id.clone(),
+            title: String::new(),
+            title_source: "auto".into(),
+            doc_json: "{}".into(),
+            plain_text: String::new(),
+            excerpt: String::new(),
+            word_count: 0,
+            folder_id: None,
+            is_pinned: false,
+            rev: 9,
+            created_at: 0,
+            updated_at: 0,
+            deleted_at: None,
+        };
+        // The open note with a newer remote rev defers.
+        assert!(note_pull_skipped(Some(&id), &newer, &db).expect("reads"));
+        // Any other note, no open note, or an already-seen rev flows through.
+        let other = RemoteNote {
+            id: "other".into(),
+            ..newer.clone()
+        };
+        assert!(!note_pull_skipped(Some(&id), &other, &db).expect("reads"));
+        assert!(!note_pull_skipped(None, &newer, &db).expect("reads"));
+        let seen = RemoteNote {
+            rev: 3,
+            ..newer.clone()
+        };
+        assert!(!note_pull_skipped(Some(&id), &seen, &db).expect("reads"));
     }
 
     #[test]
@@ -2398,7 +2701,7 @@ mod tests {
         let note_uuid = uuid::Uuid::parse_str(&created.summary.id).expect("note uuid");
 
         // First cycle pushes everything, then finds nothing to pull.
-        let first = sync.run_cycle().await.expect("first cycle");
+        let first = sync.run_cycle(None).await.expect("first cycle");
         assert!(first.pushed >= 3, "pushes tag, folder, note: {first:?}");
         assert_eq!(first.pulled, 0);
         let status = sync.status().expect("status");
@@ -2424,7 +2727,7 @@ mod tests {
         assert_eq!(server_tags, vec![tag.id.clone()]);
 
         // A quiet second cycle is a no-op in both directions.
-        let second = sync.run_cycle().await.expect("second cycle");
+        let second = sync.run_cycle(None).await.expect("second cycle");
         assert_eq!((second.pushed, second.pulled), (0, 0));
 
         // Remote-only rename pulls cleanly.
@@ -2435,7 +2738,7 @@ mod tests {
             )
             .await
             .expect("remote rename");
-        let third = sync.run_cycle().await.expect("third cycle");
+        let third = sync.run_cycle(None).await.expect("third cycle");
         assert_eq!(third.pulled, 1);
         let tree = folders.list().expect("tree lists");
         assert_eq!(tree[0].name, "RenamedElsewhere");
@@ -2466,7 +2769,7 @@ mod tests {
             )
             .await
             .expect("remote edit");
-        let fourth = sync.run_cycle().await.expect("fourth cycle");
+        let fourth = sync.run_cycle(None).await.expect("fourth cycle");
         assert_eq!(
             fourth.conflicts, 1,
             "parks exactly one conflict: {fourth:?}"
@@ -2491,7 +2794,7 @@ mod tests {
         // instead of lingering. The tombstone name satisfies the server
         // CHECK that once rejected an empty placeholder here.
         folders.delete(&folder.id).expect("folder deletes");
-        let fifth = sync.run_cycle().await.expect("fifth cycle");
+        let fifth = sync.run_cycle(None).await.expect("fifth cycle");
         assert!(fifth.pushed >= 1, "tombstone pushes: {fifth:?}");
         let tombstone: Option<i64> = client
             .query_opt(
@@ -2510,6 +2813,39 @@ mod tests {
             0,
             "no stale rows linger after the delete"
         );
+
+        // The Phase-E open-editor guard: a pull that would change the note on
+        // screen defers it instead. The row is untouched, the watermark held,
+        // and the next cycle without the guard applies it.
+        let guarded_doc: serde_json::Value = serde_json::json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "guarded change"}]}]
+        });
+        client
+            .execute(
+                "UPDATE notes SET title = 'Deferred Remote', doc_json = $2::jsonb,
+                                  plain_text = 'guarded change', rev = nextval('sync_rev_seq')
+                  WHERE id = $1::uuid",
+                &[&note_uuid, &guarded_doc],
+            )
+            .await
+            .expect("remote edit while open");
+        let sixth = sync
+            .run_cycle(Some(&created.summary.id))
+            .await
+            .expect("guarded cycle");
+        assert_eq!(sixth.deferred, 1, "open note defers: {sixth:?}");
+        assert_eq!(sixth.pulled, 0);
+        let held = notes.get(&created.summary.id).expect("note reads");
+        assert!(
+            held.summary.excerpt.contains("local wins") || held.summary.title.contains("local"),
+            "screen untouched while open: {:?}",
+            held.summary.title
+        );
+        let seventh = sync.run_cycle(None).await.expect("unguarded cycle");
+        assert_eq!(seventh.pulled, 1);
+        let applied = notes.get(&created.summary.id).expect("note reads");
+        assert_eq!(applied.summary.title, "Deferred Remote");
 
         std::fs::remove_dir_all(&dir).ok();
     }

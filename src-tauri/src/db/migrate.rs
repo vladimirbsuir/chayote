@@ -23,6 +23,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0004_sync.sql",
         include_str!("../../migrations/0004_sync.sql"),
     ),
+    (
+        "0005_sync_backoff.sql",
+        include_str!("../../migrations/0005_sync_backoff.sql"),
+    ),
 ];
 
 /// Applies every migration not yet recorded in `schema_migrations`.

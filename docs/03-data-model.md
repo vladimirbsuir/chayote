@@ -128,11 +128,12 @@ Column-by-column rationale:
 
 **Deliberately absent:** `position` (no manual note order in v1), `is_favorite` (folded into `is_pinned`), `html`, `markdown`, `tags` (as text), `attachments`. Tags live in a join table; content has exactly one serialised form.
 
-**Migration count.** There are four migrations. `title_source` ships
+**Migration count.** There are five migrations. `title_source` ships
 inside `0001_initial.sql` with the rest of the table; the earlier draft of this
 document listed a separate `0004_note_title_source.sql`, which would have been a
 no-op `ALTER TABLE ADD COLUMN` against the schema above. The real fourth is
-`0004_sync.sql` — the sync `conflicts` and `sync_state` tables.
+`0004_sync.sql` — the sync `conflicts` and `sync_state` tables — and the fifth
+is `0005_sync_backoff.sql`, the outbox retry column.
 
 ### 3.4 `tags`
 
@@ -281,13 +282,17 @@ CREATE TABLE outbox (
   created_at INTEGER NOT NULL,
   sent_at    INTEGER,
   attempts   INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT
+  last_error TEXT,
+  next_retry_at INTEGER
 );
 
 CREATE INDEX idx_outbox_pending ON outbox(created_at) WHERE sent_at IS NULL;
+CREATE INDEX idx_outbox_retry ON outbox(next_retry_at) WHERE sent_at IS NULL;
 ```
 
 The pending-rows partial index is what the drain loop scans. Every service write appends here in the same transaction as the row write (**rule R5**); if the process dies between the two, neither happened.
+
+`next_retry_at` (epoch ms, NULL means due now) is the Phase-E backoff: a failed row waits 30 s × 4ⁿ⁻¹ capped at 30 min before it is due again. The drain collapses to the latest row per entity *before* filtering by due time, so a stale state is never promoted past a waiting latest.
 
 For `note_tags`, `entity_id` is a hash of the sorted `(note_id, tag_id)` pairs so that a set change collapses to one outbox row per note per drain cycle.
 
@@ -405,6 +410,7 @@ src-tauri/migrations/
   0002_fts.sql            -- notes_fts + triggers
   0003_outbox.sql         -- outbox, trash_snapshots
   0004_sync.sql           -- conflicts, sync_state
+  0005_sync_backoff.sql  -- outbox.next_retry_at + index
 ```
 
 Rules:
@@ -413,7 +419,7 @@ Rules:
 2. Every migration is idempotent where SQLite allows it: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE TRIGGER IF NOT EXISTS`. `ALTER TABLE ADD COLUMN` is not idempotent — guard it with a `PRAGMA table_info` check in Rust before running it.
 3. A migration that changes an indexed column must run `INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')` at the end.
 4. A migration must never rewrite the `notes` table with `DROP`/`CREATE`. The FTS triggers reference `notes` by name and `rowid`; recreating the table invalidates the external-content mapping and requires a full rebuild.
-5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: four migrations, the fourth (`0004_sync.sql`) carrying the sync `conflicts` and `sync_state` tables.
+5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: five migrations, the fourth (`0004_sync.sql`) carrying the sync `conflicts` and `sync_state` tables and the fifth (`0005_sync_backoff.sql`) the outbox retry column.
 
 ## 7. Migration path to Postgres
 

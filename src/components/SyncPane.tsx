@@ -16,8 +16,11 @@ type SyncPaneProps = {
   saving: boolean;
   saveError: string | null;
   lastResult: SyncSummary | null;
+  reuploading: boolean;
+  lastReupload: number | null;
   onSaveConfig: (connectionString: string, enabled: boolean) => Promise<void>;
   onSyncNow: () => Promise<SyncSummary>;
+  onReupload: () => Promise<number>;
   onResolve: (id: string, keepLocal: boolean) => Promise<void>;
 };
 
@@ -29,8 +32,11 @@ export function SyncPane({
   saving,
   saveError,
   lastResult,
+  reuploading,
+  lastReupload,
   onSaveConfig,
   onSyncNow,
+  onReupload,
   onResolve,
 }: SyncPaneProps) {
   const [draft, setDraft] = useState('');
@@ -62,6 +68,15 @@ export function SyncPane({
     setActionError(null);
     try {
       await onSyncNow();
+    } catch (error) {
+      setActionError(messageOf(error));
+    }
+  };
+
+  const reupload = async (): Promise<void> => {
+    setActionError(null);
+    try {
+      await onReupload();
     } catch (error) {
       setActionError(messageOf(error));
     }
@@ -179,6 +194,36 @@ export function SyncPane({
         </p>
       ) : null}
 
+      {/* Recovery, not routine: after a server wipe the device holds clean
+          rows against stale watermarks, and a sync would push nothing and
+          pull nothing. This re-queues the whole library so the next sync
+          uploads it again. Idempotent — running it twice changes nothing
+          the second time. */}
+      <div className="flex flex-col gap-1.5 border-t border-[var(--border)] pt-[18px]">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="sync-reupload"
+            disabled={reuploading || !configured}
+            onClick={() => {
+              void reupload();
+            }}
+            className="flex items-center gap-[6px] rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-[13px] font-medium text-[var(--text)] disabled:opacity-50"
+          >
+            {reuploading ? 'Re-uploading…' : 'Re-upload everything'}
+          </button>
+        </div>
+        <p className="text-[12px] text-[var(--text-subtle)]">
+          Pushes every note, folder and tag again. Only needed after wiping the server.
+        </p>
+        {lastReupload !== null ? (
+          <p className="text-[12px] text-[var(--text-muted)]" data-testid="sync-reupload-status">
+            {lastReupload} {lastReupload === 1 ? 'row' : 'rows'} queued — press Sync now to
+            upload.
+          </p>
+        ) : null}
+      </div>
+
       <ConflictsBlock
         conflicts={conflicts ?? []}
         resolvingId={resolvingId}
@@ -216,6 +261,9 @@ function SyncStatusLines({
       {lastResult !== null && !lastResult.alreadyRunning ? (
         <li className="text-[var(--text-muted)]">
           Pushed {lastResult.pushed} · pulled {lastResult.pulled}
+          {lastResult.deferred > 0
+            ? ` · ${lastResult.deferred} deferred for the open note — it syncs next time`
+            : null}
         </li>
       ) : null}
       {lastResult?.alreadyRunning === true ? <li>A sync is already running.</li> : null}

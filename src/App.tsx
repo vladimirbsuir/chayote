@@ -10,6 +10,7 @@ import { useTogglePin } from './hooks/useTogglePin';
 import { useTrashActions } from './hooks/useTrashActions';
 import {
   useAutoSync,
+  useReupload,
   useResolveConflict,
   useSyncConflicts,
   useSyncNow,
@@ -179,9 +180,11 @@ function Shell() {
   useAutoSync(syncStatus);
   const { syncNow, isSyncing } = useSyncNow();
   const { resolve: resolveConflict } = useResolveConflict();
+  const { reupload, isReuploading } = useReupload();
   const { conflicts: syncConflicts } = useSyncConflicts(settingsOpen && settingsTab === 'sync');
   const [syncSaving, setSyncSaving] = useState(false);
   const [syncLastResult, setSyncLastResult] = useState<SyncSummary | null>(null);
+  const [syncLastReupload, setSyncLastReupload] = useState<number | null>(null);
 
   /* Failures surface where they happened: SyncPane shows the thrown message
      itself (R7 copy), so this only tracks the spinner. */
@@ -204,6 +207,12 @@ function Shell() {
     refetch();
     return summary;
   }, [syncNow, refetch]);
+
+  const runReupload = useCallback(async (): Promise<number> => {
+    const queued = await reupload();
+    setSyncLastReupload(queued);
+    return queued;
+  }, [reupload]);
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
   /* The folder chips on the rows are counted from the selection's own notes, not
@@ -792,8 +801,11 @@ function Shell() {
             saving: syncSaving,
             saveError: null,
             lastResult: syncLastResult,
+            reuploading: isReuploading,
+            lastReupload: syncLastReupload,
             onSaveConfig: saveSyncConfig,
             onSyncNow: runSyncNow,
+            onReupload: runReupload,
             onResolve: (id, keepLocal) => resolveConflict(id, keepLocal),
           }}
           onThemeChange={(next) => {

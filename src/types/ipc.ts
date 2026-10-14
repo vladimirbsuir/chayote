@@ -91,6 +91,7 @@ export type CommandName =
   | 'sync_get_status'
   | 'sync_set_config'
   | 'sync_now'
+  | 'sync_reupload'
   | 'sync_list_conflicts'
   | 'sync_resolve_conflict'
   | 'window_ready';
@@ -118,7 +119,8 @@ export type CommandArgs = {
   search_query: { input: SearchInput };
   sync_get_status: Record<string, never>;
   sync_set_config: { connectionString: string; enabled: boolean };
-  sync_now: Record<string, never>;
+  sync_now: { openNoteId: string | null };
+  sync_reupload: Record<string, never>;
   sync_list_conflicts: Record<string, never>;
   sync_resolve_conflict: { id: string; keepLocal: boolean };
   window_ready: Record<string, never>;
@@ -148,6 +150,7 @@ export type CommandOutput = {
   sync_get_status: SyncStatus;
   sync_set_config: undefined;
   sync_now: SyncSummary;
+  sync_reupload: number;
   sync_list_conflicts: SyncConflict[];
   sync_resolve_conflict: undefined;
   window_ready: undefined;

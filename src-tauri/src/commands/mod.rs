@@ -65,6 +65,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         crate::commands::sync::sync_get_status,
         crate::commands::sync::sync_set_config,
         crate::commands::sync::sync_now,
+        crate::commands::sync::sync_reupload,
         crate::commands::sync::sync_list_conflicts,
         crate::commands::sync::sync_resolve_conflict,
     ]

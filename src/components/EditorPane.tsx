@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Editor } from '@tiptap/core';
 import { AlertCircle, ArrowLeft, RotateCw } from 'lucide-react';
 import { notesApi, tagsApi } from '../lib/ipc';
+import { registerSyncFlusher } from '../lib/syncFlush';
 import { useAutosave } from '../hooks/useAutosave';
 import { useFolders, folderNamesById } from '../hooks/useFolders';
 import { useTags } from '../hooks/useTags';
@@ -320,6 +321,17 @@ const createTag = useCallback(
   useEffect(() => {
     void autosave.flush();
   }, [autosave, selectionKey]);
+
+  /* Phase-E open-editor guard: every sync entry point flushes through this
+     before draining, so the pull arbitrates on the user's actual document
+     rather than on the row beneath unsaved typing. Registered per mount —
+     exactly one pane is ever mounted — and cleared on unmount. */
+  useEffect(() => {
+    registerSyncFlusher(() => autosave.flush());
+    return () => {
+      registerSyncFlusher(null);
+    };
+  }, [autosave]);
 
   /* Flush conditions: window blur and app background. The Android lifecycle
      event arrives as `visibilitychange`, because that is what the WebView

@@ -84,8 +84,11 @@ export type SyncTabState = {
   saving: boolean;
   saveError: string | null;
   lastResult: SyncSummary | null;
+  reuploading: boolean;
+  lastReupload: number | null;
   onSaveConfig: (connectionString: string, enabled: boolean) => Promise<void>;
   onSyncNow: () => Promise<SyncSummary>;
+  onReupload: () => Promise<number>;
   onResolve: (id: string, keepLocal: boolean) => Promise<void>;
 };
 
@@ -534,8 +537,11 @@ export function SettingsDialog({
                 saving={sync.saving}
                 saveError={sync.saveError}
                 lastResult={sync.lastResult}
+                reuploading={sync.reuploading}
+                lastReupload={sync.lastReupload}
                 onSaveConfig={sync.onSaveConfig}
                 onSyncNow={sync.onSyncNow}
+                onReupload={sync.onReupload}
                 onResolve={sync.onResolve}
               />
             ) : (

@@ -17,6 +17,9 @@ export type SyncSummary = {
   pushed: number;
   pulled: number;
   conflicts: number;
+  /** Remote rows deliberately not applied this cycle: the open note's, while
+      it is being edited. Re-fetched next cycle — never lost, never clobbered. */
+  deferred: number;
   alreadyRunning: boolean;
 };
 

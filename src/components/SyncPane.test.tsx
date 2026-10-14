@@ -43,8 +43,9 @@ const CONFLICT: SyncConflict = {
 function pane(overrides: Partial<React.ComponentProps<typeof SyncPane>> = {}) {
   const onSaveConfig = vi.fn(() => Promise.resolve());
   const onSyncNow = vi.fn(() =>
-    Promise.resolve({ pushed: 1, pulled: 2, conflicts: 0, alreadyRunning: false }),
+    Promise.resolve({ pushed: 1, pulled: 2, conflicts: 0, deferred: 0, alreadyRunning: false }),
   );
+  const onReupload = vi.fn(() => Promise.resolve(7));
   const onResolve = vi.fn(() => Promise.resolve());
   render(
     <SyncPane
@@ -55,13 +56,16 @@ function pane(overrides: Partial<React.ComponentProps<typeof SyncPane>> = {}) {
       saving={false}
       saveError={null}
       lastResult={null}
+      reuploading={false}
+      lastReupload={null}
       onSaveConfig={onSaveConfig}
       onSyncNow={onSyncNow}
+      onReupload={onReupload}
       onResolve={onResolve}
       {...overrides}
     />,
   );
-  return { onSaveConfig, onSyncNow, onResolve };
+  return { onSaveConfig, onSyncNow, onReupload, onResolve };
 }
 
 describe('SyncPane', () => {
@@ -140,6 +144,32 @@ describe('SyncPane', () => {
     pane({ status: CONFIGURED, conflicts: [] });
     expect(screen.queryByTestId('sync-conflict')).toBeNull();
   });
+
+  it('names deferred changes for the open note without blocking', () => {
+    pane({
+      status: CONFIGURED,
+      lastResult: { pushed: 1, pulled: 0, conflicts: 0, deferred: 1, alreadyRunning: false },
+    });
+    expect(screen.getByTestId('sync-status').textContent).toContain('1 deferred for the open note');
+  });
+
+  it('re-uploads on demand and names what was queued', async () => {
+    const { onReupload } = pane({ status: CONFIGURED });
+    fireEvent.click(screen.getByTestId('sync-reupload'));
+    await waitFor(() => {
+      expect(onReupload).toHaveBeenCalled();
+    });
+  });
+
+  it('reports the last re-upload count where the user can read it', () => {
+    pane({ status: CONFIGURED, lastReupload: 7 });
+    expect(screen.getByTestId('sync-reupload-status').textContent).toContain('7 rows queued');
+  });
+
+  it('disables re-upload until a string is stored', () => {
+    pane({ status: UNCONFIGURED });
+    expect(screen.getByTestId<HTMLButtonElement>('sync-reupload').disabled).toBe(true);
+  });
 });
 
 const FOLDERS: FolderNode[] = [];
@@ -167,9 +197,12 @@ function dialog(tab: 'general' | 'sync') {
         saving: false,
         saveError: null,
         lastResult: null,
+        reuploading: false,
+        lastReupload: null,
         onSaveConfig: () => Promise.resolve(),
         onSyncNow: () =>
-          Promise.resolve({ pushed: 0, pulled: 0, conflicts: 0, alreadyRunning: false }),
+          Promise.resolve({ pushed: 0, pulled: 0, conflicts: 0, deferred: 0, alreadyRunning: false }),
+        onReupload: () => Promise.resolve(0),
         onResolve: () => Promise.resolve(),
       }}
     />,

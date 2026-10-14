@@ -20,8 +20,16 @@ pub fn sync_set_config(
 }
 
 #[tauri::command]
-pub async fn sync_now(services: State<'_, Services>) -> Result<SyncSummary, AppError> {
-    services.sync.run_cycle().await
+pub async fn sync_now(
+    services: State<'_, Services>,
+    open_note_id: Option<String>,
+) -> Result<SyncSummary, AppError> {
+    services.sync.run_cycle(open_note_id.as_deref()).await
+}
+
+#[tauri::command]
+pub fn sync_reupload(services: State<'_, Services>) -> Result<i64, AppError> {
+    services.sync.reupload_all()
 }
 
 #[tauri::command]

@@ -107,7 +107,9 @@ export const syncApi = {
   status: (): Promise<SyncStatus> => invoke('sync_get_status', {}),
   setConfig: (connectionString: string, enabled: boolean): Promise<void> =>
     invoke('sync_set_config', { connectionString, enabled }),
-  now: (): Promise<SyncSummary> => invoke('sync_now', {}),
+  now: (openNoteId: Uuid | null): Promise<SyncSummary> =>
+    invoke('sync_now', { openNoteId }),
+  reupload: (): Promise<number> => invoke('sync_reupload', {}),
   conflicts: (): Promise<SyncConflict[]> => invoke('sync_list_conflicts', {}),
   resolve: (id: string, keepLocal: boolean): Promise<void> =>
     invoke('sync_resolve_conflict', { id, keepLocal }),

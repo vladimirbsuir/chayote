@@ -342,8 +342,10 @@ export function createMockBackend(db: MockDatabase): Backend {
           'Sync is not configured yet — paste a connection string under Settings → Sync.',
         );
       }
-      return { pushed: 0, pulled: 0, conflicts: 0, alreadyRunning: false };
+      return { pushed: 0, pulled: 0, conflicts: 0, deferred: 0, alreadyRunning: false };
     },
+
+    sync_reupload: () => 0,
 
     sync_list_conflicts: () => [],
 

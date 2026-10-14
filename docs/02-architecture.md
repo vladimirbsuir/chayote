@@ -213,7 +213,8 @@ Tauri commands exposed to the frontend. This is the complete API for v1; adding 
 | `search_query` | `SearchInput { query, filter, limit, offset }` | `SearchPage` |
 | `sync_get_status` | `()` | `SyncStatus` |
 | `sync_set_config` | `{ connectionString, enabled }` | `()` |
-| `sync_now` | `()` | `SyncSummary` |
+| `sync_now` | `{ openNoteId }` | `SyncSummary` |
+| `sync_reupload` | `()` | `i64` (rows queued) |
 | `sync_list_conflicts` | `()` | `SyncConflict[]` |
 | `sync_resolve_conflict` | `{ id, keepLocal }` | `()` |
 | `window_ready` | `()` | `()` |
@@ -260,10 +261,12 @@ remain on all three tables because R3 requires them and the sync phase needs
 them; `07-sync-plan.md` §5.2 and §5.4 say what changes when sync lands.
 
 **`notes_destroy`.** Permanent delete is refused while `rev` has never been
-synced (`07-sync-plan.md` §5.4). That rule is **not** implemented in v1: nothing
-is ever pushed, so `synced_at` is always NULL and the check would refuse every
-deletion, leaving the trash unemptyable against `05-ui-ux.md` §6.2 and §8. It is
-an entry condition for sync Phase B, not a v1 behaviour.
+synced (`07-sync-plan.md` §5.4). That rule shipped with sync Phase E on
+`feat/sync-mvp`: in v1 nothing was ever pushed, so the check would have refused
+every deletion and the trash would have been unemptyable against `05-ui-ux.md`
+§6.2 and §8. `notes_empty_trash` applies the same rule per row — never-synced
+notes stay in the trash until they sync, and the returned count names only
+what actually left.
 
 ## 8. Performance budget
 

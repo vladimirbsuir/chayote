@@ -87,6 +87,17 @@ fn scalar(db: &Arc<Database>, sql: &str) -> i64 {
         .expect("scalar query")
 }
 
+/// Simulates a sync push for `id`: the server has assigned a `rev`, so the
+/// §5.4 permanent-delete guard lets the row go. Direct SQL, not a sync cycle —
+/// these are data-layer tests and there is no server here.
+fn mark_synced(db: &Arc<Database>, id: &str) {
+    db.with_conn(|conn| {
+        conn.execute("UPDATE notes SET rev = 7, dirty = 0 WHERE id = ?1", [id])?;
+        Ok::<_, crate::error::AppError>(())
+    })
+    .expect("mark synced");
+}
+
 // ---------------------------------------------------------------- migration
 
 #[test]
@@ -100,7 +111,8 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
             "0001_initial.sql",
             "0002_fts.sql",
             "0003_outbox.sql",
-            "0004_sync.sql"
+            "0004_sync.sql",
+            "0005_sync_backoff.sql"
         ]
     );
     assert_eq!(applied[0].0, 1);
@@ -108,7 +120,7 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
     // Reopening must apply nothing new (R8).
     let reopened = Arc::new(Database::open(f._dir.path()).expect("reopen"));
     let again = crate::db::migrate::applied_all(&reopened).expect("readable again");
-    assert_eq!(again.len(), 4);
+    assert_eq!(again.len(), 5);
 }
 
 /// An in-memory database cannot do WAL or cascades across connections, so every
@@ -196,6 +208,8 @@ fn every_write_appends_exactly_one_outbox_row() {
     repo.restore(&created.summary.id).expect("restore");
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 4);
 
+    // Permanent delete needs a synced row (§5.4): simulate the push first.
+    mark_synced(&f.db, &created.summary.id);
     repo.destroy(&created.summary.id).expect("destroy");
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 5);
 }
@@ -322,6 +336,7 @@ fn ids_are_never_reused_after_deletion() {
 
     let first = repo.create(None).expect("create");
     let second = repo.create(None).expect("create");
+    mark_synced(&f.db, &first.summary.id);
     repo.destroy(&first.summary.id).expect("destroy");
     let third = repo.create(None).expect("create");
 
@@ -375,6 +390,8 @@ fn empty_trash_removes_only_soft_deleted_notes() {
     let keep = repo.create(None).expect("keep");
     let drop_one = repo.create(None).expect("drop");
     repo.soft_delete(&drop_one.summary.id).expect("soft delete");
+    // The trashed note must have been pushed before it may leave (§5.4).
+    mark_synced(&f.db, &drop_one.summary.id);
 
     assert_eq!(repo.empty_trash().expect("empty"), 1);
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM notes"), 1);
@@ -388,6 +405,43 @@ fn empty_trash_removes_only_soft_deleted_notes() {
         repo.get(&drop_one.summary.id).unwrap_err().code(),
         "NOT_FOUND"
     );
+}
+
+/// `07-sync-plan.md` §5.4: permanent delete is refused while the server has
+/// never assigned the row a `rev` — a never-pushed note must soft-delete and
+/// sync first, so the tombstone propagates before the row goes.
+#[test]
+fn destroy_refuses_a_note_that_has_never_synced() {
+    let f = fixture("destroy-guard");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let err = repo.destroy(&created.summary.id).expect_err("refused");
+    assert_eq!(err.code(), "VALIDATION");
+    // Refused before the transaction: no delete row was appended.
+    assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 1);
+    assert!(repo.get(&created.summary.id).is_ok());
+
+    mark_synced(&f.db, &created.summary.id);
+    repo.destroy(&created.summary.id).expect("goes after sync");
+}
+
+/// The same §5.4 rule, applied per row: `empty_trash` removes what has been
+/// pushed and leaves never-synced notes in the trash, naming only what left.
+#[test]
+fn empty_trash_leaves_never_synced_notes_behind() {
+    let f = fixture("empty-trash-guard");
+    let repo = notes(&f.db);
+
+    let synced = repo.create(None).expect("synced");
+    let fresh = repo.create(None).expect("fresh");
+    repo.soft_delete(&synced.summary.id).expect("soft delete");
+    repo.soft_delete(&fresh.summary.id).expect("soft delete");
+    mark_synced(&f.db, &synced.summary.id);
+
+    assert_eq!(repo.empty_trash().expect("empty"), 1);
+    assert!(repo.get(&synced.summary.id).is_err());
+    assert!(repo.get(&fresh.summary.id).is_ok());
 }
 
 // --------------------------------------------------------- required test 6
@@ -424,6 +478,7 @@ fn fts_index_tracks_notes_across_every_write() {
     assert!(page.hits.is_empty(), "trashed note is not a live hit");
 
     // Hard delete removes it from the index entirely.
+    mark_synced(&f.db, &created.summary.id);
     repo.destroy(&created.summary.id).expect("destroy");
     assert_eq!(fts_hits(&f.db, "satsuma"), 0, "row gone from index");
     assert_eq!(

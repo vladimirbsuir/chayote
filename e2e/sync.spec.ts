@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { seedSettings } from './helpers';
 
 /* The Sync tab, driven against the mock backend (ADR-018): the config
@@ -9,7 +10,7 @@ import { seedSettings } from './helpers';
 
 const DIALOG = '[data-testid="settings-dialog"]';
 
-async function openSyncTab(page: import('@playwright/test').Page): Promise<void> {
+async function openSyncTab(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'More' }).click();
   await page.getByTestId('topbar-overflow-settings').click();
   await expect(page.locator(DIALOG)).toBeVisible();
@@ -51,6 +52,19 @@ test.describe('sync tab', () => {
     /* The save invalidates the status query, which then reads the mock's
        stored config. */
     await expect(page.getByTestId('sync-status')).toContainText('Configured');
+  });
+
+  test('re-upload queues the library and names what was queued', async ({ page }) => {
+    await openSyncTab(page);
+    await expect(page.getByTestId('sync-reupload')).toBeDisabled();
+    await page.getByLabel('Postgres connection string').fill('postgresql://localhost/db');
+    await page.getByTestId('sync-save').click();
+    await expect(page.getByTestId('sync-status')).toContainText('Configured');
+    await page.getByTestId('sync-reupload').click();
+    /* The mock backend answers 0: what this pins is the wiring — the button
+       enables once configured and the queued count lands where it can be
+       read — not the engine, which the Rust tests own. */
+    await expect(page.getByTestId('sync-reupload-status')).toContainText('0 rows queued');
   });
 
   test('no conflict badge without conflicts', async ({ page }) => {

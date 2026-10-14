@@ -184,9 +184,11 @@ pub trait NotesRepo: Send + Sync {
     /// Sets `deleted_at`; the row stays, so the deletion can propagate (R3).
     fn soft_delete(&self, id: &str) -> Result<(), crate::error::AppError>;
     fn restore(&self, id: &str) -> Result<(), crate::error::AppError>;
-    /// Removes the row outright. `07-sync-plan.md` §5.4 adds the tombstone
-    /// guard here when sync lands; in v1 it would refuse every delete, since
-    /// `synced_at` is always NULL before the first push.
+    /// Removes the row outright. Refused while the server has never assigned
+    /// the row a `rev` (`07-sync-plan.md` §5.4): a never-pushed note must
+    /// soft-delete and sync first, so the tombstone propagates before the
+    /// row goes. `empty_trash` applies the same rule per row and leaves
+    /// never-synced notes in the trash.
     fn destroy(&self, id: &str) -> Result<(), crate::error::AppError>;
     fn empty_trash(&self) -> Result<i64, crate::error::AppError>;
 }
