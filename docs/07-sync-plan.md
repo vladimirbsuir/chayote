@@ -42,7 +42,7 @@ who never configures it runs exactly the v1 build.
 | B | Push: outbox drain loop, tags → folders → notes | done |
 | C | Pull: incremental fetch by `rev` watermark, apply with conflict checks | done |
 | D | Bootstrap: falls out of the drain; switching servers re-queues everything | done |
-| E | Retry/backoff polish, open-editor guard, never-synced delete guard | done |
+| E | Retry/backoff polish, open-editor guard, never-synced delete guard, re-upload recovery, two-device live coverage | done |
 
 Phases F (cross-device search) and G (realtime push) were dropped, not
 deferred: there is no server search and no live updates, by decision.
@@ -80,12 +80,24 @@ For the both-changed document case:
 
 Automatic three-way merging at the paragraph level is explicitly rejected for now. A silently wrong merge is worse than a visible conflict, and the conflict rate for a personal notes app is low enough that a manual prompt is acceptable.
 
+Documents compare by parsed value, never by string: the server column is
+`jsonb`, and `jsonb::text` re-spaces and reorders keys on every read, so a
+round-tripped document is never string-equal to the compact text the device
+stored. String comparison would park a conflict on every concurrent edit,
+however identical. Keep-local converges in one round: the push that parked
+already carried the local document and echoed its rev, so the re-queued row
+updates cleanly instead of parking again.
+
 ### 5.2 Folders and tags — LWW per row
 
 - Same row, both changed: higher `updated_at` wins, loser rebases.
 - Concurrent rename to the same name: both applied; duplicate names are legal (`03-data-model.md` §3.2).
 - Concurrent delete and rename: the delete wins, the rename is discarded, the row is tombstoned.
 - Concurrent move of a folder: LWW on `parent_id`. Not ideal, acceptable.
+- A pull filing a note into a folder the device does not hold (deleted here,
+  never arrived): the note is unfiled instead of failing the cycle — the same
+  `ON DELETE SET NULL` semantics a local folder delete gets. Crashing the
+  cycle over a filing hint would block every row behind it.
 
 A tree cannot be merged structurally in v1. Documented limitation.
 
@@ -94,6 +106,13 @@ A tree cannot be merged structurally in v1. Documented limitation.
 A many-to-many join cannot be row-merged. Treat a note's tag set as one set-valued field and union the local and remote sets. Removing a tag on one device while adding a different tag on another keeps both. Removing a tag is only truly honoured when it is applied as a whole-set replacement by a single device that saw the previous full set.
 
 This asymmetry is a known, accepted cost of using a relational model for something Obsidian solves with a set-based CRDT. If tag-removal sync proves unreliable in practice, the escape hatch is a `doc_tags jsonb` column on `notes` that is replaced wholesale, which resolves the whole set and needs no union rule.
+
+The push runs before the pull in every cycle, so a union can link a tag
+whose row has not arrived yet; SQLite does not apply `OR IGNORE` to foreign
+keys, so the local link write aborts and the row waits out backoff. Nothing
+is lost — the server side already applied the full union, and the retry
+completes the links once the tag row arrives. Filtering the unknown tag
+instead would clobber the server union on the next push.
 
 ### 5.4 Deletes
 

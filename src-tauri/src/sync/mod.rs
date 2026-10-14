@@ -821,7 +821,7 @@ impl SyncService {
     ) -> Result<PushOutcome, AppError> {
         let remote_tags = query_remote_note_tags(client, &row.entity_id).await?;
 
-        if remote.doc_json != local.doc_json {
+        if !docs_equal(&local.doc_json, &remote.doc_json) {
             park_conflict(
                 &self.db,
                 &row.entity_id,
@@ -1946,6 +1946,25 @@ async fn update_remote_note(client: &Client, id: &str, local: &LocalNote) -> Res
 
 // -- pull apply ---------------------------------------------------------------
 
+/// Documents compare by parsed value, never by string. The server column is
+/// `jsonb`, and `jsonb::text` re-spaces (and reorders) keys on every read —
+/// so a round-tripped document is never string-equal to the compact text the
+/// device stored, even with zero content change. Comparing strings would park
+/// a conflict on every concurrent edit, however identical. Unparseable input
+/// compares unequal (park is the safe direction).
+fn docs_equal(local: &str, remote: &str) -> bool {
+    if local == remote {
+        return true;
+    }
+    match (
+        serde_json::from_str::<serde_json::Value>(local),
+        serde_json::from_str::<serde_json::Value>(remote),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
 /// Whether the open-editor guard defers this remote row. True only when the
 /// row *would* change the note on screen: the ids match and the remote rev is
 /// newer than the local one. Anything else — a different note, an already-seen
@@ -2089,6 +2108,24 @@ fn apply_remote_tag(conn: &mut rusqlite::Connection, remote: &RemoteTag) -> Resu
     }
 }
 
+/// A pull that files a note into a folder this device does not hold
+/// (deleted here, never arrived) unfiles the note instead of violating the
+/// FK — the same `ON DELETE SET NULL` semantics a local folder delete gets.
+/// Crashing the cycle over a filing hint would block every row behind it;
+/// the next local edit re-sends the (null) filing and heals the server row.
+fn live_folder_id(
+    conn: &rusqlite::Connection,
+    folder_id: &Option<String>,
+) -> Result<Option<String>, AppError> {
+    let Some(id) = folder_id else {
+        return Ok(None);
+    };
+    let exists = conn
+        .query_row("SELECT 1 FROM folders WHERE id = ?1", [id], |_| Ok(()))
+        .is_ok();
+    Ok(exists.then(|| id.clone()))
+}
+
 fn apply_remote_note(
     conn: &mut rusqlite::Connection,
     remote: &RemoteNote,
@@ -2100,6 +2137,7 @@ fn apply_remote_note(
             if remote.deleted_at.is_some() {
                 return Ok(ApplyOutcome::Unchanged);
             }
+            let folder_id = live_folder_id(conn, &remote.folder_id)?;
             let tx = conn.transaction()?;
             tx.execute(
                 "INSERT INTO notes (id, title, title_source, doc_json, plain_text, excerpt,
@@ -2114,7 +2152,7 @@ fn apply_remote_note(
                     remote.plain_text,
                     remote.excerpt,
                     remote.word_count,
-                    remote.folder_id,
+                    folder_id,
                     i64::from(remote.is_pinned),
                     remote.rev,
                     remote.created_at,
@@ -2138,7 +2176,7 @@ fn apply_remote_note(
                 // Both sides changed: park the remote document, keep local
                 // live. The next push converges the server onto local; the
                 // user restores remote explicitly if that was wrong (§5.1).
-                if remote.doc_json != local.doc_json && remote.deleted_at.is_none() {
+                if !docs_equal(&local.doc_json, &remote.doc_json) && remote.deleted_at.is_none() {
                     park_conflict_in(
                         conn,
                         &remote.id,
@@ -2160,6 +2198,7 @@ fn apply_remote_note(
                     rusqlite::params![remote.id, remote.deleted_at, remote.rev],
                 )?;
             } else {
+                let folder_id = live_folder_id(&tx, &remote.folder_id)?;
                 tx.execute(
                     "UPDATE notes
                         SET title = ?2, title_source = ?3, doc_json = ?4, plain_text = ?5,
@@ -2175,7 +2214,7 @@ fn apply_remote_note(
                         remote.plain_text,
                         remote.excerpt,
                         remote.word_count,
-                        remote.folder_id,
+                        folder_id,
                         i64::from(remote.is_pinned),
                         remote.rev,
                         remote.updated_at
@@ -2239,6 +2278,14 @@ fn park_conflict_in(
     Ok(())
 }
 
+/// Links are whole-set replaced to match the union (or the pulled set).
+/// SQLite does not apply `OR IGNORE` to foreign keys, so linking a tag whose
+/// row has not arrived yet aborts the write instead of skipping it. That is
+/// ordering, not corruption: the push runs before the pull in every cycle,
+/// so a cross-device union can reference a tag pulled moments later. The row
+/// waits out backoff and completes on retry — never filtered, because
+/// dropping the link locally would clobber the server union on the next
+/// push. See the heal leg in `live_two_devices_share_tag_union_and_lww`.
 fn replace_local_tags(
     conn: &rusqlite::Connection,
     note_id: &str,
@@ -2478,6 +2525,26 @@ mod tests {
         assert_eq!(retry_delay_ms(3), 480_000);
         assert_eq!(retry_delay_ms(4), 1_800_000);
         assert_eq!(retry_delay_ms(40), 1_800_000);
+    }
+
+    #[test]
+    fn docs_compare_by_value_not_string() {
+        // What `jsonb::text` hands back after a round trip: re-spaced and
+        // reordered, zero content change. String comparison calls these
+        // different and parks a conflict on every concurrent edit.
+        let compact = r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
+        let spaced = r#"{ "type": "doc", "content": [ { "type": "paragraph" } ] }"#;
+        let reordered = r#"{"content":[{"type":"paragraph"}],"type":"doc"}"#;
+        assert!(docs_equal(compact, compact));
+        assert!(docs_equal(compact, spaced));
+        assert!(docs_equal(compact, reordered));
+        assert!(!docs_equal(
+            compact,
+            r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"changed"}]}]}"#
+        ));
+        // Unparseable input parks (the safe direction), never matches.
+        assert!(!docs_equal(compact, "not json"));
+        assert!(!docs_equal("not json", "not json either"));
     }
 
     #[test]
@@ -2789,6 +2856,81 @@ mod tests {
             .expect("keep-local resolves");
         assert_eq!(sync.list_conflicts().expect("lists").len(), 0);
 
+        // Use-remote resolves to the server document wholesale. For the parked
+        // copy to be a TRUE remote — rather than one the push just converged
+        // onto local — the local row sits out the push in backoff: then the
+        // pull, not the push, parks, the server still holds the remote
+        // content, and use-remote applies something visibly different from
+        // keep-local. (This also covers the backoff-skip → pull-park path.)
+        let local_doc2 = serde_json::json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "local v2"}]}]
+        });
+        notes
+            .save(&crate::repo::SaveNoteInput {
+                id: created.summary.id.clone(),
+                doc: local_doc2,
+                folder_id: Some(folder.id.clone()),
+                tag_ids: vec![tag.id.clone()],
+                is_pinned: false,
+            })
+            .expect("local edit");
+        db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE outbox SET attempts = 1, next_retry_at = ?1
+                  WHERE sent_at IS NULL AND entity = 'note'",
+                [crate::clock::now_ms() + 600_000],
+            )?;
+            Ok::<_, AppError>(())
+        })
+        .expect("backoff set");
+        let remote_doc2: serde_json::Value = serde_json::json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "true remote use-remote"}]}]
+        });
+        client
+            .execute(
+                "UPDATE notes SET doc_json = $2::jsonb, plain_text = 'true remote use-remote',
+                                  rev = nextval('sync_rev_seq') WHERE id = $1::uuid",
+                &[&note_uuid, &remote_doc2],
+            )
+            .await
+            .expect("remote edit");
+        let fourth_b = sync.run_cycle(None).await.expect("conflict cycle");
+        assert_eq!(fourth_b.conflicts, 1, "pull parks: {fourth_b:?}");
+        assert_eq!(
+            fourth_b.pushed, 0,
+            "the push sat the row out in backoff: {fourth_b:?}"
+        );
+        let conflicts2 = sync.list_conflicts().expect("lists");
+        assert_eq!(conflicts2.len(), 1);
+        sync.resolve_conflict(&conflicts2[0].id, false)
+            .await
+            .expect("use-remote resolves");
+        assert_eq!(sync.list_conflicts().expect("lists").len(), 0);
+        let applied2 = notes.get(&created.summary.id).expect("note reads");
+        assert!(
+            applied2.summary.excerpt.contains("true remote use-remote"),
+            "remote document goes live: {:?}",
+            applied2.summary.title
+        );
+        // Release the backoff: the stale row pushes current (remote) state.
+        // Docs are equal by now, so the disjoint path converges without
+        // parking a second conflict.
+        db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE outbox SET next_retry_at = NULL WHERE sent_at IS NULL",
+                (),
+            )?;
+            Ok::<_, AppError>(())
+        })
+        .expect("backoff released");
+        let quiet = sync.run_cycle(None).await.expect("converge cycle");
+        assert_eq!(
+            quiet.conflicts, 0,
+            "equal docs converge without parking again: {quiet:?}"
+        );
+
         // A local hard delete becomes a server tombstone (never a silent
         // row drop), and the queued older rows for the same folder collapse
         // instead of lingering. The tombstone name satisfies the server
@@ -2838,15 +2980,259 @@ mod tests {
         assert_eq!(sixth.pulled, 0);
         let held = notes.get(&created.summary.id).expect("note reads");
         assert!(
-            held.summary.excerpt.contains("local wins") || held.summary.title.contains("local"),
+            held.summary.excerpt.contains("true remote use-remote"),
             "screen untouched while open: {:?}",
             held.summary.title
         );
         let seventh = sync.run_cycle(None).await.expect("unguarded cycle");
-        assert_eq!(seventh.pulled, 1);
+        assert_eq!(seventh.pulled, 1, "applies the deferred row: {seventh:?}");
         let applied = notes.get(&created.summary.id).expect("note reads");
         assert_eq!(applied.summary.title, "Deferred Remote");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Two devices against one Postgres. Requires `CHAYOTE_SYNC_2DEV_URL` —
+    /// a throwaway database (the test truncates it first); without it the
+    /// test passes trivially so CI stays green.
+    ///
+    /// Exercises what one device cannot: a clean pull onto an empty device,
+    /// a both-sides-changed document (parked on the second pusher, applied
+    /// on the first), a tag-set union across devices, and folder LWW.
+    #[tokio::test]
+    async fn live_two_devices_share_tag_union_and_lww() {
+        let url = match std::env::var("CHAYOTE_SYNC_2DEV_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping two-device sync test: CHAYOTE_SYNC_2DEV_URL unset");
+                return;
+            }
+        };
+
+        fn device(tag: &str) -> (std::path::PathBuf, Arc<Database>, SyncService) {
+            let dir = std::env::temp_dir().join(format!(
+                "chayote-sync-2dev-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::create_dir_all(&dir).expect("temp dir");
+            let db = Arc::new(Database::open(&dir).expect("database opens"));
+            let sync = SyncService::new(Arc::clone(&db));
+            (dir, db, sync)
+        }
+
+        let (dir_a, db_a, sync_a) = device("a");
+        let (dir_b, db_b, sync_b) = device("b");
+
+        let client = connect(&url).await.expect("connects to test Postgres");
+        client
+            .batch_execute(include_str!("../../../postgres/schema.sql"))
+            .await
+            .expect("server schema applies");
+        client
+            .execute(
+                "TRUNCATE note_tags, notes, tags, folders RESTART IDENTITY",
+                &[],
+            )
+            .await
+            .expect("server starts empty");
+
+        sync_a.set_config(&url, true).expect("A config saves");
+        sync_b.set_config(&url, true).expect("B config saves");
+
+        let tags_a = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db_a));
+        let folders_a = crate::repo::folders::SqliteFoldersRepo::new(Arc::clone(&db_a));
+        let notes_a = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db_a));
+        let notes_b = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db_b));
+
+        // Device A writes the library; device B starts empty.
+        let shared = tags_a.create("Shared").expect("tag creates");
+        let folder = folders_a
+            .create("SharedFolder", None)
+            .expect("folder creates");
+        let created = notes_a.create(Some(&folder.id)).expect("note creates");
+        notes_a
+            .save(&crate::repo::SaveNoteInput {
+                id: created.summary.id.clone(),
+                doc: serde_json::json!({
+                    "type": "doc",
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hello A"}]}]
+                }),
+                folder_id: Some(folder.id.clone()),
+                tag_ids: vec![shared.id.clone()],
+                is_pinned: false,
+            })
+            .expect("note saves");
+        let first_a = sync_a.run_cycle(None).await.expect("A pushes");
+        assert!(first_a.pushed >= 3, "A uploads everything: {first_a:?}");
+
+        // A clean pull onto an empty device.
+        let first_b = sync_b.run_cycle(None).await.expect("B pulls");
+        assert!(first_b.pulled >= 3, "B downloads everything: {first_b:?}");
+        let b_live = notes_b.get(&created.summary.id).expect("B reads note");
+        assert!(
+            b_live.summary.excerpt.contains("hello A"),
+            "B sees A's document: {:?}",
+            b_live.summary.title
+        );
+
+        // Both sides change the document. A pushes first and wins the live
+        // copy; B parks the conflict and keeps typing.
+        notes_a
+            .save(&crate::repo::SaveNoteInput {
+                id: created.summary.id.clone(),
+                doc: serde_json::json!({
+                    "type": "doc",
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "A edit"}]}]
+                }),
+                folder_id: Some(folder.id.clone()),
+                tag_ids: vec![shared.id.clone()],
+                is_pinned: false,
+            })
+            .expect("A edits");
+        notes_b
+            .save(&crate::repo::SaveNoteInput {
+                id: created.summary.id.clone(),
+                doc: serde_json::json!({
+                    "type": "doc",
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "B edit"}]}]
+                }),
+                folder_id: Some(folder.id.clone()),
+                tag_ids: vec![shared.id.clone()],
+                is_pinned: false,
+            })
+            .expect("B edits");
+        sync_a.run_cycle(None).await.expect("A pushes first");
+        let b_push = sync_b.run_cycle(None).await.expect("B pushes second");
+        assert_eq!(b_push.conflicts, 1, "B parks exactly one: {b_push:?}");
+        assert_eq!(sync_b.list_conflicts().expect("lists").len(), 1);
+        let b_live = notes_b.get(&created.summary.id).expect("B reads");
+        assert!(
+            b_live.summary.excerpt.contains("B edit"),
+            "B keeps its live copy: {:?}",
+            b_live.summary.title
+        );
+        // A pulls B's push and converges onto it without a conflict of its own.
+        let a_pull = sync_a.run_cycle(None).await.expect("A pulls");
+        assert_eq!(a_pull.pulled, 1, "A applies B's push: {a_pull:?}");
+        let a_live = notes_a.get(&created.summary.id).expect("A reads");
+        assert!(
+            a_live.summary.excerpt.contains("B edit"),
+            "A converges onto B: {:?}",
+            a_live.summary.title
+        );
+
+        // Tag sets union: each side adds a different tag to the same note.
+        // Documents are equal by now, so the disjoint path unions the sets.
+        let tag2 = tags_a.create("ATag").expect("A tag creates");
+        let tags_b = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db_b));
+        let tag3 = tags_b.create("BTag").expect("B tag creates");
+        notes_a
+            .save(&crate::repo::SaveNoteInput {
+                id: created.summary.id.clone(),
+                doc: serde_json::json!({
+                    "type": "doc",
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "B edit"}]}]
+                }),
+                folder_id: Some(folder.id.clone()),
+                tag_ids: vec![shared.id.clone(), tag2.id.clone()],
+                is_pinned: false,
+            })
+            .expect("A tags");
+        notes_b
+            .save(&crate::repo::SaveNoteInput {
+                id: created.summary.id.clone(),
+                doc: serde_json::json!({
+                    "type": "doc",
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "B edit"}]}]
+                }),
+                folder_id: Some(folder.id.clone()),
+                tag_ids: vec![shared.id.clone(), tag3.id.clone()],
+                is_pinned: false,
+            })
+            .expect("B tags");
+        sync_a.run_cycle(None).await.expect("A pushes tags");
+        let b_tags = sync_b.run_cycle(None).await.expect("B pushes tags");
+        assert!(b_tags.pushed >= 1, "B uploads its tag set: {b_tags:?}");
+        // Still exactly the one parked row from the document leg: the equal
+        // docs take the union path and park nothing new (the table is one
+        // row per note, so a second park could not raise the count anyway —
+        // the server tag set below is what proves the union ran).
+        assert_eq!(sync_b.list_conflicts().expect("lists").len(), 1);
+        let note_uuid = uuid::Uuid::parse_str(&created.summary.id).expect("note uuid");
+        let server_tags: Vec<String> = client
+            .query(
+                "SELECT tag_id::text FROM note_tags WHERE note_id = $1::uuid ORDER BY 1",
+                &[&note_uuid],
+            )
+            .await
+            .expect("tag set")
+            .iter()
+            .map(|row| row.get(0))
+            .collect();
+        assert_eq!(
+            server_tags.len(),
+            3,
+            "union keeps all three: {server_tags:?}"
+        );
+
+        // Folder LWW: the later rename wins on both sides.
+        folders_a.rename(&folder.id, "AName").expect("A renames");
+        sync_a.run_cycle(None).await.expect("A pushes rename");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let folders_b = crate::repo::folders::SqliteFoldersRepo::new(Arc::clone(&db_b));
+        folders_b.rename(&folder.id, "BName").expect("B renames");
+        let b_rename = sync_b.run_cycle(None).await.expect("B pushes rename");
+        assert!(b_rename.pushed >= 1, "B uploads its rename: {b_rename:?}");
+        // Unchanged: still exactly the one parked row from the document leg.
+        // (Folders resolve by LWW and never park; the server name below is
+        // what proves B's rename won.)
+        assert_eq!(sync_b.list_conflicts().expect("lists").len(), 1);
+        let folder_uuid = uuid::Uuid::parse_str(&folder.id).expect("folder uuid");
+        let server_name: String = client
+            .query_one(
+                "SELECT name FROM folders WHERE id = $1::uuid",
+                &[&folder_uuid],
+            )
+            .await
+            .expect("folder reads")
+            .get(0);
+        assert_eq!(server_name, "BName", "later rename wins");
+        sync_a.run_cycle(None).await.expect("A pulls rename");
+        let tree = folders_a.list().expect("tree lists");
+        assert_eq!(tree[0].name, "BName");
+
+        assert_eq!(
+            sync_a.status().expect("status").pending_count,
+            0,
+            "A drains clean"
+        );
+        // The union push above raced tag-row arrival: B linked a tag it had
+        // not pulled yet, so the local link write aborted on the FK (SQLite
+        // does not apply OR IGNORE to foreign keys) *after* the server side
+        // had already applied the full union. Nothing is lost — the row waits
+        // out backoff and completes once the tag row arrives, exactly like a
+        // transient failure. Clear the wait to prove the heal deterministically.
+        db_b.with_conn(|conn| {
+            conn.execute(
+                "UPDATE outbox SET next_retry_at = NULL WHERE sent_at IS NULL",
+                (),
+            )?;
+            Ok::<_, AppError>(())
+        })
+        .expect("backoff released");
+        let b_heal = sync_b.run_cycle(None).await.expect("B heals links");
+        assert_eq!(
+            b_heal.conflicts, 1,
+            "healing parks nothing new, old row stands: {b_heal:?}"
+        );
+        assert_eq!(
+            sync_b.status().expect("status").pending_count,
+            0,
+            "B drains clean (the parked conflict lives in the conflicts table, not the outbox)"
+        );
+
+        std::fs::remove_dir_all(&dir_a).ok();
+        std::fs::remove_dir_all(&dir_b).ok();
     }
 }
