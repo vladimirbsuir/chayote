@@ -204,6 +204,10 @@ function Shell() {
   const runSyncNow = useCallback(async (): Promise<SyncSummary> => {
     const summary = await syncNow();
     setSyncLastResult(summary);
+    /* The re-upload notice names what the *next* sync will do. A completed
+       cycle did it, so the line retires — otherwise it sits under a
+       "Pending rows: 0" claiming work remains. */
+    setSyncLastReupload(null);
     refetch();
     return summary;
   }, [syncNow, refetch]);
