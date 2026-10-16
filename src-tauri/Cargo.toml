@@ -28,6 +28,12 @@ rustls = "0.23.45"
 webpki-roots = "1.0.9"
 tokio-postgres-rustls = "0.14.0"
 
+# Windows only: reaching WebView2's settings to hand browser accelerators
+# (Ctrl+F find, …) to the page (`06-platform.md` §1, shortcuts).
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
 [profile.release]
 codegen-units = 1
 lto = true
