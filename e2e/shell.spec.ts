@@ -463,8 +463,11 @@ test.describe('folder organisation', () => {
     await page.getByRole('button', { name: 'New folder' }).click();
     const input = page.getByTestId('folder-name-input');
     await expect(input).toBeFocused();
-    await input.fill('Research');
-    await input.press('Enter');
+    /* Typed, not filled, and committed from the keyboard: `fill`/`press` hold
+       an element handle across React re-renders, and a node swapped mid-action
+       retries until the timeout — keystrokes land on whatever holds focus. */
+    await input.pressSequentially('Research');
+    await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('folder-row')).toHaveCount(before + 1);
     await expect(page.getByTestId('folder-row').filter({ hasText: 'Research' })).toBeVisible();
@@ -476,8 +479,8 @@ test.describe('folder organisation', () => {
     const before = await page.getByTestId('folder-row').count();
 
     await page.getByRole('button', { name: 'New folder' }).click();
-    await page.getByTestId('folder-name-input').fill('Discarded');
-    await page.getByTestId('folder-name-input').press('Escape');
+    await page.getByTestId('folder-name-input').pressSequentially('Discarded');
+    await page.keyboard.press('Escape');
 
     await expect(page.getByTestId('folder-name-input')).toHaveCount(0);
     await expect(page.getByTestId('folder-row')).toHaveCount(before);
@@ -705,8 +708,8 @@ test.describe('tag management', () => {
     await open(page);
 
     await page.getByRole('button', { name: 'New tag' }).click();
-    await page.getByTestId('tag-name-input').fill('e2e-extra');
-    await page.getByTestId('tag-name-input').press('Enter');
+    await page.getByTestId('tag-name-input').pressSequentially('e2e-extra');
+    await page.keyboard.press('Enter');
 
     /* Visible immediately, at a zero count — the hiding rule this replaces made
        exactly this flow look broken. */
@@ -722,8 +725,10 @@ test.describe('tag management', () => {
     await page.getByTestId('tag-row').first().click({ button: 'right' });
     await page.getByTestId('tag-menu-rename').click();
 
-    await page.getByTestId('tag-name-input').fill('e2e-renamed');
-    await page.getByTestId('tag-name-input').press('Enter');
+    /* The rename input mounts with its contents selected, so typing replaces.
+       Keystrokes, not handles: see the folder create test. */
+    await page.getByTestId('tag-name-input').pressSequentially('e2e-renamed');
+    await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('tag-row').filter({ hasText: 'e2e-renamed' })).toBeVisible();
     await expect(page.getByTestId('tag-row')).toHaveCount(before);
@@ -959,8 +964,8 @@ test.describe('folder organisation', () => {
     await page.getByTestId('folder-menu-create').click();
 
     const input = page.getByTestId('folder-name-input');
-    await input.fill('Clients');
-    await input.press('Enter');
+    await input.pressSequentially('Clients');
+    await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('folder-row').filter({ hasText: 'Clients' })).toHaveAttribute(
       'aria-level',
