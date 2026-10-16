@@ -62,6 +62,14 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --shard=${{ matrix.shard }}/2 --grep-invert @touch
+      # Traces (and the screenshots inside them) are the only way to see a
+      # headless failure after the runner is gone. Kept on failure only.
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: e2e-trace-shard-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 7
 
   e2e-touch:
     # The `@touch` block alone on one worker: emulated-touch timing needs an
@@ -77,3 +85,9 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --grep @touch --workers=1
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: e2e-trace-touch
+          path: test-results/
+          retention-days: 7
