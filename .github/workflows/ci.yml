@@ -43,16 +43,25 @@ jobs:
   e2e:
     # Sharded across machines, not workers: one runner's CPUs are already
     # saturated at two workers, so more workers on the same box only add
-    # contention. Each shard gets its own runner and half the suite.
-    # Touch-emulation tests are excluded here (tagged `@touch`): their
-    # real-timer holds break under a shared runner, so they run alone in
-    # `e2e-touch` below instead.
-    name: End-to-end (shard ${{ matrix.shard }})
+    # contention. Each shard gets its own runner and part of the suite.
+    # Touch-emulation tests (tagged `@touch`) ride in the same matrix as
+    # their own entry: their real-timer holds need an unloaded browser, so
+    # they run alone on one worker rather than in a shard.
+    name: End-to-end (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        include:
+          - name: shard 1
+            slug: shard-1
+            args: --shard=1/2 --grep-invert @touch
+          - name: shard 2
+            slug: shard-2
+            args: --shard=2/2 --grep-invert @touch
+          - name: touch
+            slug: touch
+            args: --grep @touch --workers=1
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -61,33 +70,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test --shard=${{ matrix.shard }}/2 --grep-invert @touch
+      - run: npx playwright test ${{ matrix.args }}
       # Traces (and the screenshots inside them) are the only way to see a
       # headless failure after the runner is gone. Kept on failure only.
       - uses: actions/upload-artifact@v5
         if: failure()
         with:
-          name: e2e-trace-shard-${{ matrix.shard }}
-          path: test-results/
-          retention-days: 7
-
-  e2e-touch:
-    # The `@touch` block alone on one worker: emulated-touch timing needs an
-    # unloaded browser, which the sharded gate cannot promise.
-    name: End-to-end (touch)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npx playwright test --grep @touch --workers=1
-      - uses: actions/upload-artifact@v5
-        if: failure()
-        with:
-          name: e2e-trace-touch
+          name: e2e-trace-${{ matrix.slug }}
           path: test-results/
           retention-days: 7
