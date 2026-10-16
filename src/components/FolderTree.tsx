@@ -743,16 +743,20 @@ function FolderRows({
                       event.stopPropagation();
                       onToggle(node.id);
                     }}
-                    /* Collapsing works from touch today — the twisty is a real
-                       button — but 16 px is a miss waiting to happen against §9's
-                       44 px touch bar. The row is 26 px tall and the name owns the
+                    /* The button fills the slot (`h-5 w-5` like the header
+                       chevron's), so the two boxes — and therefore the icons —
+                       share the column exactly; centring a 16 px icon in the
+                       slot still left the left edges 2 px apart. Collapsing
+                       works from touch today — the twisty is a real button —
+                       but 16 px is a miss waiting to happen against §9's 44 px
+                       touch bar. The row is 26 px tall and the name owns the
                        rest of it, so a full-size target would steal taps from its
                        neighbours; the invisible hit slop below roughly doubles the
                        target on coarse pointers without moving any pixel. A 44 px
                        target genuinely does not fit here — recorded in the M8
                        tracker rather than faked with an overlap that misattributes
                        taps to the rows above and below. */
-                    className="relative flex text-[var(--text-subtle)] hover:text-[var(--text)] pointer-coarse:before:absolute pointer-coarse:before:-inset-x-3 pointer-coarse:before:-inset-y-2 pointer-coarse:before:content-['']"
+                    className="relative grid h-5 w-5 flex-none place-items-center text-[var(--text-subtle)] hover:text-[var(--text)] pointer-coarse:before:absolute pointer-coarse:before:-inset-x-3 pointer-coarse:before:-inset-y-2 pointer-coarse:before:content-['']"
                   >
                     {isCollapsed ? (
                       <ChevronRight className="icon i-16" aria-hidden="true" />

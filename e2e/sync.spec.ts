@@ -56,6 +56,8 @@ test.describe('sync tab', () => {
 
   test('re-upload queues the library and names what was queued', async ({ page }) => {
     await openSyncTab(page);
+    /* Status and recovery live collapsed under Status & advanced. */
+    await page.getByTestId('sync-details-toggle').click();
     await expect(page.getByTestId('sync-reupload')).toBeDisabled();
     await page.getByLabel('Postgres connection string').fill('postgresql://localhost/db');
     await page.getByTestId('sync-save').click();

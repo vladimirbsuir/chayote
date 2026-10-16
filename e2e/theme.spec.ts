@@ -21,7 +21,9 @@ test.describe('theme', () => {
     await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();
   });
 
-  test('Ctrl+Shift+L cycles light, dark, system and back', async ({ page }) => {
+  test('Ctrl+Shift+L changes what is on screen with every press', async ({ page }) => {
+    /* The cycle skips a step that would resolve to what is already showing:
+       on this light OS, stored system from dark would be a no-op press. */
     await waitForStoredTheme(page, 'light');
 
     await page.keyboard.press('Control+Shift+L');
@@ -30,19 +32,28 @@ test.describe('theme', () => {
 
     await page.keyboard.press('Control+Shift+L');
     await waitForStoredTheme(page, 'system');
+    expect(await themeNow(page)).toBe('light');
 
-    /* Three steps is a full lap, which is what makes the cycle safe to press
-       without looking. */
+    /* Stepping onto stored light next would change nothing while the OS is
+       light, so the cycle lands on dark instead — every press stays visible. */
     await page.keyboard.press('Control+Shift+L');
-    await waitForStoredTheme(page, 'light');
+    await waitForStoredTheme(page, 'dark');
+    expect(await themeNow(page)).toBe('dark');
   });
 
   test('system follows the OS preference', async ({ page }) => {
-    await page.emulateMedia({ colorScheme: 'dark' });
+    /* Two presses from seeded light on this light OS land on stored system —
+       reached through the app, never by writing storage under the debounced
+       writer. */
     await page.keyboard.press('Control+Shift+L');
     await page.keyboard.press('Control+Shift+L');
     await waitForStoredTheme(page, 'system');
-    expect(await themeNow(page)).toBe('dark');
+    expect(await themeNow(page)).toBe('light');
+
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(() => themeNow(page)).toBe('dark');
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect.poll(() => themeNow(page)).toBe('light');
   });
 
   test('a theme change survives a relaunch', async ({ page }) => {
@@ -61,10 +72,13 @@ test.describe('theme', () => {
 
     await button.click();
     await waitForStoredTheme(page, 'dark');
+    expect(await themeNow(page)).toBe('dark');
     await button.click();
     await waitForStoredTheme(page, 'system');
+    expect(await themeNow(page)).toBe('light');
     await button.click();
-    await waitForStoredTheme(page, 'light');
+    await waitForStoredTheme(page, 'dark');
+    expect(await themeNow(page)).toBe('dark');
   });
 
   test('the button icon shows the theme in effect, not the next one', async ({ page }) => {
@@ -73,7 +87,6 @@ test.describe('theme', () => {
        "Light" while dark is showing would be a lie in the one place the user
        checks what the app thinks the theme is. */
     await page.emulateMedia({ colorScheme: 'dark' });
-    await page.keyboard.press('Control+Shift+L');
     await page.keyboard.press('Control+Shift+L');
     await expect.poll(() => themeNow(page)).toBe('dark');
 
