@@ -78,24 +78,28 @@ export function NoteRowMenu({
     [note.id],
   );
 
-  /* Outside press closes, on `click` and `auxclick` rather than `mousedown` —
-     deliberately. The press that opens the menu from a touch hold is still down
-     when the menu mounts, and its release synthesises a `mousedown`: closing on
-     `mousedown` would shut the menu in the user's face before the hold is over.
-     The release's `click` is swallowed separately by the row (it would open the
-     note under the menu), and only then does this close. `auxclick` keeps a
-     second right-click working: without it, right-clicking another row would
-     leave two menus up, since the right button's release never fires `click`. */
+  /* Outside press closes on `mousedown` (plus `click` for presses with no
+     button-down, like keyboard activation) — deliberately never on `auxclick`.
+     The same physical press both opens the menu (`contextmenu`) and releases
+     (`auxclick`), and their order differs by platform: where `auxclick` lands
+     after `contextmenu`, closing on it shuts the just-opened menu in the
+     user's face — found on Linux, invisible on Windows. `mousedown` always
+     precedes `contextmenu`, so it can never close what the press is opening;
+     a hold that produced `contextmenu` synthesises no mouse events on release
+     at all, so the touch path is unaffected. Right-clicking another row still
+     lands on one menu, because opening replaces the list's single menu state
+     rather than stacking. The row swallows the release's own `click` (it would
+     open the note under the menu). */
   useEffect(() => {
     const onOutsidePress = (event: MouseEvent): void => {
       if (menuRef.current?.contains(event.target as Node)) return;
       onClose();
     };
+    document.addEventListener('mousedown', onOutsidePress);
     document.addEventListener('click', onOutsidePress);
-    document.addEventListener('auxclick', onOutsidePress);
     return () => {
+      document.removeEventListener('mousedown', onOutsidePress);
       document.removeEventListener('click', onOutsidePress);
-      document.removeEventListener('auxclick', onOutsidePress);
     };
   }, [onClose]);
 
@@ -204,7 +208,13 @@ function buildItems(
     });
   }
   if (onRestore !== undefined) {
-    items.push({ action: 'restore', label: 'Restore', icon: RotateCw, danger: false, run: onRestore });
+    items.push({
+      action: 'restore',
+      label: 'Restore',
+      icon: RotateCw,
+      danger: false,
+      run: onRestore,
+    });
   }
   if (onDestroy !== undefined) {
     items.push({

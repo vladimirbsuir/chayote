@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { seedSettings } from './helpers';
 
 /* `05-ui-ux.md` §2.4 and §9, below 768 px.
@@ -348,7 +348,9 @@ test.describe('narrow desktop window', () => {
   });
 });
 
-test.describe('mobile touch', () => {
+/* Tagged `@touch`: emulated-touch timing breaks under a loaded shared runner,
+   so CI runs this block alone on one worker rather than in the sharded gate. */
+test.describe('mobile touch', { tag: '@touch' }, () => {
   test.use({
     viewport: MOBILE,
     userAgent: ANDROID_UA,
@@ -356,13 +358,23 @@ test.describe('mobile touch', () => {
     isMobile: true,
   });
 
+  /* A hold, without depending on input synthesis: a real right-click in a
+     touch context does not reliably produce `contextmenu` across browser
+     builds (CI's headless-shell swallows it), while the app answers the DOM
+     event itself — which is the contract under test, proven on hardware. */
+  async function holdRow(target: Locator): Promise<void> {
+    await target.evaluate((row) => {
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    });
+  }
+
   test('a trashed note restores from the row menu after the toast is gone', async ({ page }) => {
     /* The gap this file keeps finding: on touch the note rows had no menu at
        all — the button is `pointer:fine`-only and a hold selected text — so
        once the undo toast expired a trashed note was stuck. The row answers
        `contextmenu` like the folder rows, which is what a hold fires on the
-       device (proven with `input swipe x y x y 900`); the right-click here
-       reaches the same `openMenu` measurement. The toast is dismissed first so
+       device (proven with `input swipe x y x y 900`); the hold here reaches
+       the same `openMenu` measurement. The toast is dismissed first so
        this pins the stuck state, not the undo path. */
     await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
     await page.goto('/');
@@ -370,14 +382,14 @@ test.describe('mobile touch', () => {
 
     const card = page.getByTestId('note-card').first();
     const noteId = await card.getAttribute('data-note-id');
-    await card.click({ button: 'right' });
+    await holdRow(card);
     await page.getByTestId('note-menu-delete').click();
     await page.getByTestId('undo-toast-dismiss').click();
 
     await page.getByTestId('filter-trash').click();
     const trashed = page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`);
     await expect(trashed).toBeVisible();
-    await trashed.click({ button: 'right' });
+    await holdRow(trashed);
 
     const menu = page.getByTestId('note-menu');
     await expect(menu).toBeVisible();
@@ -424,9 +436,10 @@ test.describe('mobile touch', () => {
 
   test('the row menu pins and unpins, the touch path to the pin', async ({ page }) => {
     /* On touch there is no hover, so the row menu is the only path to the pin
-       outside the editor. Right-click reaches the same `openMenu` a hold does.
-       Proven by the label flipping: the menu re-reads the note, so the opposite
-       verb means the write landed and the list refreshed. */
+       outside the editor. The hold reaches the same `openMenu` a device
+       long-press does. Proven by the label flipping: the menu re-reads the
+       note, so the opposite verb means the write landed and the list
+       refreshed. */
     await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
     await page.goto('/');
     await expect(page.getByTestId('note-list')).toBeVisible();
@@ -435,7 +448,7 @@ test.describe('mobile touch', () => {
     const row = (): ReturnType<typeof page.locator> =>
       page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`);
     const menuLabel = async (): Promise<string> => {
-      await row().click({ button: 'right' });
+      await holdRow(row());
       const label = (await page.getByTestId('note-menu-pin').textContent()) ?? '';
       await page.keyboard.press('Escape');
       return label;
@@ -444,7 +457,7 @@ test.describe('mobile touch', () => {
     const first = await menuLabel();
     expect(first).toMatch(/Pin note|Unpin note/);
 
-    await row().click({ button: 'right' });
+    await holdRow(row());
     await page.getByTestId('note-menu-pin').click();
     await expect(page.getByTestId('note-menu')).toHaveCount(0);
 
@@ -502,12 +515,12 @@ test.describe('mobile touch', () => {
        long-press gesture itself is proven on hardware (`input swipe x y x y
        900` opens it); what this pins is the portal contract at a phone
        viewport — the whole panel, Rename through Delete, inside the screen —
-       through the right-click, which reaches the same `openMenu` measurement. */
+       through the hold, which reaches the same `openMenu` measurement. */
     await seedSettings(page, { theme: 'dark', accent: null, lastSelection: { kind: 'all' } });
     await page.goto('/');
     const row = page.getByTestId('folder-row').filter({ hasText: 'Work' });
     await expect(row).toBeVisible();
-    await row.click({ button: 'right' });
+    await holdRow(row);
 
     const menu = page.getByTestId('folder-menu');
     await expect(menu).toBeVisible();

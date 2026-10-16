@@ -173,7 +173,7 @@ impl FoldersRepo for SqliteFoldersRepo {
                 }
             }
 
-            let target = position.clamp(0, sibling_count(conn, parent.as_deref())? as i64) as usize;
+            let target = position.clamp(0, sibling_count(conn, parent.as_deref())?) as usize;
 
             let tx = conn.transaction()?;
             densify(&tx, parent.as_deref(), &folder_id, target)?;

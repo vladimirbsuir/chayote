@@ -509,7 +509,8 @@ function Shell() {
         return;
       }
       /* §7: `Toggle theme` is `Ctrl/Cmd+Shift+L`. Light, dark, system, in that
-         order — the same cycle as the top-bar button, because a shortcut that
+         order, skipping a step that would resolve to what is already on
+         screen — the same cycle as the top-bar button, because a shortcut that
          did something different from the control beside it would be worse than
          having neither. `Shift+L` alone is left alone: browsers use it for
          nothing, but the modifier is part of the binding either way. */
