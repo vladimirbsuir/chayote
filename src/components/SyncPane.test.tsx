@@ -77,6 +77,17 @@ describe('SyncPane', () => {
     expect(screen.getByTestId('sync-now')).toBeDefined();
   });
 
+  it('keeps status and re-upload collapsed until asked', () => {
+    pane({ status: CONFIGURED });
+    const toggle = screen.getByTestId('sync-details-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByTestId('sync-details').className).toContain('hidden');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId('sync-details').className).not.toContain('hidden');
+    expect(screen.getByTestId('sync-status').textContent).toContain('Pending rows: 3');
+  });
+
   it('shows a placeholder when a secret is stored, without revealing it', () => {
     pane({ status: CONFIGURED });
     const field = screen.getByLabelText<HTMLInputElement>('Postgres connection string');
@@ -129,6 +140,10 @@ describe('SyncPane', () => {
 
   it('lists conflicts with a choice per note', async () => {
     const { onResolve } = pane({ status: CONFIGURED, conflicts: [CONFLICT] });
+    /* The list lives behind the resolver button so the settings dialog never
+       overflows: opening it reveals the per-note choice. */
+    expect(screen.queryByTestId('sync-conflict')).toBeNull();
+    fireEvent.click(screen.getByTestId('sync-resolve-open'));
     expect(screen.getByTestId('sync-conflict').textContent).toContain('Shopping');
     fireEvent.click(screen.getByText('Keep mine'));
     await waitFor(() => {
@@ -140,8 +155,17 @@ describe('SyncPane', () => {
     });
   });
 
+  it('opens the resolver in a scrollable pop-up that closes again', () => {
+    pane({ status: CONFIGURED, conflicts: [CONFLICT] });
+    fireEvent.click(screen.getByTestId('sync-resolve-open'));
+    expect(screen.getByTestId('sync-conflicts-dialog')).toBeDefined();
+    fireEvent.click(screen.getByText('Close'));
+    expect(screen.queryByTestId('sync-conflicts-dialog')).toBeNull();
+  });
+
   it('renders no conflict section when there are none', () => {
     pane({ status: CONFIGURED, conflicts: [] });
+    expect(screen.queryByTestId('sync-resolve-open')).toBeNull();
     expect(screen.queryByTestId('sync-conflict')).toBeNull();
   });
 
@@ -201,7 +225,13 @@ function dialog(tab: 'general' | 'sync') {
         lastReupload: null,
         onSaveConfig: () => Promise.resolve(),
         onSyncNow: () =>
-          Promise.resolve({ pushed: 0, pulled: 0, conflicts: 0, deferred: 0, alreadyRunning: false }),
+          Promise.resolve({
+            pushed: 0,
+            pulled: 0,
+            conflicts: 0,
+            deferred: 0,
+            alreadyRunning: false,
+          }),
         onReupload: () => Promise.resolve(0),
         onResolve: () => Promise.resolve(),
       }}

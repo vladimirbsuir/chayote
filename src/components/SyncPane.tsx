@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { AlertCircle, RotateCw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertCircle, ChevronDown, RotateCw } from 'lucide-react';
 import type { SyncConflict, SyncStatus, SyncSummary } from '../types/sync';
 
 /* The Sync tab of the settings dialog: connection string, enable switch,
@@ -44,6 +44,11 @@ export function SyncPane({
   const [revealed, setRevealed] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  /* Status lines and the re-upload recovery live collapsed: the tab stays
+     short enough for a phone screen, and the error (if any) stays visible
+     outside. Content stays mounted while collapsed so status polls keep
+     working and tests keep reading it. */
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   /* The secret is write-only: the status says *whether* one is stored, never
      the value. An empty field therefore means "keep the stored string" and
@@ -131,8 +136,7 @@ export function SyncPane({
           </button>
         </div>
         <p className="mt-1.5 text-[12px] text-[var(--text-subtle)]">
-          Any Postgres server works — hosted or local. The string stays on this device; anyone
-          holding it can read and write these tables.
+          Any Postgres server works. The string stays on this device.
         </p>
       </div>
 
@@ -158,7 +162,10 @@ export function SyncPane({
           }}
           className="flex items-center gap-[6px] rounded-[var(--r-input)] border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-[13px] font-medium text-white disabled:opacity-50"
         >
-          {saving ? 'Saving…' : 'Save'}
+          {/* Static label while saving: swapping the text resizes the button
+              and the whole tab twitches. Progress shows as dimmed; failures
+              show in red below. */}
+          Save
         </button>
         <button
           type="button"
@@ -174,54 +181,81 @@ export function SyncPane({
         </button>
       </div>
 
-      <div
-        aria-live="polite"
-        className="text-[12px] text-[var(--text-subtle)]"
-        data-testid="sync-status"
-      >
-        {statusPending ? (
-          'Loading sync status…'
-        ) : status === undefined ? (
-          'Sync status unavailable.'
-        ) : (
-          <SyncStatusLines status={status} lastResult={lastResult} />
-        )}
-      </div>
-
       {errorText !== null ? (
         <p className="text-[12px] text-[var(--danger)]" role="alert" data-testid="sync-error">
           {errorText}
         </p>
       ) : null}
 
-      {/* Recovery, not routine: after a server wipe the device holds clean
-          rows against stale watermarks, and a sync would push nothing and
-          pull nothing. This re-queues the whole library so the next sync
-          uploads it again. Idempotent — running it twice changes nothing
-          the second time. */}
-      <div className="flex flex-col gap-1.5 border-t border-[var(--border)] pt-[18px]">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-testid="sync-reupload"
-            disabled={reuploading || !configured}
-            onClick={() => {
-              void reupload();
-            }}
-            className="flex items-center gap-[6px] rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-[13px] font-medium text-[var(--text)] disabled:opacity-50"
+      <div className="border-t border-[var(--border)] pt-2">
+        <button
+          type="button"
+          data-testid="sync-details-toggle"
+          aria-expanded={detailsOpen}
+          aria-controls="sync-details"
+          onClick={() => {
+            setDetailsOpen((value) => !value);
+          }}
+          className="flex min-h-11 w-full items-center gap-1 text-left text-[12px] font-medium text-[var(--text-muted)]"
+        >
+          <ChevronDown
+            className={`icon i-16 transition-transform ${detailsOpen ? 'rotate-180' : ''}`}
+            aria-hidden="true"
+          />
+          Status & advanced
+        </button>
+        <div
+          id="sync-details"
+          data-testid="sync-details"
+          className={detailsOpen ? 'flex flex-col gap-[18px] pt-2' : 'hidden'}
+        >
+          <div
+            aria-live="polite"
+            className="text-[12px] text-[var(--text-subtle)]"
+            data-testid="sync-status"
           >
-            {reuploading ? 'Re-uploading…' : 'Re-upload everything'}
-          </button>
+            {statusPending ? (
+              'Loading sync status…'
+            ) : status === undefined ? (
+              'Sync status unavailable.'
+            ) : (
+              <SyncStatusLines status={status} lastResult={lastResult} />
+            )}
+          </div>
+
+          {/* Recovery, not routine: after a server wipe the device holds clean
+              rows against stale watermarks, and a sync would push nothing and
+              pull nothing. This re-queues the whole library so the next sync
+              uploads it again. Idempotent — running it twice changes nothing
+              the second time. */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="sync-reupload"
+                disabled={reuploading || !configured}
+                onClick={() => {
+                  void reupload();
+                }}
+                className="flex items-center gap-[6px] rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-[13px] font-medium text-[var(--text)] disabled:opacity-50"
+              >
+                Re-upload everything
+              </button>
+            </div>
+            <p className="text-[12px] text-[var(--text-subtle)]">
+              Pushes everything again. Only needed after wiping the server.
+            </p>
+            {lastReupload !== null ? (
+              <p
+                className="text-[12px] text-[var(--text-muted)]"
+                data-testid="sync-reupload-status"
+              >
+                {lastReupload} {lastReupload === 1 ? 'row' : 'rows'} queued — press Sync now to
+                upload.
+              </p>
+            ) : null}
+          </div>
         </div>
-        <p className="text-[12px] text-[var(--text-subtle)]">
-          Pushes every note, folder and tag again. Only needed after wiping the server.
-        </p>
-        {lastReupload !== null ? (
-          <p className="text-[12px] text-[var(--text-muted)]" data-testid="sync-reupload-status">
-            {lastReupload} {lastReupload === 1 ? 'row' : 'rows'} queued — press Sync now to
-            upload.
-          </p>
-        ) : null}
       </div>
 
       <ConflictsBlock
@@ -280,6 +314,11 @@ function ConflictsBlock({
   resolvingId: string | null;
   onResolve: (id: string, keepLocal: boolean) => void;
 }): React.ReactNode {
+  /* The list lives behind a button in a scrollable pop-up rather than inline:
+     with many conflicts the inline cards pushed the settings dialog past the
+     screen edge on both phone and desktop. The heading stays visible so the
+     badge count is never hidden. */
+  const [open, setOpen] = useState(false);
   if (conflicts.length === 0) return null;
   return (
     <div>
@@ -291,47 +330,134 @@ function ConflictsBlock({
         The same note changed on two devices. Your version is live; the other one is parked here
         until you choose.
       </p>
-      <ul className="flex flex-col gap-2">
-        {conflicts.map((conflict) => {
-          const title = conflict.noteTitle.length > 0 ? conflict.noteTitle : 'Untitled';
-          const remote = conflict.remoteTitle.length > 0 ? conflict.remoteTitle : 'Untitled';
-          const busy = resolvingId === conflict.id;
-          return (
-            <li
-              key={conflict.id}
-              data-testid="sync-conflict"
-              className="rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] p-3"
-            >
-              <p className="text-[13px] font-medium text-[var(--text)]">{title}</p>
-              <p className="mt-0.5 text-[12px] text-[var(--text-subtle)]">
-                Other version: {remote}
-              </p>
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    onResolve(conflict.id, true);
-                  }}
-                  className="rounded-[var(--r-input)] border border-[var(--border-strong)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] disabled:opacity-50"
-                >
-                  Keep mine
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    onResolve(conflict.id, false);
-                  }}
-                  className="rounded-[var(--r-input)] border border-[var(--border-strong)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] disabled:opacity-50"
-                >
-                  Use theirs
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <button
+        type="button"
+        data-testid="sync-resolve-open"
+        onClick={() => {
+          setOpen(true);
+        }}
+        className="rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 py-2 text-[13px] font-medium text-[var(--text)]"
+      >
+        Resolve conflicts
+      </button>
+      {open ? (
+        <ConflictsDialog
+          conflicts={conflicts}
+          resolvingId={resolvingId}
+          onResolve={onResolve}
+          onClose={() => {
+            setOpen(false);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/* A pop-up over the settings dialog: the card caps its height and scrolls the
+   list inside, so any number of conflicts fits on a phone screen. `fixed`
+   positions against the viewport, so the settings panel's `overflow` never
+   clips it even though it renders inside that panel (which keeps the settings
+   focus trap wrapping the whole tree). */
+function ConflictsDialog({
+  conflicts,
+  resolvingId,
+  onResolve,
+  onClose,
+}: {
+  conflicts: SyncConflict[];
+  resolvingId: string | null;
+  onResolve: (id: string, keepLocal: boolean) => void;
+  onClose: () => void;
+}): React.ReactNode {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-6 pb-[max(1.5rem,var(--inset-bottom))]"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Resolve conflicts"
+        data-testid="sync-conflicts-dialog"
+        onKeyDown={(event) => {
+          /* Esc closes this pop-up only: without stopping propagation the
+             settings panel's own Esc handler would close settings behind it. */
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+        onMouseDown={(event) => {
+          event.stopPropagation();
+        }}
+        className="flex max-h-[70dvh] w-full max-w-[380px] flex-col overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
+      >
+        <div className="flex flex-none items-center gap-2 px-4 pt-4">
+          <span className="flex text-[var(--text-muted)]">
+            <AlertCircle className="icon i-16" aria-hidden="true" />
+          </span>
+          <h3 className="flex-1 text-[13px] font-semibold text-[var(--text)]">
+            Resolve conflicts ({conflicts.length})
+          </h3>
+          <button
+            ref={closeRef}
+            type="button"
+            aria-label="Close conflict resolver"
+            onClick={onClose}
+            className="rounded-[var(--r-input)] border border-[var(--border-strong)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-muted)]"
+          >
+            Close
+          </button>
+        </div>
+        <ul className="flex flex-col gap-2 overflow-y-auto px-4 py-3">
+          {conflicts.map((conflict) => {
+            const title = conflict.noteTitle.length > 0 ? conflict.noteTitle : 'Untitled';
+            const remote = conflict.remoteTitle.length > 0 ? conflict.remoteTitle : 'Untitled';
+            const busy = resolvingId === conflict.id;
+            return (
+              <li
+                key={conflict.id}
+                data-testid="sync-conflict"
+                className="rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] p-3"
+              >
+                <p className="text-[13px] font-medium text-[var(--text)]">{title}</p>
+                <p className="mt-0.5 text-[12px] text-[var(--text-subtle)]">
+                  Other version: {remote}
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      onResolve(conflict.id, true);
+                    }}
+                    className="rounded-[var(--r-input)] border border-[var(--border-strong)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] disabled:opacity-50"
+                  >
+                    Keep mine
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      onResolve(conflict.id, false);
+                    }}
+                    className="rounded-[var(--r-input)] border border-[var(--border-strong)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] disabled:opacity-50"
+                  >
+                    Use theirs
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 }

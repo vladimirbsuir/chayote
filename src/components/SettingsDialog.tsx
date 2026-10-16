@@ -190,7 +190,11 @@ export function SettingsDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_srgb,var(--surface-sunken)_70%,transparent)] p-6"
+      /* `pb` clears the Android navigation bar (`--inset-bottom` in
+         `styles/base.css`): the dialog is `fixed`, so `#root`'s own padding
+         does not move it, and without this the panel ends behind the system
+         buttons on a phone. */
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_srgb,var(--surface-sunken)_70%,transparent)] p-6 pb-[max(1.5rem,var(--inset-bottom))]"
       onMouseDown={(event) => {
         /* A click on the scrim dismisses; a click inside the panel must not.
            Dismissal loses nothing, because every setting here is applied as it
@@ -207,9 +211,9 @@ export function SettingsDialog({
         onKeyDown={onPanelKeyDown}
         /* Dialog copy is chrome, not content: read, never copied. The colour
            input below is a picker, not a text field, so nothing opts back in. */
-        className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
+        className="flex max-h-[calc(100dvh-3rem-var(--inset-bottom))] w-full max-w-[420px] flex-col overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
       >
-        <div className="flex items-center gap-2 px-5 pt-[18px]">
+        <div className="flex flex-none items-center gap-2 px-5 pt-[18px]">
           <span className="flex text-[var(--text-muted)]">
             <SettingsIcon className="icon i-20" aria-hidden="true" />
           </span>
@@ -227,7 +231,7 @@ export function SettingsDialog({
             event.preventDefault();
             setTab((current) => (current === 'general' ? 'sync' : 'general'));
           }}
-          className="flex gap-1 px-5 pt-3"
+          className="flex flex-none gap-1 px-5 pt-3"
         >
           {(['general', 'sync'] as const).map((name) => {
             const selected = tab === name;
@@ -260,7 +264,7 @@ export function SettingsDialog({
             id="settings-panel-general"
             role="tabpanel"
             aria-labelledby="settings-tab-general"
-            className="flex flex-col gap-[18px] px-5 py-4"
+            className="flex flex-col gap-[18px] overflow-y-auto px-5 py-4"
           >
             <div>
               <label
@@ -526,7 +530,7 @@ export function SettingsDialog({
             id="settings-panel-sync"
             role="tabpanel"
             aria-labelledby="settings-tab-sync"
-            className="px-5 py-4"
+            className="overflow-y-auto px-5 py-4"
           >
             {sync !== undefined ? (
               <SyncPane
@@ -550,7 +554,7 @@ export function SettingsDialog({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2 border-t border-[var(--border)] bg-[var(--surface-raised)] px-5 py-[14px]">
+        <div className="flex flex-none items-center gap-2 border-t border-[var(--border)] bg-[var(--surface-raised)] px-5 py-[14px]">
           <button
             type="button"
             data-testid="settings-reset"
