@@ -72,10 +72,16 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test ${{ matrix.args }}
       # Traces (and the screenshots inside them) are the only way to see a
-      # headless failure after the runner is gone. Kept on failure only.
+      # headless failure after the runner is gone. `always()` rather than
+      # `failure()`: with `retries: 2` a shard that flakes and then passes exits
+      # 0, so `failure()` is false and the run looks green while its `##[error]`
+      # lines stay in the log with no trace attached. Uploading always keeps the
+      # first-retry trace for exactly those flakes; fully green runs upload
+      # nothing (`if-no-files-found: ignore`).
       - uses: actions/upload-artifact@v5
-        if: failure()
+        if: always()
         with:
           name: e2e-trace-${{ matrix.slug }}
           path: test-results/
           retention-days: 7
+          if-no-files-found: ignore
