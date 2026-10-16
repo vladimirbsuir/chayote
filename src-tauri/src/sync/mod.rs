@@ -246,14 +246,28 @@ impl SyncService {
     }
 
     /// Keep-local drops the parked copy (the live document already won on
-    /// the next push). Use-remote fetches the *live* server row — which may
-    /// be newer than the parked copy — and applies it wholesale, deriving
-    /// everything from the document (R9), then re-queues for push.
+    /// the next push). Use-remote applies the *parked* remote document from
+    /// the conflicts table — never the live server row. The push that parked
+    /// the conflict already overwrote the server with the local document
+    /// (§5.1: keep-local converges in one round), so the live row *is* the
+    /// local version and fetching it would behave exactly like keep-local.
+    /// The parked copy is what the UI showed as "Other version", and applying
+    /// it needs no network: filing, pin and tags stay as they are (tags were
+    /// already unioned at park time, §5.3), only the text is restored (R9),
+    /// then the row is re-queued so the next push converges the server.
     pub async fn resolve_conflict(&self, id: &str, keep_local: bool) -> Result<(), AppError> {
-        let note_id = self.db.with_conn(|conn| {
-            conn.query_row("SELECT note_id FROM conflicts WHERE id = ?1", [id], |row| {
-                row.get::<_, String>(0)
-            })
+        let (note_id, remote_doc, remote_title) = self.db.with_conn(|conn| {
+            conn.query_row(
+                "SELECT note_id, remote_doc, remote_title FROM conflicts WHERE id = ?1",
+                [id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
             .map_err(|err| match err {
                 rusqlite::Error::QueryReturnedNoRows => AppError::NotFound,
                 other => AppError::from(other),
@@ -270,17 +284,10 @@ impl SyncService {
             });
         }
 
-        let conn_str = self.configured_connection()?;
-        let client = connect(&conn_str).await?;
-        let remote = query_remote_note(&client, &note_id)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        let remote_tags = query_remote_note_tags(&client, &note_id).await?;
-
         self.db.with_conn(|conn| {
             let tx = conn.transaction()?;
             let doc: serde_json::Value =
-                serde_json::from_str(&remote.doc_json)
+                serde_json::from_str(&remote_doc)
                     .map_err(|err| AppError::internal(format!("remote document is not valid JSON: {err}")))?;
             crate::doc::validate::validate(&doc)?;
             let title_source: String = tx
@@ -291,26 +298,30 @@ impl SyncService {
                 )
                 .map_err(|_| AppError::NotFound)?;
             let derived = crate::services::derive::derive(&doc, &title_source);
+            // `manual` titles derive to "": fall back to the parked remote
+            // title the other device stored, rather than blanking the row.
+            let title = if derived.title.is_empty() && !remote_title.is_empty() {
+                remote_title.clone()
+            } else {
+                derived.title
+            };
             let now = crate::clock::now_ms();
             tx.execute(
                 "UPDATE notes
                     SET title = ?2, doc_json = ?3, plain_text = ?4, excerpt = ?5,
-                        word_count = ?6, folder_id = ?7, is_pinned = ?8,
-                        dirty = 1, updated_at = ?9, deleted_at = NULL
+                        word_count = ?6,
+                        dirty = 1, updated_at = ?7, deleted_at = NULL
                   WHERE id = ?1",
                 rusqlite::params![
                     note_id,
-                    derived.title,
-                    remote.doc_json,
+                    title,
+                    remote_doc,
                     derived.plain_text,
                     derived.excerpt,
                     derived.word_count,
-                    remote.folder_id,
-                    i64::from(remote.is_pinned),
                     now,
                 ],
             )?;
-            replace_local_tags(&tx, &note_id, &remote_tags)?;
             let base: i64 =
                 tx.query_row("SELECT rev FROM notes WHERE id = ?1", [&note_id], |row| row.get(0))?;
             tx.execute(
@@ -2698,6 +2709,112 @@ mod tests {
         tags.delete(&tag.id).expect("tag deletes");
         let status = sync.status().expect("status");
         assert_eq!(status.pending_count, 1);
+    }
+
+    /// Use-remote applies the *parked* document, not the live server row.
+    /// Regression test for "Use theirs behaves like Keep mine": the push
+    /// that parks a conflict overwrites the server with the local document
+    /// (§5.1), so a live fetch returns the local version. The parked copy
+    /// is the only true remote — and applying it needs no network.
+    #[tokio::test]
+    async fn use_remote_restores_parked_document_without_network() {
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let folders = crate::repo::folders::SqliteFoldersRepo::new(Arc::clone(&db));
+        let notes = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db));
+        let folder = folders.create("F", None).expect("folder creates");
+        let created = notes.create(Some(&folder.id)).expect("note creates");
+        let note_id = created.summary.id.clone();
+
+        let local_doc = serde_json::json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "PHONE WINS"}]}]
+        });
+        notes
+            .save(&crate::repo::SaveNoteInput {
+                id: note_id.clone(),
+                doc: local_doc,
+                folder_id: Some(folder.id.clone()),
+                tag_ids: vec![],
+                is_pinned: false,
+            })
+            .expect("local edit");
+
+        // What the push parked before overwriting the server with local:
+        // the other device's document, which no longer exists server-side.
+        let remote_doc = serde_json::json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "DESKTOP WINS AGAIN"}]}]
+        });
+        let remote_doc_str = serde_json::to_string(&remote_doc).expect("serialises");
+        let local_rev: i64 = db
+            .with_conn(|conn| {
+                conn.query_row("SELECT rev FROM notes WHERE id = ?1", [&note_id], |row| {
+                    row.get(0)
+                })
+                .map_err(AppError::from)
+            })
+            .expect("rev reads");
+        park_conflict(
+            &db,
+            &note_id,
+            local_rev,
+            local_rev + 1,
+            &remote_doc_str,
+            "DESKTOP WINS AGAIN",
+        )
+        .expect("parks");
+        let conflicts = sync.list_conflicts().expect("lists");
+        assert_eq!(conflicts.len(), 1);
+
+        // No connection configured on purpose: use-remote must not need one.
+        sync.resolve_conflict(&conflicts[0].id, false)
+            .await
+            .expect("use-remote resolves");
+        assert_eq!(sync.list_conflicts().expect("lists").len(), 0);
+        let applied = notes.get(&note_id).expect("note reads");
+        assert!(
+            applied.summary.excerpt.contains("DESKTOP WINS AGAIN"),
+            "parked remote goes live: {:?}",
+            applied.summary.title
+        );
+
+        // And keep-local still keeps the live document untouched.
+        park_conflict(
+            &db,
+            &note_id,
+            local_rev,
+            local_rev + 1,
+            &remote_doc_str,
+            "DESKTOP WINS AGAIN",
+        )
+        .expect("parks again");
+        let conflicts = sync.list_conflicts().expect("lists");
+        assert_eq!(conflicts.len(), 1);
+        // Restore the local text first so keep-local has something to keep.
+        let local_doc2 = serde_json::json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "PHONE WINS"}]}]
+        });
+        notes
+            .save(&crate::repo::SaveNoteInput {
+                id: note_id.clone(),
+                doc: local_doc2,
+                folder_id: Some(folder.id.clone()),
+                tag_ids: vec![],
+                is_pinned: false,
+            })
+            .expect("local edit");
+        sync.resolve_conflict(&conflicts[0].id, true)
+            .await
+            .expect("keep-local resolves");
+        let kept = notes.get(&note_id).expect("note reads");
+        assert!(
+            kept.summary.excerpt.contains("PHONE WINS"),
+            "local stays live: {:?}",
+            kept.summary.title
+        );
     }
 
     /// End-to-end against a real Postgres. Requires
