@@ -103,18 +103,19 @@ describe('note card pinning', () => {
     useSelectionStore.setState({ selection: { kind: 'all' }, openNoteId: null });
   });
 
-  it('gives every card a pin control, including the unpinned ones', () => {
+  it('shows the pin control only on pinned cards', () => {
     render(<List />);
 
-    /* One per card. A control that appears only on pinned cards is undiscoverable:
-       the user has to know a note is pinned before they can unpin it. */
-    expect(screen.getAllByTestId('pin-toggle')).toHaveLength(NOTES.length);
+    /* Unpinned rows carry no pin — pinning runs from the row menu, the editor
+       and the shortcut instead. */
+    expect(screen.getAllByTestId('pin-toggle')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Unpin Bravo' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Pin Alpha' })).toBeNull();
   });
 
   it('labels the control by what it will do, not by its state', () => {
     render(<List />);
 
-    expect(screen.getByRole('button', { name: 'Pin Alpha' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Unpin Bravo' })).toBeDefined();
   });
 
@@ -124,9 +125,6 @@ describe('note card pinning', () => {
     expect(screen.getByRole('button', { name: 'Unpin Bravo' }).getAttribute('aria-pressed')).toBe(
       'true',
     );
-    expect(screen.getByRole('button', { name: 'Pin Alpha' }).getAttribute('aria-pressed')).toBe(
-      'false',
-    );
   });
 
   it('renders no pin control at all when the caller supplies none, as in the trash', () => {
@@ -135,7 +133,7 @@ describe('note card pinning', () => {
     expect(screen.queryByTestId('pin-toggle')).toBeNull();
   });
 
-  it('shows a pinned note\'s pin as a plain icon, not a dead control, where it cannot be toggled', () => {
+  it("shows a pinned note's pin as a plain icon, not a dead control, where it cannot be toggled", () => {
     /* The trash. A disabled button would read as a control that is broken, rather
        than as one that does not belong here; an icon still carries the fact that
        the note was pinned, which the ordering does too. */
@@ -162,23 +160,19 @@ describe('note card pinning', () => {
     );
 
     act(() => {
-      screen.getByRole('button', { name: 'Pin Alpha' }).click();
+      screen.getByRole('button', { name: 'Unpin Bravo' }).click();
     });
 
-    expect(onTogglePin).toHaveBeenCalledWith('n-1');
+    expect(onTogglePin).toHaveBeenCalledWith('n-2');
     /* A pin that also opened the note would make the control useless on a row the
        user was trying to read. */
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it('disables the control while that note\'s write is in flight', () => {
-    render(<List pinPendingId="n-1" />);
+  it("disables the control while that note's write is in flight", () => {
+    render(<List pinPendingId="n-2" />);
 
-    expect(screen.getByRole('button', { name: 'Pin Alpha' }).hasAttribute('disabled')).toBe(true);
-    /* Only the note being written is disabled — the others are unrelated writes. */
-    expect(screen.getByRole('button', { name: 'Unpin Bravo' }).hasAttribute('disabled')).toBe(
-      false,
-    );
+    expect(screen.getByRole('button', { name: 'Unpin Bravo' }).hasAttribute('disabled')).toBe(true);
   });
 });
 
@@ -308,12 +302,10 @@ describe('useTogglePin', () => {
     client.setQueryData(['notes', { kind: 'all' }], summaries);
 
     act(() => {
-      client.setQueriesData(
-        { queryKey: ['notes'] },
-        (existing: NoteSummary[] | undefined) =>
-          Array.isArray(existing)
-            ? existing.map((s) => (s.id === pinned.id ? { ...s, ...summaryOf(pinned) } : s))
-            : existing,
+      client.setQueriesData({ queryKey: ['notes'] }, (existing: NoteSummary[] | undefined) =>
+        Array.isArray(existing)
+          ? existing.map((s) => (s.id === pinned.id ? { ...s, ...summaryOf(pinned) } : s))
+          : existing,
       );
     });
 

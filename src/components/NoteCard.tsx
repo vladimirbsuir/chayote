@@ -1,5 +1,5 @@
 import { memo, useRef } from 'react';
-import { Folder, Hash, MoreHorizontal, Pin } from 'lucide-react';
+import { Folder, Hash, Pin } from 'lucide-react';
 import { sanitizeSnippet } from '../lib/sanitize';
 import type { NoteRow } from '../types/ipc';
 
@@ -73,7 +73,8 @@ export const NoteCard = memo(function NoteCard({
   onCloseMenu,
 }: NoteCardProps) {
   const untitled = note.title.length === 0;
-  const hasRowActions = onDelete !== undefined || onRestore !== undefined || onDestroy !== undefined;
+  const hasRowActions =
+    onDelete !== undefined || onRestore !== undefined || onDestroy !== undefined;
 
   /* A press that opened the menu via long-press is still a press: the release
      after the hold synthesises a click, and a click opens the note — covering
@@ -120,19 +121,18 @@ export const NoteCard = memo(function NoteCard({
           onOpen(note.id);
         }
         /* §7: `ContextMenu` opens the focused row's menu — the application key
-           on a Windows keyboard, and the standard way to ask for a menu. Without
-           this the menu button's `tabIndex={-1}` leaves keyboard users with no
-           path to the row's actions at all. */
+           on a Windows keyboard, and the standard way to ask for a menu. It is
+           the keyboard path to the row's actions: there is no menu button. */
         if (event.key === 'ContextMenu') {
           if (!hasRowActions) return;
           event.preventDefault();
           toggleMenu(event.currentTarget);
         }
       }}
-      /* §2.2 and §9: right-click on desktop, long-press on touch — a hold fires
-         `contextmenu` on the device — and the row's own button, all reach the
-         same menu. `preventDefault` is what stops the hold from becoming a text
-         selection instead. Rows with no actions have no menu to open.
+      /* §2.2 and §9: right-click on desktop and long-press on touch — a hold
+         fires `contextmenu` on the device — reach the row menu. `preventDefault`
+         is what stops the hold from becoming a text selection instead. Rows
+         with no actions have no menu to open.
          The `select-none` + `touch-callout` pair on the row is the other half:
          on a text-rich card the hold is a selection gesture and no `contextmenu`
          fires at all — measured on the device, where the hold selected text on
@@ -154,21 +154,16 @@ export const NoteCard = memo(function NoteCard({
       }`}
     >
       <div className="flex items-baseline gap-[6px]">
-        {/* The pin is a control wherever there is anything to toggle, and a plain
-            icon where there is not — the trash, where a deleted note's pin is not
-            something the user can act on. A disabled button would read as a control
-            that is broken rather than as one that does not exist here. */}
+        {/* The pin is a control on a pinned note, and a plain icon where there
+            is nothing to toggle — the trash, where a deleted note's pin is not
+            something the user can act on. A disabled button would read as a
+            control that is broken rather than as one that does not exist here.
+            Unpinned rows carry no pin: pinning runs from the row menu, the
+            editor and the shortcut instead. */}
         {onTogglePin !== undefined ? (
           note.isPinned ? (
             <PinButton note={note} pending={pinPending} onTogglePin={onTogglePin} pinned />
-          ) : (
-            /* Unpinned rows get the control too, revealed on hover at `pointer:
-               fine` (§9). A permanently visible pin on every card would make the
-               pinned one stop meaning anything. */
-            <span className="hidden flex-none self-center pointer-fine:group-hover:flex">
-              <PinButton note={note} pending={pinPending} onTogglePin={onTogglePin} pinned={false} />
-            </span>
-          )
+          ) : null
         ) : note.isPinned ? (
           <span
             data-testid="pin-indicator"
@@ -178,9 +173,9 @@ export const NoteCard = memo(function NoteCard({
           </span>
         ) : null}
         <span
-          className={`overflow-hidden text-ellipsis whitespace-nowrap text-[14px] leading-[1.4] ${
+          className={`overflow-hidden text-[14px] leading-[1.4] text-ellipsis whitespace-nowrap ${
             untitled
-              ? 'italic font-normal text-[var(--text-subtle)]'
+              ? 'font-normal text-[var(--text-subtle)] italic'
               : 'font-medium text-[var(--text)]'
           }`}
         >
@@ -200,44 +195,10 @@ export const NoteCard = memo(function NoteCard({
         <span>{timestamp}</span>
         {showFolder && folderName !== null ? <FolderChip name={folderName} /> : null}
         {note.tags.length > 0 ? <TagChip name={note.tags[0]?.name ?? ''} /> : null}
-        {hasRowActions ? (
-          /* §9: hover styling exists at `pointer: fine` and nowhere else, and the
-             menu button stays out of the tab order because the row's own keydown
-             opens it — the same two rules the folder rows follow. */
-          <span className="ml-auto hidden flex-none pointer-fine:group-hover:flex">
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label={`${titleOf(note)} actions`}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              title={`${titleOf(note)} actions`}
-              data-testid="note-menu-button"
-              data-note-id={note.id}
-              onClick={(event) => {
-                event.stopPropagation();
-                toggleMenu(event.currentTarget);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'ContextMenu') {
-                  event.preventDefault();
-                  toggleMenu(event.currentTarget);
-                }
-              }}
-              className="grid h-[20px] w-[20px] place-items-center rounded text-[var(--text-subtle)] transition-colors hover:bg-[var(--surface-sunken)] hover:text-[var(--text)]"
-            >
-              <MoreHorizontal className="icon i-16" aria-hidden="true" />
-            </button>
-          </span>
-        ) : null}
       </div>
     </div>
   );
 });
-
-function titleOf(note: NoteRow): string {
-  return note.title.length === 0 ? UNTITLED : note.title;
-}
 
 /**
  * A search result shows the sentence that matched rather than the note's
@@ -289,9 +250,7 @@ function PinButton({
         onTogglePin?.(note.id);
       }}
       className={`grid h-[18px] w-[18px] flex-none place-items-center rounded transition-opacity disabled:opacity-50 ${
-        pinned
-          ? 'text-[var(--accent)]'
-          : 'text-[var(--text-subtle)] hover:text-[var(--accent)]'
+        pinned ? 'text-[var(--accent)]' : 'text-[var(--text-subtle)] hover:text-[var(--accent)]'
       }`}
     >
       <Pin className="icon i-16" aria-hidden="true" />

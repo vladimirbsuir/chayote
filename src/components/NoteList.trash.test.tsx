@@ -68,13 +68,13 @@ function List(props: {
   );
 }
 
-/** Open a card's menu the way a user does: hover the row, then press the button.
-    `force` is not used — §9 keeps the control at `pointer: fine` on hover, so the
-    row has to be hovered for the button to be laid out at all. */
+/** Open a card's menu the way a user does: right-click the row. There is no
+    menu button — the menu answers to right-click, long-press and the
+    application key. */
 function openMenuFor(id: string): void {
   const card = document.querySelector(`[data-testid="note-card"][data-note-id="${id}"]`);
   if (!(card instanceof HTMLElement)) throw new Error(`no card ${id}`);
-  fireEvent.click(card.querySelector('[data-testid="note-menu-button"]') ?? card);
+  fireEvent.contextMenu(card);
 }
 
 describe('note row actions', () => {
@@ -86,7 +86,7 @@ describe('note row actions', () => {
   it('offers no menu at all when the caller supplies no actions', () => {
     render(<List />);
 
-    expect(screen.queryByTestId('note-menu-button')).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId('note-card'));
     expect(screen.queryByTestId('note-menu')).toBeNull();
   });
 

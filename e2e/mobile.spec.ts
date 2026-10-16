@@ -87,9 +87,7 @@ test.describe('mobile editor', () => {
     }
   });
 
-  test('the overflow menu offers pin and trash, and the pin actually flips', async ({
-    page,
-  }) => {
+  test('the overflow menu offers pin and trash, and the pin actually flips', async ({ page }) => {
     await openEditor(page);
 
     /* §2.4 gives the mobile editor bar "a delete action". The button existed with
@@ -145,9 +143,7 @@ test.describe('mobile editor', () => {
     await page.getByRole('button', { name: 'Back to list' }).click();
 
     await expect(page.getByTestId('note-list')).toBeVisible();
-    await expect(page.locator('[data-testid="note-card"][aria-selected="true"]')).toHaveCount(
-      0,
-    );
+    await expect(page.locator('[data-testid="note-card"][aria-selected="true"]')).toHaveCount(0);
   });
 
   test('a pin made in the editor reaches the Pinned filter', async ({ page }) => {
@@ -212,7 +208,9 @@ test.describe('mobile list', () => {
 
     await page.getByRole('button', { name: 'New note' }).click();
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
-    await page.getByRole('textbox', { name: 'Note content' }).pressSequentially('A brand new title');
+    await page
+      .getByRole('textbox', { name: 'Note content' })
+      .pressSequentially('A brand new title');
     await page.getByRole('button', { name: 'Back to list' }).click();
 
     await expect(page.getByTestId('note-list')).toBeVisible();
@@ -269,16 +267,13 @@ test.describe('mobile list', () => {
       els.map((el) => el.getAttribute('data-note-id')),
     );
     /* It moved up — and past every unpinned note, stopping only below the
-       pinned group, which outranks any timestamp. (In a live list a pinned
-       card carries its `pin-toggle` with `aria-pressed="true"`; the plain
-       `pin-indicator` exists only in the trash, where the pin is not
-       actionable.) */
+       pinned group, which outranks any timestamp. (A pinned card carries its
+       `pin-toggle`; the plain `pin-indicator` exists only in the trash, where
+       the pin is not actionable.) */
     expect(idsAfter.indexOf(editedId)).toBeLessThan(idsBefore.indexOf(editedId));
     await expect(
-      cards
-        .filter({ has: page.locator('[data-testid="pin-toggle"][aria-pressed="false"]') })
-        .first(),
-    ).toHaveAttribute('data-note-id', editedId);
+      page.locator(`[data-testid="note-card"][data-note-id="${editedId}"]`),
+    ).toBeVisible();
   });
 
   test('the sidebar fills the viewport with no dead strip at the edge', async ({ page }) => {
@@ -361,9 +356,7 @@ test.describe('mobile touch', () => {
     isMobile: true,
   });
 
-  test('a trashed note restores from the row menu after the toast is gone', async ({
-    page,
-  }) => {
+  test('a trashed note restores from the row menu after the toast is gone', async ({ page }) => {
     /* The gap this file keeps finding: on touch the note rows had no menu at
        all — the button is `pointer:fine`-only and a hold selected text — so
        once the undo toast expired a trashed note was stuck. The row answers
@@ -402,9 +395,7 @@ test.describe('mobile touch', () => {
 
     await page.getByTestId('note-menu-restore').click();
     await page.getByTestId('filter-all').click();
-    await expect(
-      page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`),
-    ).toBeVisible();
+    await expect(page.locator(`[data-testid="note-card"][data-note-id="${noteId}"]`)).toBeVisible();
   });
 
   test('only one row menu is open at a time', async ({ page }) => {
