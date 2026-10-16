@@ -24,11 +24,49 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 014 | First launch creates no folders or tags | Accepted |
 | 015 | Icons are Lucide vectors; emoji are banned from the UI | Accepted |
 | 016 | The prototype is a permanent visual reference, not a disposable mockup | Accepted |
-| 017 | README.md is the agent onboarding document | Accepted |
-| 018 | The frontend runs without Tauri, so the UI is testable in a browser | Accepted |
+| 017 | README.md is the agent onboarding document | Superseded by ADR-022 |
 | 019 | The accent is per-theme; custom accents are used verbatim | Accepted |
 | 020 | The Android back button is handled in Kotlin, and window insets in CSS | Accepted |
 | 021 | Tags stay listed at a zero count; the sidebar creates them | Accepted |
+| 022 | AGENTS.md is the agent onboarding document; work lands via pull request | Accepted |
+
+---
+
+## ADR-022 — AGENTS.md is the agent onboarding document; work lands via pull request
+
+**Status:** Accepted · **Date:** 2026-10-16
+
+**Context.** ADR-017 made README.md the agent onboarding document, so the
+README carried two audiences: a human skimming the product state, and an
+agent needing workflow instructions. The §4 instructions grew — onboarding
+steps, verification rules, commit and push policy — and the human half paid
+for all of it. Separately, collaboration outgrew direct pushes: with a remote
+on GitHub, `main` needs a gate between a finished task and a landed one.
+
+**Decision.** Agent onboarding and workflow move to `AGENTS.md` at the root,
+which coding agents read by convention without being pointed at it. README.md
+keeps §§1–3 (product state, frozen decisions, document index), the repository
+layout, and the outstanding manual steps; the sync-readiness rules stay
+stated in full in `docs/02-architecture.md` §6 with a pointer from the
+README. Topic branches land through pull requests (`gh`), merged when CI is
+green; `docs/10-conventions.md` §11 records the rule.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Keep onboarding in README.md | The file serves two readers with opposite needs — skimmable overview versus exact procedure. It grows in the wrong direction for both. |
+| A wiki page or external prompt file | A new artefact to keep in sync, and one more thing a session must be told about — the objection ADR-017 already settled. |
+| Direct pushes to `main` with CI watching | CI reports after the fact; a red `main` is already the failure. The PR is the gate, not the notification. |
+
+**Consequences.**
+
+- ADR-017 is superseded, not edited. The one-line first message now points at
+  `AGENTS.md` instead of `README.md` §4.
+- `main` stays buildable and shippable by construction rather than by luck;
+  every landing has a reviewable unit with green gates behind it.
+- The `gh` CLI (authenticated once per machine) is how agents push, open
+  PRs, and read CI — GitHub Desktop remains the human path and needs nothing.
 
 ---
 

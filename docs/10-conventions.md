@@ -333,7 +333,9 @@ are handled in `editor.spec.ts` rather than worked around:
 
 ## 11. Git and workflow
 
-- `main` is always buildable. Work happens on topic branches.
+- `main` is always buildable and always shippable. Work happens on topic
+  branches (`fix/…`, `feat/…`); nothing lands on `main` except through a pull
+  request, merged when CI is green.
 - Conventional Commits: `feat(editor): add task list input rule`.
 - Scopes mirror the folders: `editor`, `db`, `repo`, `ui`, `search`, `platform`, `build`, `docs`.
 - One logical change per commit. A commit that touches the schema, the UI, and the docs for two unrelated features will be rejected.
