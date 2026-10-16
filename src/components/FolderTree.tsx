@@ -1,6 +1,12 @@
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
-import { descendantCount, dropZoneAt, resolveDrop, treeKeyAction, visibleFolderRows } from './folderRows';
+import {
+  descendantCount,
+  dropZoneAt,
+  resolveDrop,
+  treeKeyAction,
+  visibleFolderRows,
+} from './folderRows';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FolderMenuButton, FolderRowMenu } from './FolderRowMenu';
 import { InlineNameInput } from './InlineNameInput';
@@ -129,8 +135,7 @@ export function FolderTree({
     setDrag(null);
     const rect = anchor.getBoundingClientRect();
     const up =
-      rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight &&
-      rect.top > MENU_ESTIMATED_HEIGHT;
+      rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight && rect.top > MENU_ESTIMATED_HEIGHT;
     setMenu({
       id,
       placement: {
@@ -724,8 +729,10 @@ function FolderRows({
               ) : null}
               {/* The twisty slot is the header chevron's width (`w-5` either way),
                   so the two arrows share a column and the glyphs below share
-                  theirs — the column contract in the row's `paddingLeft`. */}
-              <span className="flex w-5 flex-none">
+                  theirs — the column contract in the row's `paddingLeft`. The
+                  icon is centred in the slot like the header chevron is in its
+                  button: left-aligned it sat 2 px off the header's column. */}
+              <span className="flex w-5 flex-none justify-center">
                 {hasChildren ? (
                   <button
                     type="button"

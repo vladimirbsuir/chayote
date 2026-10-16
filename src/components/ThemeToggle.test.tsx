@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ThemeToggle } from './ThemeToggle';
-import { nextTheme, themeLabel } from '../lib/theme';
+import { nextTheme, nextVisibleTheme, themeLabel } from '../lib/theme';
 
 /* `05-ui-ux.md` §4 names `ThemeToggle` as the Light / Dark / System cycle and
    §7 binds `Ctrl/Cmd+Shift+L` to it. The shortcut and the button have to run the
@@ -25,6 +25,22 @@ describe('nextTheme', () => {
   });
 });
 
+describe('nextVisibleTheme', () => {
+  it('skips system when the OS already shows what is on screen', () => {
+    /* Stored dark on a dark OS: plain nextTheme would step onto system-dark,
+       a press that changes nothing. */
+    expect(nextVisibleTheme('dark', true)).toBe('light');
+    expect(nextVisibleTheme('light', false)).toBe('dark');
+  });
+
+  it('keeps system when it would visibly change the theme', () => {
+    expect(nextVisibleTheme('dark', false)).toBe('system');
+    expect(nextVisibleTheme('light', true)).toBe('dark');
+    expect(nextVisibleTheme('system', true)).toBe('light');
+    expect(nextVisibleTheme('system', false)).toBe('dark');
+  });
+});
+
 describe('ThemeToggle', () => {
   it('offers exactly the three states of 05-ui-ux.md 6.6, by name', () => {
     render(<ThemeToggle value="light" onChange={() => {}} />);
@@ -37,16 +53,12 @@ describe('ThemeToggle', () => {
   it('marks the selected state with aria-checked, not colour alone', () => {
     render(<ThemeToggle value="dark" onChange={() => {}} />);
     expect(screen.getByRole('radio', { name: 'Dark' }).getAttribute('aria-checked')).toBe('true');
-    expect(screen.getByRole('radio', { name: 'Light' }).getAttribute('aria-checked')).toBe(
-      'false',
-    );
+    expect(screen.getByRole('radio', { name: 'Light' }).getAttribute('aria-checked')).toBe('false');
   });
 
   it('reports the value it was given', () => {
     render(<ThemeToggle value="system" onChange={() => {}} />);
-    expect(screen.getByRole('radio', { name: 'System' }).getAttribute('aria-checked')).toBe(
-      'true',
-    );
+    expect(screen.getByRole('radio', { name: 'System' }).getAttribute('aria-checked')).toBe('true');
     expect(themeLabel('system')).toBe('System');
   });
 
@@ -55,7 +67,9 @@ describe('ThemeToggle', () => {
        the folder tree: the tab order would spend more presses on the control
        than on the thing the control is for. */
     render(<ThemeToggle value="light" onChange={() => {}} />);
-    const stops = screen.getAllByRole('radio').filter((node) => node.getAttribute('tabindex') === '0');
+    const stops = screen
+      .getAllByRole('radio')
+      .filter((node) => node.getAttribute('tabindex') === '0');
     expect(stops).toHaveLength(1);
     expect(stops[0]?.getAttribute('aria-checked')).toBe('true');
   });

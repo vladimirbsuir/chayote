@@ -19,6 +19,18 @@ export function nextTheme(theme: Theme): Theme {
   return ORDER[(index + 1) % ORDER.length] ?? 'system';
 }
 
+/** The cycle step that actually changes what is on screen. `system` resolves
+    against the OS, so stepping onto it from the theme it currently equals is
+    a no-op press — stored dark on a dark OS would need two clicks to reach
+    light. Such a step is skipped, exactly once (only `system` can alias). */
+export function nextVisibleTheme(stored: Theme, systemDark: boolean): Theme {
+  const os: 'light' | 'dark' = systemDark ? 'dark' : 'light';
+  const effective = stored === 'system' ? os : stored;
+  const next = nextTheme(stored);
+  if ((next === 'system' ? os : next) === effective) return nextTheme(next);
+  return next;
+}
+
 export function themeLabel(theme: Theme): string {
   if (theme === 'light') return 'Light';
   if (theme === 'dark') return 'Dark';

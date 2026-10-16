@@ -96,7 +96,7 @@ export function FormattingToolbar({
       role="toolbar"
       aria-label="Formatting"
       data-testid="formatting-toolbar"
-      className={`flex flex-none items-center gap-0.5 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] ${
+      className={`no-scrollbar flex flex-none items-center gap-0.5 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] ${
         mobile ? 'h-12 px-1' : 'h-10 px-2'
       }`}
     >
@@ -276,12 +276,7 @@ export function FormattingToolbar({
 }
 
 function Separator(): React.ReactElement {
-  return (
-    <span
-      aria-hidden="true"
-      className="mx-1 h-5 w-px flex-none bg-[var(--border)]"
-    />
-  );
+  return <span aria-hidden="true" className="mx-1 h-5 w-px flex-none bg-[var(--border)]" />;
 }
 
 function ToolButton({

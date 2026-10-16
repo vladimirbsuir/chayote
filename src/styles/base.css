@@ -120,6 +120,48 @@ input[type='search']::-webkit-search-decoration {
   appearance: none;
 }
 
+/* One scrollbar everywhere: the platform default never appears — in the note
+   list, the editor, the trees, the dialogs or the popovers. A slim thumb in
+   the theme's own border colour on a transparent track, darkening on hover;
+   the Firefox pair below covers the engine Chromium's pseudo-elements do not. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-subtle);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+/* Where a horizontal and a vertical bar meet (a dual-axis scroller), the
+   corner is transparent rather than the platform's white square. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* A strip that scrolls by swipe, with no bars at all: once a horizontal bar
+   appears it eats vertical room and forces a pointless vertical bar beside
+   it — the formatting toolbar's mobile buttons are exactly tall enough for
+   that loop. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
 /* Icons: Lucide geometry, four fixed sizes, stroke steps down as size rises.
    05-ui-ux.md §3.3. Never a hard-coded colour; never a free-form size. */
 .icon {
@@ -164,4 +206,13 @@ input[type='search']::-webkit-search-decoration {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Added and removed around a theme swap (`App`): every surface lands on the
+   new palette in the same frame instead of fading behind each other. */
+.theme-switch,
+.theme-switch *,
+.theme-switch *::before,
+.theme-switch *::after {
+  transition: none !important;
 }
