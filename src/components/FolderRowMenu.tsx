@@ -66,21 +66,20 @@ export function FolderRowMenu({
     [folderId],
   );
 
-  /* Outside press closes, on `click` and `auxclick` rather than `mousedown` —
-     the same contract as `NoteRowMenu`, for the same reason: the press that
-     opens the menu from a touch hold is still down when the menu mounts, and
-     closing on its release `mousedown` would shut the menu before the hold is
-     over. `auxclick` keeps right-clicking another row to a single menu. */
+  /* Outside press closes on `mousedown` (plus `click` for presses with no
+     button-down) — the same contract as `NoteRowMenu`: never on `auxclick`,
+     whose order against `contextmenu` differs by platform and shuts the
+     just-opened menu where it lands after. */
   useEffect(() => {
     const onOutsidePress = (event: MouseEvent): void => {
       if (menuRef.current?.contains(event.target as Node)) return;
       onClose();
     };
+    document.addEventListener('mousedown', onOutsidePress);
     document.addEventListener('click', onOutsidePress);
-    document.addEventListener('auxclick', onOutsidePress);
     return () => {
+      document.removeEventListener('mousedown', onOutsidePress);
       document.removeEventListener('click', onOutsidePress);
-      document.removeEventListener('auxclick', onOutsidePress);
     };
   }, [onClose]);
 
