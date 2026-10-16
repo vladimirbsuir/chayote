@@ -44,6 +44,9 @@ jobs:
     # Sharded across machines, not workers: one runner's CPUs are already
     # saturated at two workers, so more workers on the same box only add
     # contention. Each shard gets its own runner and half the suite.
+    # Touch-emulation tests are excluded here (tagged `@touch`): their
+    # real-timer holds break under a shared runner, so they run alone in
+    # `e2e-touch` below instead.
     name: End-to-end (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
@@ -58,4 +61,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test --shard=${{ matrix.shard }}/2
+      - run: npx playwright test --shard=${{ matrix.shard }}/2 --grep-invert @touch
+
+  e2e-touch:
+    # The `@touch` block alone on one worker: emulated-touch timing needs an
+    # unloaded browser, which the sharded gate cannot promise.
+    name: End-to-end (touch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --grep @touch --workers=1

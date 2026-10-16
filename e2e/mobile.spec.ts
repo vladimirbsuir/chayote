@@ -348,7 +348,9 @@ test.describe('narrow desktop window', () => {
   });
 });
 
-test.describe('mobile touch', () => {
+/* Tagged `@touch`: emulated-touch timing breaks under a loaded shared runner,
+   so CI runs this block alone on one worker rather than in the sharded gate. */
+test.describe('mobile touch', { tag: '@touch' }, () => {
   test.use({
     viewport: MOBILE,
     userAgent: ANDROID_UA,
