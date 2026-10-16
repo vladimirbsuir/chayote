@@ -36,7 +36,9 @@ import {
   useSettingsStore,
 } from './stores/settings';
 import { TopBar } from './components/TopBar';
-import { nextTheme } from './lib/theme';
+import { nextVisibleTheme } from './lib/theme';
+import { isLetterShortcut } from './lib/shortcuts';
+import { flushEditorsForSync } from './lib/syncFlush';
 import { Sidebar } from './components/Sidebar';
 import { DesktopLayout, MobileLayout, TabletLayout } from './layout/DesktopLayout';
 import { useBreakpoint } from './layout/useBreakpoint';
@@ -120,6 +122,32 @@ function Shell() {
   const { tags } = useTags();
   const { togglePin, pendingId: pinPendingId } = useTogglePin();
   const { toast: undoToast, show: showUndoToast } = useUndoToast();
+
+  /* Trash failures must never be silent: a refused permanent delete (a note
+     that has never synced, a database error) used to close the confirmation
+     with no message, leaving the note "stuck" in the trash. The message is
+     user-facing copy by contract (R7); it clears after a few seconds. */
+  const [actionError, setActionError] = useState<string | null>(null);
+  const actionErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (actionErrorTimer.current !== null) clearTimeout(actionErrorTimer.current);
+    };
+  }, []);
+  const showActionError = useCallback((message: string): void => {
+    if (actionErrorTimer.current !== null) clearTimeout(actionErrorTimer.current);
+    setActionError(message);
+    actionErrorTimer.current = setTimeout(() => {
+      actionErrorTimer.current = null;
+      setActionError(null);
+    }, 6000);
+  }, []);
+  const reportActionError = useCallback(
+    (error: unknown): void => {
+      showActionError(messageOf(error));
+    },
+    [showActionError],
+  );
 
   /* `05-ui-ux.md` §6.2: a note that leaves the trash closes the editor, and one that
      comes back re-opens it — closing after a restore would make undo look like it
@@ -233,7 +261,20 @@ function Shell() {
      props: switching either must not re-render the ProseMirror subtree
      (ADR-008). */
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    const root = document.documentElement;
+    /* The swap lands atomically: surfaces with `transition-colors` would
+       otherwise fade one by one behind a background that already flipped,
+       leaving dark cards on a light page for a beat. Transitions are
+       suppressed for exactly one frame, then restored. */
+    root.classList.add('theme-switch');
+    root.dataset.theme = theme;
+    const frame = requestAnimationFrame(() => {
+      root.classList.remove('theme-switch');
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      root.classList.remove('theme-switch');
+    };
   }, [theme]);
 
   useEffect(() => {
@@ -428,20 +469,25 @@ function Shell() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!event.ctrlKey && !event.metaKey) return;
+      /* Letter shortcuts match by physical key too (`lib/shortcuts`): with a
+         Russian layout `event.key` for Ctrl+F is "а", so matching the key
+         alone strands every shortcut. Non-printable keys need no second
+         test — their codes never change with layout. */
       const key = event.key.toLowerCase();
+      const code = event.code;
 
-      if (key === 'n') {
+      if (isLetterShortcut(event, 'n')) {
         event.preventDefault();
         void createNote();
         return;
       }
-      if (key === 'f') {
+      if (isLetterShortcut(event, 'f')) {
         event.preventDefault();
         searchRef.current?.focus();
         searchRef.current?.select();
         return;
       }
-      if (key === '\\') {
+      if (key === '\\' || code === 'Backslash') {
         event.preventDefault();
         if (tablet) {
           setDrawerOpen((open) => !open);
@@ -467,9 +513,9 @@ function Shell() {
          did something different from the control beside it would be worse than
          having neither. `Shift+L` alone is left alone: browsers use it for
          nothing, but the modifier is part of the binding either way. */
-      if (key === 'l' && event.shiftKey) {
+      if (isLetterShortcut(event, 'l') && event.shiftKey) {
         event.preventDefault();
-        useSettingsStore.getState().setTheme(nextTheme(themeSetting));
+        useSettingsStore.getState().setTheme(nextVisibleTheme(themeSetting, systemDark));
         return;
       }
       /* §7: `Delete note` is `Ctrl/Cmd+Backspace`. Not plain Backspace — in a WebView
@@ -484,7 +530,7 @@ function Shell() {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [createNote, deleteOpenNote, tablet, themeSetting]);
+  }, [createNote, deleteOpenNote, systemDark, tablet, themeSetting]);
 
   /* §7: `Esc` dismisses the search field (in `TopBar`), a dialog (in
      `useDialogFocus`), and the sidebar — the last one being the tablet drawer.
@@ -643,7 +689,7 @@ function Shell() {
       onRestoreNote={
         selection.kind === 'trash'
           ? (id) => {
-              void trash.restore(id);
+              void trash.restore(id).catch(reportActionError);
             }
           : undefined
       }
@@ -712,7 +758,7 @@ function Shell() {
             void createNote();
           }}
           onToggleTheme={() => {
-            useSettingsStore.getState().setTheme(nextTheme(themeSetting));
+            useSettingsStore.getState().setTheme(nextVisibleTheme(themeSetting, systemDark));
           }}
           theme={theme}
           onToggleSidebar={() => {
@@ -745,7 +791,7 @@ function Shell() {
                   void createNote();
                 }}
                 onToggleTheme={() => {
-                  useSettingsStore.getState().setTheme(nextTheme(themeSetting));
+                  useSettingsStore.getState().setTheme(nextVisibleTheme(themeSetting, systemDark));
                 }}
                 theme={theme}
                 onOpenOverflow={() => {
@@ -788,6 +834,22 @@ function Shell() {
         </div>
       )}
 
+      {/* Action failures (trash restore/destroy/empty): red, centred, above the
+          navigation bar like the undo toast, dismissing itself. */}
+      {actionError === null ? null : (
+        <div
+          data-testid="action-error-toast"
+          className="pointer-events-none fixed inset-x-0 bottom-[calc(1.25rem+var(--inset-bottom))] z-40 flex justify-center px-4"
+        >
+          <p
+            role="alert"
+            className="pointer-events-auto max-w-[420px] rounded-[var(--r-card)] border border-[var(--danger)] bg-[var(--surface)] px-4 py-2 text-center text-[13px] font-medium text-[var(--danger)] shadow-[var(--shadow-pop)]"
+          >
+            {actionError}
+          </p>
+        </div>
+      )}
+
       {settingsOpen ? (
         <SettingsDialog
           theme={themeSetting}
@@ -810,7 +872,15 @@ function Shell() {
             onSaveConfig: saveSyncConfig,
             onSyncNow: runSyncNow,
             onReupload: runReupload,
-            onResolve: (id, keepLocal) => resolveConflict(id, keepLocal),
+            /* Flush-then-resolve, like flush-then-sync: keystrokes still in
+              the autosave debounce are committed first, so Use-theirs on the
+              open note replaces the user's actual document — and the editor
+              remount effect then has a clean state to adopt the remote text
+              instead of guarding unsaved typing. */
+            onResolve: async (id, keepLocal) => {
+              await flushEditorsForSync();
+              return resolveConflict(id, keepLocal);
+            },
           }}
           onThemeChange={(next) => {
             useSettingsStore.getState().setTheme(next);
@@ -862,7 +932,7 @@ function Shell() {
           onConfirm={() => {
             const target = confirm.id;
             setConfirm(null);
-            void trash.destroy(target);
+            void trash.destroy(target).catch(reportActionError);
           }}
         />
       ) : confirm?.kind === 'empty' ? (
@@ -875,7 +945,7 @@ function Shell() {
           }}
           onConfirm={() => {
             setConfirm(null);
-            void trash.emptyTrash();
+            void trash.emptyTrash().catch(reportActionError);
           }}
         />
       ) : null}
@@ -886,6 +956,16 @@ function Shell() {
 /* One shared empty list rather than a fresh `[]` per render, so the sidebar's
    memoised rows are not handed a new reference on every tick. */
 const EMPTY_NOTES: NoteSummary[] = [];
+
+/* `AppError` arrives as `{ code, message }`; anything else is a bug shaped
+   like a string. The message is user-facing copy by contract (R7). */
+function messageOf(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.length > 0) return message;
+  }
+  return 'Something went wrong.';
+}
 
 /** Appends the next page of results. A two-character query can match more notes
     than one page holds, and a list that stopped at the page boundary while the
