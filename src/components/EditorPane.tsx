@@ -6,6 +6,7 @@ import { AlertCircle, ArrowLeft, RotateCw } from 'lucide-react';
 import { notesApi, tagsApi } from '../lib/ipc';
 import { registerSyncFlusher } from '../lib/syncFlush';
 import { useAutosave } from '../hooks/useAutosave';
+import { isLetterShortcut } from '../lib/shortcuts';
 import { useFolders, folderNamesById } from '../hooks/useFolders';
 import { useTags } from '../hooks/useTags';
 import { useTogglePin } from '../hooks/useTogglePin';
@@ -88,6 +89,15 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
      document belongs to TipTap (`10-conventions.md` §7) and nothing else reads it
      during render. */
   const editorRef = useRef<Editor | null>(null);
+  /* The serialised document the mounted TipTap instance was built from. The
+     editor is keyed by note id alone, so a saved document that changes
+     underneath it — a sync pull for a note opened from stale cache, or a
+     conflict resolution — would otherwise never reach the screen: the list
+     preview updates from the query cache while TipTap keeps showing the old
+     text until the note is reopened. `contentEpoch` below remounts the editor
+     when the saved document moves and there is nothing unsaved to lose. */
+  const loadedDocRef = useRef<string | null>(null);
+  const [contentEpoch, setContentEpoch] = useState(0);
   /* The same instance as state for the formatting toolbar. The toolbar reads
      `isActive`/`can` during render, and a ref write renders nothing — without
      the mirror its pressed states would freeze at the mount value. Set and
@@ -106,6 +116,11 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
     placement: { top: number; left: number };
   } | null>(null);
   const autosave = useAutosave((saved) => {
+    /* An own save is not an external change: the editor already holds this
+       document, so adopt it as the baseline the remount effect compares
+       against — otherwise every save would remount the editor and drop undo
+       history and caret. */
+    loadedDocRef.current = JSON.stringify(saved.doc);
     /* `10-conventions.md` §7: a save does not invalidate the list, because the
        response already carries the fresh summary — so the entry is patched in
        place. `updatedAt` and `isPinned` both move with a save (the pin through
@@ -153,17 +168,20 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
     [tags, tagIds],
   );
 
-  const targetOf = useCallback((editor: Editor): SaveNoteInput | null => {
-    if (noteId === null) return null;
-    const active = activeRef.current;
-    return {
-      id: noteId,
-      doc: editor.getJSON() as JsonDoc,
-      folderId: active.folderId,
-      tagIds: active.tagIds,
-      isPinned: active.isPinned,
-    };
-  }, [noteId]);
+  const targetOf = useCallback(
+    (editor: Editor): SaveNoteInput | null => {
+      if (noteId === null) return null;
+      const active = activeRef.current;
+      return {
+        id: noteId,
+        doc: editor.getJSON() as JsonDoc,
+        folderId: active.folderId,
+        tagIds: active.tagIds,
+        isPinned: active.isPinned,
+      };
+    },
+    [noteId],
+  );
 
   /* All three callbacks are stable for the lifetime of the editor instance.
 
@@ -182,6 +200,7 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
     (editor: Editor): void => {
       const data = queryClient.getQueryData<Note>(qk.note(noteId ?? ''));
       if (data === undefined) return;
+      loadedDocRef.current = JSON.stringify(data.doc);
       const ids = data.tags.map((tag) => tag.id);
       activeRef.current = {
         folderId: data.folderId,
@@ -275,7 +294,7 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
      complete. Case-insensitive match, normalised to the first-created spelling."
      The backend returns the existing row when the name matches, so a case-insensitive
      duplicate lands on the original tag rather than a second copy. */
-const createTag = useCallback(
+  const createTag = useCallback(
     async (name: string): Promise<void> => {
       const created = await tagsApi.create(name);
       toggleTag(created.id);
@@ -333,6 +352,42 @@ const createTag = useCallback(
     };
   }, [autosave]);
 
+  /* A saved document that changed under the mounted editor — a sync pull that
+     landed after the note opened from a stale cache entry, or a conflict
+     resolution — remounts the editor so the screen shows what the list
+     already shows. Only while clean: with unsaved typing (or a save in
+     flight) the user's keystrokes win and the editor is left alone. The
+     resolve path flushes first (`App`), so Use-theirs on the open note still
+     lands immediately. Metadata-only writes keep the serialised document
+     identical and never remount: pinning while typing keeps caret and undo. */
+  const serverDocJson = note.data === undefined ? null : JSON.stringify(note.data.doc);
+  useEffect(() => {
+    if (note.data === undefined || serverDocJson === null) return;
+    if (saveState !== 'saved') return;
+    if (loadedDocRef.current === serverDocJson) return;
+    loadedDocRef.current = serverDocJson;
+    setContentEpoch((epoch) => epoch + 1);
+  }, [note.data, serverDocJson, saveState]);
+
+  /* First paint waits for fresh data. Mounting TipTap on a stale cache entry
+     flashes the old text until the mount refetch lands — visible after every
+     sync that changed the note. Local reads settle in milliseconds, so the
+     placeholder is imperceptible; a failed refetch still falls back to the
+     cached document rather than a blank screen. Background refetches later
+     never hide the editor: only the newly opened note waits.
+     Adjusted during render rather than in an effect, where it would be a
+     cascading render (`10-conventions.md` §8) — the same pattern the settings
+     dialog uses for external accent changes. */
+  const [freshId, setFreshId] = useState<Uuid | null>(null);
+  if (freshId !== noteId) {
+    if (noteId === null || note.data === undefined || note.isFetching) {
+      if (freshId !== null) setFreshId(null);
+    } else {
+      setFreshId(noteId);
+    }
+  }
+  const ready = freshId === noteId && note.data !== undefined;
+
   /* Flush conditions: window blur and app background. The Android lifecycle
      event arrives as `visibilitychange`, because that is what the WebView
      reports; `06-platform.md` §4.5 wants the same effect. Editor blur reaches
@@ -362,16 +417,15 @@ const createTag = useCallback(
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!(event.ctrlKey || event.metaKey)) return;
-      const key = event.key.toLowerCase();
 
-      if (key === 's') {
+      if (isLetterShortcut(event, 's')) {
         event.preventDefault();
         void autosave.flush();
         return;
       }
       /* `Ctrl/Cmd+D` is the pin, not the bookmark dialog: it is §7's shortcut and the
          empty state promises it by name. Browser default suppressed either way. */
-      if (key === 'd') {
+      if (isLetterShortcut(event, 'd')) {
         event.preventDefault();
         togglePin();
       }
@@ -386,7 +440,7 @@ const createTag = useCallback(
   if (noteId === null) {
     return (
       <Shell
-status={
+        status={
           <EditorStatusBar
             title=""
             wordCount={0}
@@ -399,10 +453,10 @@ status={
             onEditTags={NOOP}
           />
         }
-      editor={
-        <Centred>
-          <EmptyState
-            title="No note open"
+        editor={
+          <Centred>
+            <EmptyState
+              title="No note open"
               body="Pick a note from the list, or create one with Ctrl+N."
               icon={<AlertCircle className="icon i-20" aria-hidden="true" />}
             />
@@ -475,7 +529,7 @@ status={
         ) : null
       }
       editor={
-        data === undefined ? (
+        !ready || data === undefined ? (
           <div className="flex-1" />
         ) : (
           <>
@@ -496,7 +550,7 @@ status={
               variant={onClose === undefined ? 'desktop' : 'mobile'}
             />
             <NoteEditor
-              key={data.id}
+              key={`${data.id}:${contentEpoch}`}
               doc={data.doc}
               editable
               onChange={onChange}
@@ -526,7 +580,10 @@ function Shell({
   popover?: ReactNode;
 }): React.ReactElement {
   return (
-    <section className="relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]" aria-label="Editor">
+    <section
+      className="relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]"
+      aria-label="Editor"
+    >
       {editor}
       {status}
       {popover}
@@ -580,7 +637,7 @@ function MobileEditorBar({
 function RecoveryScreen({ code, onRetry }: { code: string; onRetry: () => void }) {
   return (
     <Shell
-status={
+      status={
         <EditorStatusBar
           title=""
           wordCount={0}
