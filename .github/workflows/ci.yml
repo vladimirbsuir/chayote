@@ -41,8 +41,15 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   e2e:
-    name: End-to-end
+    # Sharded across machines, not workers: one runner's CPUs are already
+    # saturated at two workers, so more workers on the same box only add
+    # contention. Each shard gets its own runner and half the suite.
+    name: End-to-end (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -51,4 +58,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test
+      - run: npx playwright test --shard=${{ matrix.shard }}/2
