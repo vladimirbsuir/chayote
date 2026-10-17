@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Code,
+  Download,
   FilePlus,
   Folder,
   Hash,
@@ -85,6 +86,7 @@ const ICONS: Record<string, typeof Search> = {
   x: X,
   'alert-circle': AlertCircle,
   'rotate-cw': RotateCw,
+  download: Download,
   inbox: Inbox,
   bold: Bold,
   italic: Italic,
@@ -123,7 +125,7 @@ describe('the icon inventory of 05-ui-ux.md §3.3', () => {
   it('has an implementation for every documented icon, and no others', () => {
     const documented = inventoryFromDoc();
     expect(documented.length).toBeGreaterThan(0);
-    /* ADR-015 fixes the inventory, now at 40 with indent.
+    /* ADR-015 fixes the inventory, now at 41 with download.
        A count assertion alone would pass while the list silently grew; the
        equality below is what catches both a missing icon and an extra one. */
     expect([...documented].sort()).toEqual([...Object.keys(ICONS)].sort());

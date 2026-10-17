@@ -560,8 +560,36 @@ body {
 .dialog .dhead { padding: 18px 20px 0; display: flex; align-items: center; gap: 8px; }
 .dialog .dhead .ico { color: var(--text-muted); display: flex; }
 .dialog .dtitle { font-size: 15px; font-weight: 600; }
+.dialog .dtabs { display: flex; gap: 4px; padding: 12px 20px 0; }
+.dialog .dtabs button {
+  font-family: var(--font); font-size: 13px; font-weight: 500;
+  color: var(--text-muted); background: none; border: 0;
+  border-radius: var(--r-input); padding: 6px 12px; cursor: pointer;
+}
+.dialog .dtabs button[aria-selected="true"] { background: var(--surface-raised); color: var(--text); }
 .dialog .settings { padding: 16px 20px; display: flex; flex-direction: column; gap: 18px; }
 .field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; }
+/* Updates tab. The values are the app's real steps: 13px for a value, 12px for
+   a result line, 12px subtle for a timestamp. Colour is never the only signal —
+   each line carries its meaning in words. */
+.dialog .uval { font-size: 13px; color: var(--text); }
+.dialog .ubtn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font); font-size: 13px; font-weight: 500; color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  background: var(--surface); padding: 8px 16px; cursor: pointer;
+}
+.dialog .ubtn + .ubtn { margin-top: 10px; }
+.dialog .ubtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dialog .ubtn:disabled { opacity: 0.5; cursor: default; }
+.dialog .unote { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+.dialog .unote-strong { font-size: 13px; color: var(--text); margin-top: 10px; }
+.dialog .usub { font-size: 12px; color: var(--text-subtle); margin-top: 8px; }
+.dialog .ubar {
+  height: 6px; margin-top: 12px; border-radius: 999px;
+  background: var(--surface-raised); overflow: hidden;
+}
+.dialog .ufill { height: 100%; border-radius: 999px; background: var(--accent); }
 .field .pick {
   display: flex; align-items: center; gap: 8px;
   font-family: var(--font); font-size: 13px; color: var(--text);
@@ -679,6 +707,7 @@ body {
     <symbol id="i-alert-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
     <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></symbol>
     <symbol id="i-rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
     <symbol id="i-bold" viewBox="0 0 24 24"><path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/></symbol>
     <symbol id="i-italic" viewBox="0 0 24 24"><line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/></symbol>
@@ -1144,12 +1173,17 @@ body {
   <!-- ==================================================================== -->
   <div class="section">
     <h2>5 · Settings dialog</h2>
-    <div class="note">Six accent presets plus an in-app custom colour editor (hex field with Hue / Saturation / Lightness sliders) — never the platform colour picker. Settings live in the Tauri store, never in the notes database. The swatch ring is the only selected state — it is never colour alone.</div>
+    <div class="note">Three tabs — <strong>General</strong>, <strong>Sync</strong>, <strong>Updates</strong> — in that order, so the things a user touches oftenest sit leftmost. One tab stop across the strip; arrows move between tabs and wrap, Home/End jump to the ends. Six accent presets plus an in-app custom colour editor (hex field with Hue / Saturation / Lightness sliders) — never the platform colour picker. Settings live in the Tauri store, never in the notes database. The swatch ring is the only selected state — it is never colour alone.</div>
     <div class="dialog-wrap">
       <div class="dialog">
         <div class="dhead">
           <span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-settings"/></svg></span>
           <div class="dtitle">Settings</div>
+        </div>
+        <div class="dtabs" role="tablist">
+          <button role="tab" aria-selected="true">General</button>
+          <button role="tab">Sync</button>
+          <button role="tab">Updates</button>
         </div>
         <div class="settings">
           <div class="field">
@@ -1202,6 +1236,115 @@ body {
           <div class="field">
             <label>Default folder for new notes</label>
             <div class="pick"><svg class="icon i-16" style="opacity:.7" aria-hidden="true"><use href="#i-folder"/></svg><span class="grow">None</span><span class="chev"><svg class="icon i-16" aria-hidden="true"><use href="#i-chevron-down"/></svg></span></div>
+          </div>
+        </div>
+        <div class="dlg-btns">
+          <button class="danger">
+            <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Reset all settings
+          </button>
+          <div style="flex:1"></div>
+          <button class="primary">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:26px">
+      <strong>Updates tab, three states.</strong> Nothing is claimed that was not measured:
+      "up to date" appears only after a check that came back empty, never as the
+      resting state. On a platform that cannot install an update — unsigned macOS,
+      or Android — the button is disabled and a sentence says why, which is better
+      than a control whose only possible outcome is a failure.
+    </div>
+    <div class="dialog-wrap">
+      <div class="dialog">
+        <div class="dhead">
+          <span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-settings"/></svg></span>
+          <div class="dtitle">Settings</div>
+        </div>
+        <div class="dtabs" role="tablist">
+          <button role="tab">General</button>
+          <button role="tab">Sync</button>
+          <button role="tab" aria-selected="true">Updates</button>
+        </div>
+        <div class="settings">
+          <div class="field">
+            <label>Version</label>
+            <div class="uval">Chayote 0.1.0</div>
+          </div>
+          <div class="field">
+            <button class="ubtn">
+              <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Check for updates
+            </button>
+            <div class="unote">Chayote is up to date.</div>
+            <div class="usub">Last checked 17 October 2026 at 19:04</div>
+          </div>
+        </div>
+        <div class="dlg-btns">
+          <button class="danger">
+            <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Reset all settings
+          </button>
+          <div style="flex:1"></div>
+          <button class="primary">Done</button>
+        </div>
+      </div>
+
+      <div class="dialog">
+        <div class="dhead">
+          <span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-settings"/></svg></span>
+          <div class="dtitle">Settings</div>
+        </div>
+        <div class="dtabs" role="tablist">
+          <button role="tab">General</button>
+          <button role="tab">Sync</button>
+          <button role="tab" aria-selected="true">Updates</button>
+        </div>
+        <div class="settings">
+          <div class="field">
+            <label>Version</label>
+            <div class="uval">Chayote 0.1.0</div>
+          </div>
+          <div class="field">
+            <button class="ubtn">
+              <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Check for updates
+            </button>
+            <div class="unote-strong">Version 0.2.0 is available.</div>
+            <div class="unote">Faster search on large notes, and the Updates tab.</div>
+            <button class="ubtn primary">
+              <svg class="icon i-16" aria-hidden="true"><use href="#i-download"/></svg>Install and restart
+            </button>
+            <div class="ubar"><div class="ufill" style="width:62%"></div></div>
+            <div class="usub">Downloading… 62% &nbsp;·&nbsp; 9.3 MB of 15 MB</div>
+          </div>
+        </div>
+        <div class="dlg-btns">
+          <button class="danger">
+            <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Reset all settings
+          </button>
+          <div style="flex:1"></div>
+          <button class="primary">Done</button>
+        </div>
+      </div>
+
+      <div class="dialog">
+        <div class="dhead">
+          <span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-settings"/></svg></span>
+          <div class="dtitle">Settings</div>
+        </div>
+        <div class="dtabs" role="tablist">
+          <button role="tab">General</button>
+          <button role="tab">Sync</button>
+          <button role="tab" aria-selected="true">Updates</button>
+        </div>
+        <div class="settings">
+          <div class="field">
+            <label>Version</label>
+            <div class="uval">Chayote 0.1.0</div>
+          </div>
+          <div class="field">
+            <button class="ubtn" disabled>
+              <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Check for updates
+            </button>
+            <div class="usub">macOS builds are not code-signed, so Chayote cannot replace itself. Download a new version from the releases page.</div>
           </div>
         </div>
         <div class="dlg-btns">
@@ -1305,7 +1448,11 @@ body {
       </div>
       <div class="inv-item">
         <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-rotate-cw"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-rotate-cw"/></svg></div>
-        <div class="nm">rotate-cw<br>retry/reset</div>
+        <div class="nm">rotate-cw<br>retry/reset/check</div>
+      </div>
+      <div class="inv-item">
+        <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-download"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-download"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-download"/></svg></div>
+        <div class="nm">download<br>install update</div>
       </div>
       <div class="inv-item">
         <div class="sw"><svg class="icon i-16" aria-hidden="true"><use href="#i-inbox"/></svg><svg class="icon i-20" aria-hidden="true"><use href="#i-inbox"/></svg><svg class="icon i-24" aria-hidden="true"><use href="#i-inbox"/></svg></div>

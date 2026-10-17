@@ -222,6 +222,48 @@ describe('mock adapter against the real command surface', () => {
     await expect(backend.invoke('window_ready', {})).resolves.toBeUndefined();
   });
 
+  /* ADR-024. `app_info` is the one updater command that exists on every
+     platform, so its shape is the one a browser test and a device share. */
+  it('answers app_info with the three fields the Updates tab renders from', async () => {
+    const backend = createMockBackend(buildMockDatabase());
+    const info = await backend.invoke('app_info', {});
+    expect(Object.keys(info).sort()).toEqual(['os', 'updatesSupported', 'version']);
+    expect(typeof info.version).toBe('string');
+    expect(info.version.length).toBeGreaterThan(0);
+    expect(typeof info.os).toBe('string');
+    expect(typeof info.updatesSupported).toBe('boolean');
+  });
+
+  it('reports no update on the default feed, and one when asked for it', async () => {
+    const plain = createMockBackend(buildMockDatabase());
+    await expect(plain.invoke('updates_check', {})).resolves.toBeNull();
+
+    const seeded = createMockBackend(buildMockDatabase(), { updateFeed: 'available' });
+    const found = await seeded.invoke('updates_check', {});
+    expect(found).not.toBeNull();
+    expect(Object.keys(found ?? {}).sort()).toEqual(['date', 'notes', 'version']);
+    expect(typeof found?.version).toBe('string');
+    expect(typeof found?.notes).toBe('string');
+    /* `notes` is a string and never null: the pane has no use for a key it
+       cannot render, and Rust already collapsed a missing one to "". */
+    expect(found?.notes).not.toBeNull();
+  });
+
+  it('claims no update support on the unsupported feed, and says which platform', async () => {
+    const backend = createMockBackend(buildMockDatabase(), { updateFeed: 'unsupported' });
+    const info = await backend.invoke('app_info', {});
+    expect(info.updatesSupported).toBe(false);
+    expect(info.os).toBe('macOS');
+  });
+
+  /* The install resolves rather than replacing a process — there is nothing to
+     restart in a browser — but it must resolve, or the tab's installed state
+     would be unreachable outside Tauri. */
+  it('resolves an install without a channel, matching the real command', async () => {
+    const backend = createMockBackend(buildMockDatabase(), { updateFeed: 'available' });
+    await expect(backend.invoke('updates_install', { onEvent: undefined })).resolves.toBeUndefined();
+  });
+
   it('fails every read command with a coded error for an unknown id', async () => {
     const backend = createMockBackend(buildMockDatabase());
     const commands = [

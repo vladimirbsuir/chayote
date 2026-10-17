@@ -32,6 +32,10 @@ export type SettingsState = Settings & {
   toggleSectionCollapsed: (section: keyof SectionCollapse) => void;
   setLastNote: (id: Uuid | null) => void;
   setLastSelection: (selection: Settings['lastSelection']) => void;
+  /** Record that the updater looked, so the daily silent check does not repeat
+      itself on every launch. Written even when the check found nothing or
+      failed: the attempt happened, and that is what the timestamp means. */
+  setLastUpdateCheckAt: (at: number) => void;
   reset: () => void;
 };
 
@@ -46,6 +50,7 @@ const PERSISTED: ReadonlyArray<keyof Settings> = [
   'sectionsCollapsed',
   'lastNoteId',
   'lastSelection',
+  'lastUpdateCheckAt',
 ];
 
 let write: Debounced<[]> | null = null;
@@ -116,6 +121,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     },
     setLastSelection: (lastSelection) => {
       update({ lastSelection });
+    },
+    setLastUpdateCheckAt: (lastUpdateCheckAt) => {
+      update({ lastUpdateCheckAt });
     },
     /* `05-ui-ux.md` §6.6: settings never touch notes, so a reset is exactly the
        defaults and nothing else. */

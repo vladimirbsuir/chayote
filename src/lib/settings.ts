@@ -44,6 +44,16 @@ export type Settings = {
   sectionsCollapsed: SectionCollapse;
   lastNoteId: Uuid | null;
   lastSelection: Selection;
+  /** When the updater last looked for a new version, epoch ms, or `null` if
+      never. Persisted here rather than in the notes database because it is
+      runtime state about the app, not a note, and `settings.json` is the only
+      store the frontend owns (`06-platform.md` §2).
+
+      Not a preference, and it is the one field on this type that is not: nothing
+      in Settings configures the user. It rides along because a second store file
+      for one timestamp is a worse trade, and because a reset clearing it costs
+      exactly one extra network check. */
+  lastUpdateCheckAt: number | null;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -57,6 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sectionsCollapsed: { folders: false, tags: false },
   lastNoteId: null,
   lastSelection: { kind: 'all' },
+  lastUpdateCheckAt: null,
 };
 
 const STORE_FILE = 'settings.json';

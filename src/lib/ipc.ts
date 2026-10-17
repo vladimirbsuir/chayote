@@ -4,8 +4,16 @@ import type { TagWithCount } from '../types/tag';
 import type { Note, NoteFilter, NoteSummary, SaveNoteInput } from '../types/ipc';
 import type { SearchInput, SearchPage } from '../types/search';
 import type { SyncConflict, SyncStatus, SyncSummary } from '../types/sync';
+import type { AppInfo, DownloadEvent, UpdateSummary } from '../types/update';
+import type { Channel } from '@tauri-apps/api/core';
 import type { Uuid } from '../types/note';
-import { buildEmptyMockDatabase, buildMockDatabase, createMockBackend } from '../mock/adapter';
+import {
+  DEFAULT_MOCK_OPTIONS,
+  buildEmptyMockDatabase,
+  buildMockDatabase,
+  createMockBackend,
+} from '../mock/adapter';
+import type { MockOptions } from '../mock/adapter';
 import type { MockDatabase } from '../mock/derive';
 
 export { cycleDetected, MockBackendError, notFound } from '../mock/errors';
@@ -30,19 +38,36 @@ function tauriBackend(): Backend {
 
 let active: Backend | null = null;
 
-/** `?seed=empty` starts the browser fallback from an empty database, which is the
-    ADR-014 first-launch state. It is read here, in the one module that owns the
-    adapter choice, so a test reaches it by URL rather than by importing the mock
-    into a component — which `10-conventions.md` §5 forbids. */
-function mockDatabaseForUrl(): MockDatabase {
-  const seed = new URLSearchParams(window.location.search).get('seed');
+/** `?seed=` selects a starting state for the browser fallback, which is how a
+    test reaches a screen that is otherwise hard to get to. It is read here, in
+    the one module that owns the adapter choice, so a test reaches it by URL
+    rather than by importing the mock into a component — which
+    `10-conventions.md` §5 forbids.
+
+    - `empty` — the ADR-014 first-launch state: no folders, no tags, no notes.
+    - `update` — an update is waiting, so the install path is drivable.
+    - `no-updates` — a platform that cannot update, as on macOS and Android.
+    - `offline` — the endpoint cannot be reached, so the failure path is. */
+function mockSeedFromUrl(): string | null {
+  return new URLSearchParams(window.location.search).get('seed');
+}
+
+function mockDatabaseForSeed(seed: string | null): MockDatabase {
   return seed === 'empty' ? buildEmptyMockDatabase() : buildMockDatabase();
+}
+
+function mockOptionsForSeed(seed: string | null): MockOptions {
+  if (seed === 'update') return { updateFeed: 'available' };
+  if (seed === 'no-updates') return { updateFeed: 'unsupported' };
+  if (seed === 'offline') return { updateFeed: 'offline' };
+  return DEFAULT_MOCK_OPTIONS;
 }
 
 function resolve(): Backend {
   if (active !== null) return active;
   if (import.meta.env.DEV && !isTauri) {
-    active = createMockBackend(mockDatabaseForUrl());
+    const seed = mockSeedFromUrl();
+    active = createMockBackend(mockDatabaseForSeed(seed), mockOptionsForSeed(seed));
     return active;
   }
   active = tauriBackend();
@@ -121,6 +146,29 @@ export const syncApi = {
 export const windowApi = {
   ready: (): Promise<void> => invoke('window_ready', {}),
 };
+
+/** ADR-024. The updater runs entirely in Rust; nothing here imports
+    `@tauri-apps/plugin-updater`, which keeps R6 to one import site and lets the
+    browser fallback answer the same three calls. */
+export const updatesApi = {
+  info: (): Promise<AppInfo> => invoke('app_info', {}),
+  check: (): Promise<UpdateSummary | null> => invoke('updates_check', {}),
+  /** `onEvent` is only a real channel under Tauri. Outside it there is no
+      `Channel` to construct, so the browser path passes the callback through
+      untouched and the mock ignores it. */
+  install: async (onEvent: (event: DownloadEvent) => void): Promise<void> => {
+    await invoke('updates_install', {
+      onEvent: isTauri ? await buildChannel(onEvent) : onEvent,
+    });
+  },
+};
+
+async function buildChannel(
+  onEvent: (event: DownloadEvent) => void,
+): Promise<Channel<DownloadEvent>> {
+  const { Channel } = await import('@tauri-apps/api/core');
+  return new Channel<DownloadEvent>(onEvent);
+}
 
 /** The global the Android activity calls. It lives here rather than in a component
     because R6 makes this file the only place that talks to the platform, and a

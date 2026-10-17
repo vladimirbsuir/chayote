@@ -193,7 +193,8 @@ Every icon used in v1, and nothing else. Adding an icon to the UI means adding i
 | `check` | Checked task list item |
 | `x` | Clear search, dismiss |
 | `alert-circle` | Error and warning states, sync conflicts |
-| `rotate-cw` | Retry a failed save, reset settings, Sync now |
+| `rotate-cw` | Retry a failed save, reset settings, Sync now, Check for updates |
+| `download` | Install an update |
 | `inbox` | Empty state for a selection with no notes |
 | `bold` | Formatting toolbar: bold mark |
 | `italic` | Formatting toolbar: italic mark |
@@ -427,7 +428,11 @@ Timestamps are computed from `updated_at` (epoch ms) at render time and recomput
 
 ### 6.6 Settings
 
-A modal dialog with:
+A modal dialog with **three tabs**, in this order: **General**, **Sync**, **Updates**. The order is by how often each is touched — the things a user changes while writing come first, and the once-a-month chore last. One tab stop across the strip; `ArrowLeft` / `ArrowRight` move between tabs and wrap, `Home` / `End` jump to the ends. Wrapping and the end keys arrived with the third tab: with two, the handler was a pair-flip, which is why `Home` and `End` did nothing and nothing noticed.
+
+Only the selected panel is mounted, so a hidden panel holds no state and a hidden conflict resolver keeps no poll running.
+
+**General**
 
 | Setting | Control | Default |
 |---------|---------|---------|
@@ -435,6 +440,26 @@ A modal dialog with:
 | Accent colour | **Six preset swatches plus a custom colour editor behind the palette swatch** | Each theme's own preset 1 |
 | Default folder for new notes | Folder picker, "None" allowed | None — everything starts unfiled |
 | Reset settings | Destructive button with confirmation | — |
+
+**Updates** (ADR-024)
+
+| Field | Control | Default |
+|-------|---------|---------|
+| Version | Read-only text, `Chayote 0.1.0` | — |
+| Check for updates | Button (`rotate-cw`), disabled while a request is in flight | — |
+| Result | One sentence: up to date, or a version is available | Nothing |
+| Install and restart | Button (`download`), only when a newer version exists | — |
+| Progress | A bar with a percentage, only while bytes are moving | — |
+| Last checked | The reader's own locale, so it survives a relaunch | Never |
+
+Four rules this tab holds to, each of which is a screen someone could get wrong:
+
+- **Nothing is claimed that was not measured.** "Chayote is up to date." appears only after a check that came back empty, never as the resting state; a tab that says so before it has asked is asserting something about a version it does not know. This is why the result line is driven by *this tab's* check completing and not by the persisted timestamp — the silent daily tick writes that timestamp without reporting anything into the tab, and a tab that inherited its conclusion would be reporting a result it never saw.
+- **A platform that cannot update gets a disabled button and a sentence, not a working button that fails.** macOS and Android are named and told what to do instead (`06-platform.md` §3.8), the same shape as the existing "Sync is unavailable here." fallback.
+- **One action at a time.** Checking and installing are both round trips against the same manifest, and the second replaces the running process.
+- **Release notes are plain text.** `latest.json` carries them as untrusted text from a remote file and the app has no Markdown renderer, so they are never rendered as markup — the paste-sanitizer problem (`04-editor.md` §5) in a place nobody thought to check.
+
+**Sync** carries the connection string, an enable switch, an explicit Save (the only field in the dialog that does not apply on change, because it is secret text the user may still be editing), Sync now, Re-upload everything, status, and the conflict resolver; `07-sync-plan.md` §6 is the recovery story behind it.
 
 **On accent presets:** six swatches are offered because a raw colour input is an unpleasant way to make a first choice, and picking a preset is one click. The custom input remains, because one person's preset list is not everyone taste. Presets are defined once in `src/styles/tokens.css` as `--accent-preset-1` … `--accent-preset-6`, redefined in the `[data-theme='dark']` block, and mirrored as data in `lib/settings.ts`.
 

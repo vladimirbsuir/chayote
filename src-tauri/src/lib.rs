@@ -23,7 +23,7 @@ const SETTINGS_FILE: &str = "settings.json";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let built = with_updater(tauri::Builder::default())
+    let built = with_pending_update(with_updater(tauri::Builder::default()))
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(commands::handler())
         .setup(|app| {
@@ -61,6 +61,19 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
 
 #[cfg(mobile)]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
+}
+
+/// The checked-but-not-yet-installed update, carried between `updates_check` and
+/// `updates_install`. Registered here rather than in the command module so the
+/// builder chain reads in the order the app is wired, and the state has one home.
+#[cfg(desktop)]
+fn with_pending_update(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.manage(commands::updates::PendingUpdate::default())
+}
+
+#[cfg(mobile)]
+fn with_pending_update(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
 }
 

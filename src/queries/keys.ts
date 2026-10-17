@@ -12,4 +12,8 @@ export const qk = {
   search: (input: SearchInput) => ['search', input] as const,
   syncStatus: () => ['sync-status'] as const,
   syncConflicts: () => ['sync-conflicts'] as const,
+  /* The version and platform behind the Updates tab. Immutable for the life of
+     the process, so it is fetched once and never refetched — an update that
+     installs ends the process anyway. */
+  appInfo: () => ['app-info'] as const,
 };

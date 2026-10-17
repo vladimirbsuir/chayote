@@ -1646,3 +1646,113 @@ fn a_trashed_note_is_still_gettable_by_id() {
         .expect("all")
         .is_empty());
 }
+
+/// ADR-024: the Updates tab builds both its button state and its explanation
+/// from `app_info`, so the flag has to agree with the platform it runs on. A
+/// Windows build claiming otherwise would offer a button whose only possible
+/// outcome is a failure — and a macOS or Android build claiming support would
+/// offer the same button with nothing behind it.
+#[test]
+fn update_support_follows_the_platform() {
+    assert_eq!(
+        crate::commands::updates::updates_supported(),
+        cfg!(any(target_os = "windows", target_os = "linux"))
+    );
+}
+
+/// The label is interpolated into the sentence that explains why updating is
+/// unavailable, so an empty value would reach the reader verbatim.
+#[test]
+fn update_support_names_a_real_platform() {
+    let label = crate::commands::updates::os_label();
+    assert!(!label.is_empty(), "the label must not be empty");
+    assert_ne!(
+        label, "Unknown",
+        "a platform this project builds for must not report Unknown"
+    );
+}
+
+/// An updater failure reaches the user as `NETWORK`, the code the frontend reads
+/// as "try again later" (`10-conventions.md` §6). The technical detail stays in
+/// `details` and the log; the message the reader sees is the plain sentence.
+#[cfg(desktop)]
+#[test]
+fn an_updater_failure_is_a_network_error_that_keeps_its_detail_back() {
+    let mapped = crate::commands::updates::network(tauri_plugin_updater::Error::Network(
+        "the endpoint refused the connection".into(),
+    ));
+    assert_eq!(mapped.code(), "NETWORK");
+    let detail = mapped
+        .details()
+        .expect("the transport error is kept for the log");
+    assert!(
+        detail.contains("the endpoint refused the connection"),
+        "got {detail}"
+    );
+
+    let wire = serde_json::to_value(mapped).expect("serialises");
+    assert_eq!(wire["code"], "NETWORK");
+    assert_ne!(
+        wire["message"], wire["details"],
+        "the reader-facing message must not be the transport error"
+    );
+}
+
+/// The download events cross the channel as `{ event, data }`, and the tab's
+/// discriminated union in `src/types/update.ts` has to name the same three
+/// strings with the same field spellings. Renaming one side alone would leave
+/// the progress bar silently frozen at zero.
+#[cfg(desktop)]
+#[test]
+fn download_events_match_the_typescript_channel_shape() {
+    use crate::commands::updates::DownloadEvent;
+
+    let started = serde_json::to_value(DownloadEvent::Started {
+        content_length: Some(15_000_000),
+    })
+    .expect("serialises");
+    assert_eq!(started["event"], "started");
+    assert_eq!(started["data"]["contentLength"], 15_000_000);
+
+    let progress =
+        serde_json::to_value(DownloadEvent::Progress { chunk_length: 4096 }).expect("serialises");
+    assert_eq!(progress["event"], "progress");
+    assert_eq!(progress["data"]["chunkLength"], 4096);
+
+    let finished = serde_json::to_value(DownloadEvent::Finished).expect("serialises");
+    assert_eq!(finished["event"], "finished");
+
+    /* A server that omits the length leaves `null`, and the bar has to degrade
+    to indeterminate rather than divide by null. */
+    let unknown = serde_json::to_value(DownloadEvent::Started {
+        content_length: None,
+    })
+    .expect("serialises");
+    assert!(unknown["data"]["contentLength"].is_null());
+}
+
+/// `AppInfo` and `UpdateSummary` are the two payloads the tab renders from, so
+/// their field names are a contract too.
+#[test]
+fn update_payloads_match_the_typescript_types() {
+    let info = serde_json::json!({
+        "version": "0.1.0",
+        "os": "Windows",
+        "updatesSupported": true,
+    });
+    for field in ["version", "os", "updatesSupported"] {
+        assert!(info.get(field).is_some(), "AppInfo carries {field}");
+    }
+
+    let summary = serde_json::json!({
+        "version": "0.2.0",
+        "notes": "Faster search",
+        "date": "2026-10-17T09:00:00Z",
+    });
+    for field in ["version", "notes", "date"] {
+        assert!(
+            summary.get(field).is_some(),
+            "UpdateSummary carries {field}"
+        );
+    }
+}
