@@ -25,6 +25,7 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 015 | Icons are Lucide vectors; emoji are banned from the UI | Accepted |
 | 016 | The prototype is a permanent visual reference, not a disposable mockup | Accepted |
 | 017 | README.md is the agent onboarding document | Superseded by ADR-022 |
+| 018 | The frontend runs without Tauri, so the UI is testable in a browser | Accepted |
 | 019 | The accent is per-theme; custom accents are used verbatim | Accepted |
 | 020 | The Android back button is handled in Kotlin, and window insets in CSS | Accepted |
 | 021 | Tags stay listed at a zero count; the sidebar creates them | Accepted |
@@ -704,15 +705,15 @@ Fixing the cascade exposed the question it had been hiding. The accent is used a
 ---
 ## ADR-023 - The note title is a field of its own, and the editor's leading line is not it
 
-**Status:** Accepted � **Date:** 2026-10-17
+**Status:** Accepted · **Date:** 2026-10-17
 
 **Context.** The user asked for the note screen to look like a note: a title field, the date it was last changed beneath it, then the text. Doing that honestly means deciding where the title *lives*, and the answer was not free.
 
-`title` had been derived from the document since M1 (`04-editor.md` �7): the first heading, else the first non-empty block. Three things were wrong with that, and only the first is about looks. The title was a block inside the note's own content, so it appeared in every outline and export as a heading, and there was nowhere in the UI to rename a note as a *title* � only to type an H1. And it was shown twice: in the desktop status bar and in the mobile bar above the editor, neither of them editable, so two labels for one note could disagree.
+`title` had been derived from the document since M1 (`04-editor.md` §7): the first heading, else the first non-empty block. Three things were wrong with that, and only the first is about looks. The title was a block inside the note's own content, so it appeared in every outline and export as a heading, and there was nowhere in the UI to rename a note as a *title* — only to type an H1. And it was shown twice: in the desktop status bar and in the mobile bar above the editor, neither of them editable, so two labels for one note could disagree.
 
-The schema turned out to be ready for this and had been waiting. `notes.title_source` has carried a `CHECK (title_source IN ('auto','manual','first_heading'))` since `0001_initial.sql`, `03-data-model.md` �4.1 has specified the `manual` branch since it was written, and sync has pushed `title` and `title_source` in both directions all along. The only thing missing was a way to reach it.
+The schema turned out to be ready for this and had been waiting. `notes.title_source` has carried a `CHECK (title_source IN ('auto','manual','first_heading'))` since `0001_initial.sql`, `03-data-model.md` §4.1 has specified the `manual` branch since it was written, and sync has pushed `title` and `title_source` in both directions all along. The only thing missing was a way to reach it.
 
-**Decision.** The title is a field of its own, written by `notes_set_title`. A non-empty title is stored as `title_source = 'manual'` and kept verbatim by every later save; an empty one returns the note to `auto`, which hands the title back to derivation � so clearing the field is a way of saying "derive it again", not a way of leaving the note nameless. It is one command rather than a field on `notes_save`, for the reason the pin has one: the autosave judges a write by the serialised document, so a title carried in the save input would be judged unchanged and never written.
+**Decision.** The title is a field of its own, written by `notes_set_title`. A non-empty title is stored as `title_source = 'manual'` and kept verbatim by every later save; an empty one returns the note to `auto`, which hands the title back to derivation — so clearing the field is a way of saying "derive it again", not a way of leaving the note nameless. It is one command rather than a field on `notes_save`, for the reason the pin has one: the autosave judges a write by the serialised document, so a title carried in the save input would be judged unchanged and never written.
 
 The field sits above the text with the last-changed date under it, formatted for the reader's own locale. **It sits inside the editor's scroll area, not above it** — `05-ui-ux.md` §2.6 and `prototype/index.html`'s `.editor-scroll > .note-head + .editor` both have it that way, and the first implementation put it beside the scroll container instead, which pinned it: a sibling of a scroller does not move when the scroller moves, so scrolling a long note left the title at the top for ever. The user found that on a phone the same day this ADR landed. The title is gone from the status bar and from the mobile bar, because it is in one place now and that place is editable.
 
@@ -724,12 +725,12 @@ The field sits above the text with the last-changed date under it, formatted for
 | A field that writes into the document's first H1 | Cheaper, and no schema change. But then the title is still a block: it is in the outline, in the plain text, in every export, and it is still not editable as a title. It moves the pixels and keeps the problem. |
 | Keep the title in the status bar as well | Two labels for one note, one of them stale the moment the other changes. |
 | A fixed date format | The app is local-first with no account and no settings for this; the machine's locale is the only answer available that is right for the reader. |
-| Leave existing notes' leading H1 in place | Then the note's name appears twice � once in the field, once as the first line of the text � and the two drift apart on the first edit to either. |
+| Leave existing notes' leading H1 in place | Then the note's name appears twice — once in the field, once as the first line of the text — and the two drift apart on the first edit to either. |
 
 **Consequences.**
 
 - **R9 is amended, not suspended.** `plain_text` is still derived and still recomputed on every write. `title` is derived when `title_source` is `auto` and carried when it is `manual`, and it is synced as a field like any other. The rule the amendment protects is the one underneath R9: a remote device must be able to reach the same values the local device has, and a title the user typed is now among them.
-- `save()` reads the stored `title` alongside `title_source` and keeps it when the source is `manual`. Without that the first keystroke in the body blanked the field � a defect the moment `manual` became reachable, and the reason a Rust test pins it.
+- `save()` reads the stored `title` alongside `title_source` and keeps it when the source is `manual`. Without that the first keystroke in the body blanked the field — a defect the moment `manual` became reachable, and the reason a Rust test pins it.
 - **Migration `0006_note_title_field.sql` has no DDL and carries a data pass instead.** A note written under the old rule has its title as its leading H1; the pass moves it into the field, recomputes `plain_text` / `excerpt` / `word_count` from the stripped document, and appends an outbox row so the change reaches other devices. It does not touch `updated_at`: a migration is not an edit, and a library that looked freshly written on the day it upgraded would sort every note to the top of every list. A note that was only a title is left with an empty paragraph, because ProseMirror has no content model without a block.
 - The editor's body type drops from 17 px / 1.7 / 14 px to 17 px / 1.5 / 10 px, on paragraphs and lists alike. One rhythm for the body rather than two, and a screen of ordinary prose shows more of itself.
-- `docs/01-product.md` �v1 scope, `02-architecture.md` R9 and �7, `03-data-model.md` �3.2 and �4.1, `04-editor.md` �7 and �9, and `05-ui-ux.md` �9 changed with it, and `prototype/index.html` in the same commit (ADR-016).
+- `docs/01-product.md` — v1 scope, `02-architecture.md` R9 and §7, `03-data-model.md` §3.2 and §4.1, `04-editor.md` §7 and §9, and `05-ui-ux.md` §9 changed with it, and `prototype/index.html` in the same commit (ADR-016).
