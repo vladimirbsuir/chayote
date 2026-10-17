@@ -66,6 +66,11 @@ jobs:
     name: Bundle (${{ matrix.os }})
     needs: version
     runs-on: ${{ matrix.os }}
+    # The signing key lives in the `release` environment, not at repository
+    # level. A job only sees an environment's secrets when it names the
+    # environment, and the failure without this is a build that stops at
+    # "no private key" rather than anything obvious about permissions.
+    environment: release
     strategy:
       fail-fast: false
       matrix:
