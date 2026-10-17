@@ -73,10 +73,22 @@ export function EditorStatusBar({
   return (
     <div
       /* Status text is chrome, not content: folder, tags, word count and save
-         state are read, never copied — copying happens in the editor. */
+         state are read, never copied — copying happens in the editor.
+
+         On mobile it is pinned to the bottom of the *layout* viewport rather than
+         sitting at the bottom of the pane, which is a different thing since
+         `src/lib/pinToVisualViewport.ts` arrived. The app is sized to the visible
+         area, so a row in the pane's flow rides up with the keyboard and appears
+         above it; the user asked for the behaviour it had before, which is that the
+         keyboard covers the row and the text gets the space. `position: fixed`
+         resolves against the layout viewport — the undo toast's wrapper already
+         relies on that — so the row stays where it was, and `var(--inset-bottom)`
+         is added back for the system navigation bar, which a fixed element ignores.
+         The editor keeps its `pb-16` floor, so the last line still scrolls clear. */
       data-testid="editor-status-bar"
-      className={`flex shrink-0 items-center gap-3 border-t border-[var(--border)] bg-[var(--surface-raised)] text-[12px] text-[var(--text-muted)] select-none ${
-        mobile ? 'h-11 gap-2 px-1' : 'h-7 px-3'
+      style={mobile ? { bottom: 'var(--inset-bottom)' } : undefined}
+      className={`flex items-center gap-3 border-t border-[var(--border)] bg-[var(--surface-raised)] text-[12px] text-[var(--text-muted)] select-none ${
+        mobile ? 'fixed inset-x-0 z-30 h-11 gap-2 px-1' : 'h-7 shrink-0 px-3'
       }`}
     >
       <SlotButton

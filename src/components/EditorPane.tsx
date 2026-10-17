@@ -579,25 +579,65 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
               editor={toolbarEditor}
               variant={onClose === undefined ? 'desktop' : 'mobile'}
             />
-            <NoteHeader
-              title={title}
-              updatedAt={data.updatedAt}
-              onChange={changeTitle}
-              onCommit={commitTitle}
-              onEnter={enterBodyFromTitle}
-              variant={onClose === undefined ? 'desktop' : 'mobile'}
-            />
-            <NoteEditor
-              key={`${data.id}:${contentEpoch}`}
-              doc={data.doc}
-              editable
-              onChange={onChange}
-              onFlush={() => {
-                void autosave.flush();
+            {/* `prototype/index.html` §2.5 and `.m-editor`: the title, the date and
+                the text are one scrolling column, and the prototype has said so since
+                it was written — `.editor-scroll` and `.m-editor` both wrap `.note-head`
+                *and* `.editor`. ADR-023 landed the title as a sibling of the scroll
+                container, which pinned it: scrolling a note never moved it, so it read
+                as a permanent fixture rather than as the note's first line. Caught on a
+                phone, by the user, immediately after that change.
+
+                The padding is the prototype's where the prototype's is right —
+                32/40 sides and top on desktop — and `overscroll-contain` is new: at
+                the end of a note the container cannot scroll further, the gesture
+                chained to the document, which cannot scroll either, and the WebView
+                rubber-banded the whole page. Containment ends the chain there, where
+                the scrolling actually is.
+
+                The mobile floor is 64 px rather than the prototype's 40, and that is
+                the one metric that is not the prototype's: the mobile status row is
+                viewport-fixed, so it *overlays* the bottom of this column instead of
+                ending it, and 40 px no longer clears its 44. Without the extra 24 the
+                last line of a note sits under the row. */}
+            <div
+              className={`editor-scroll flex flex-1 flex-col overflow-y-auto overscroll-contain ${
+                onClose === undefined ? 'px-8 pt-10 pb-16' : 'px-5 pt-6 pb-16'
+              }`}
+              onClick={(event) => {
+                /* Taps in this wrapper's own padding land outside ProseMirror even with
+                   the editor's full-height floor above, and on touch that tap would do
+                   nothing — no caret, no keyboard. Route exactly those to the end of
+                   the document. Only when the wrapper itself is the target (anything
+                   inside the text targets a descendant and keeps ProseMirror's own
+                   position mapping), and never mid-selection: releasing a text-selection
+                   drag over the padding must not collapse what the user just selected.
+                   Scrollbar presses dispatch no click, so they cannot reach this. */
+                if (event.target !== event.currentTarget) return;
+                const selection = window.getSelection();
+                if (selection !== null && !selection.isCollapsed) return;
+                toolbarEditor?.commands.focus('end');
               }}
-              onReady={onReady}
-              onDispose={onDispose}
-            />
+            >
+              <NoteHeader
+                title={title}
+                updatedAt={data.updatedAt}
+                onChange={changeTitle}
+                onCommit={commitTitle}
+                onEnter={enterBodyFromTitle}
+                variant={onClose === undefined ? 'desktop' : 'mobile'}
+              />
+              <NoteEditor
+                key={`${data.id}:${contentEpoch}`}
+                doc={data.doc}
+                editable
+                onChange={onChange}
+                onFlush={() => {
+                  void autosave.flush();
+                }}
+                onReady={onReady}
+                onDispose={onDispose}
+              />
+            </div>
           </>
         )
       }

@@ -77,9 +77,15 @@ export function NoteHeader({
       /* The same 720 px column as the editor below it (`05-ui-ux.md` §2.5), or the
          title would sit against the pane's left edge while the body was centred
          inside it — a step across the screen that reads as a mistake, not as an
-         indent. What separates them is the space above, not a shift sideways. */
+         indent. What separates them is the space above, not a shift sideways.
+
+         The padding is not here: this sits inside the scroll container now, so it
+         scrolls with the text, and the prototype's `.note-head` carries a margin
+         rather than a padding for the same reason — `margin-bottom: 0 auto 24px`
+         on desktop, `.m-head { margin-bottom: 16px }` on mobile. The gap sits on
+         this element rather than on the date so a note with no date still has one. */
       className={`mx-auto w-full max-w-[var(--editor-measure)] flex-none ${
-        mobile ? 'px-5 pt-4 pb-1' : 'px-8 pt-9 pb-0'
+        mobile ? 'mb-4' : 'mb-6'
       }`}
       data-testid="note-header"
     >
@@ -112,10 +118,7 @@ export function NoteHeader({
            a language and a country does not read well in someone else's. The
            machine's locale is the only honest answer for a local-first app with
            no account and no settings for it. */
-        <p
-          data-testid="note-updated-at"
-          className={`mt-1.5 text-[12px] text-[var(--text-subtle)] ${mobile ? 'mb-1' : 'mb-6'}`}
-        >
+        <p data-testid="note-updated-at" className="mt-1.5 text-[12px] text-[var(--text-subtle)]">
           {new Date(updatedAt).toLocaleString()}
         </p>
       )}
