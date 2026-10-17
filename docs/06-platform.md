@@ -161,7 +161,8 @@ The one permission a release APK *does* carry is `com.chayote.app.DYNAMIC_RECEIV
 
 | Concern | Handling |
 |---------|----------|
-| On-screen keyboard | `adjustResize` in the manifest, **plus `#root` pinned to the visual viewport**, because `adjustResize` alone leaves the layout viewport at full height and the WebView shifts the visible window down. The editor's scroll container and status bar stay reachable. See §4.3. |
+| On-screen keyboard | `adjustResize` in the manifest, **plus `#root` pinned to the visual viewport**, because `adjustResize` alone leaves the layout viewport at full height and the WebView shifts the visible window down. The editor's scroll container stays above the keyboard; the status row does not, deliberately — see the next paragraph. |
+| Status row under the IME | **The keyboard is allowed to cover it.** The app is sized to the *visible* area, so a row in normal flow rides up with the keyboard and appears above it; the row is therefore viewport-fixed on mobile, which puts it back at the bottom of the layout viewport where it was. Word count, save state and folder are not what you are reading while you type, and the text is better off with the 44 px. Desktop keeps the row in flow. |
 | Viewport units | Never size a fixed element with `vh` on Android. Use flex layout and `dvh` where a viewport unit is unavoidable, because the keyboard changes the visible viewport height — and read the *visual* viewport, never `vh` or `100%`, for anything that has to sit above the keyboard. |
 | `done` action | Closes the keyboard rather than inserting a newline |
 | Window resize | Flush the autosave on the `Focus`/`Pause` lifecycle event |
@@ -277,7 +278,14 @@ npm run build                       # must complete with no TS errors
 **Android**
 
 - Cold start on an arm64 device with a current stable System WebView.
-- On-screen keyboard never covers the editor or the status bar.
+- On-screen keyboard never covers the editor's text, the title field or the
+  formatting bar. **It does cover the status row**, by the decision in §4.3 — that
+  line was "or the status bar" here until 2026-10-17, and the user overruled it on
+  the phone twice, once in the M8 session and again after the visual-viewport pin
+  put the row above the keyboard instead of under it.
+- Scrolling a note to its end does not move anything but the text: both scrollers
+  are `overscroll-behavior: contain`, so the gesture stops there rather than
+  chaining to a document that cannot scroll and rubber-banding the page.
 - Back button walks the view stack and exits from the list.
 - Backgrounding during typing loses nothing.
 - Airplane mode changes nothing, because nothing is online.

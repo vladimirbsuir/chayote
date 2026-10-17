@@ -563,9 +563,11 @@ test.describe('mobile touch', { tag: '@touch' }, () => {
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeFocused();
     expect(await caret()).toEqual({ collapsed: true, inside: true });
 
-    /* The wrapper's own left padding, outside the editable element entirely. */
+    /* The scroll container's own left padding, outside the editable element
+       entirely. ADR-023's padding lived on the editor's wrapper; it is on the
+       scrolling column now, so this aims inside it rather than at its edge. */
     await blur();
-    await page.touchscreen.tap(box.x - 20, box.y + box.height / 2);
+    await page.touchscreen.tap(box.x - 10, box.y + box.height / 2);
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeFocused();
     expect(await caret()).toEqual({ collapsed: true, inside: true });
   });
@@ -596,5 +598,84 @@ test.describe('mobile touch', { tag: '@touch' }, () => {
     expect(menuBox.y + menuBox.height, 'menu overflows the viewport').toBeLessThanOrEqual(
       MOBILE.height,
     );
+  });
+});
+
+/* Found on a phone, by the user, straight after ADR-023 and the viewport fix that
+   went with it. Three separate things, one file because they are all about the
+   shape of the scrolling column rather than about any one control. */
+test.describe('mobile scroll shape', () => {
+  test('the title is part of the scrolling text, not a fixture above it', async ({ page }) => {
+    await openEditor(page);
+
+    /* The structural claim first, because it is the one that cannot be satisfied
+       by accident: the title is a *child* of the scroll container. ADR-023 put it
+       beside the container, which is what pinned it — a sibling of a scroller does
+       not move when the scroller moves, so scrolling a long note left the title
+       sitting at the top for ever. `prototype/index.html` has had
+       `.editor-scroll > .note-head + .editor` since it was written. */
+    const nesting = await page.evaluate(() => {
+      const header = document.querySelector('[data-testid="note-header"]');
+      const scroller = document.querySelector('.editor-scroll');
+      return header !== null && scroller !== null && scroller.contains(header);
+    });
+    expect(nesting, 'note-header is inside the scroll container').toBe(true);
+
+    /* And the behaviour, on a viewport short enough that any note scrolls. */
+    await page.setViewportSize({ width: MOBILE.width, height: 200 });
+    const moved = await page.evaluate(() => {
+      const scroller = document.querySelector('.editor-scroll');
+      const header = document.querySelector('[data-testid="note-header"]');
+      if (!(scroller instanceof HTMLElement) || header === null) return null;
+      const before = header.getBoundingClientRect().y;
+      scroller.scrollTop = scroller.scrollHeight;
+      return { before, after: header.getBoundingClientRect().y, scrollTop: scroller.scrollTop };
+    });
+    expect(moved, 'header and scroller found').not.toBeNull();
+    if (moved === null) return;
+    expect(moved.scrollTop, 'the note scrolls at all').toBeGreaterThan(0);
+    expect(moved.before - moved.after, 'the title moved up with the text').toBeGreaterThan(20);
+  });
+
+  test('the status row is pinned to the layout viewport, so the keyboard covers it', async ({
+    page,
+  }) => {
+    await openEditor(page);
+
+    /* The row used to ride up with the keyboard and appear above it, because
+       `#root` is sized to the *visible* area and the row sat at the bottom of the
+       pane in normal flow. Pinned to the layout viewport instead, it stays where it
+       was: the keyboard covers it and the text gets the space. Fixed positioning is
+       what "the layout viewport" means in CSS, and the undo toast already relies on
+       it. Desktop keeps the row in flow — a fixed bar there would leave the pane. */
+    const bar = page.getByTestId('editor-status-bar');
+    expect(await bar.evaluate((el) => getComputedStyle(el).position)).toBe('fixed');
+    expect(await bar.evaluate((el) => getComputedStyle(el).bottom)).not.toBe('auto');
+
+    await page.setViewportSize({ width: 1280, height: 820 });
+    await expect(bar).toBeVisible();
+    expect(await bar.evaluate((el) => getComputedStyle(el).position)).toBe('static');
+  });
+
+  test('scrolling ends at the container instead of chaining to the page', async ({ page }) => {
+    /* At the end of a note the container has nothing left to scroll, so the gesture
+       used to chain to the document — which cannot scroll either — and the WebView
+       rubber-banded the whole page. The user's word for it was a twitch. `contain`
+       ends the chain where the scrolling actually is. Asserted as computed style
+       because the symptom is a gesture the harness cannot produce: `input swipe`
+       left every viewport metric unchanged, so the effect is not reproducible here
+       and the contract is. */
+    await seedSettings(page, { theme: 'light', accent: null, lastSelection: { kind: 'all' } });
+    await page.goto('/');
+    const list = await page
+      .getByTestId('note-list')
+      .evaluate((el) => getComputedStyle(el).overscrollBehaviorY);
+    expect(list, 'note list').toBe('contain');
+
+    await openEditor(page);
+    const editor = await page
+      .locator('.editor-scroll')
+      .evaluate((el) => getComputedStyle(el).overscrollBehaviorY);
+    expect(editor, 'editor scroller').toBe('contain');
   });
 });

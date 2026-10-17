@@ -195,7 +195,7 @@ export function NoteList({
       role="listbox"
       aria-label="Notes"
       data-testid="note-list"
-      className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2"
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {

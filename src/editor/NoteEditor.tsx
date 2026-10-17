@@ -73,22 +73,15 @@ export function NoteEditor({
   return (
     <EditorContent
       editor={editor}
-      className="editor-scroll flex-1 overflow-y-auto px-8 pb-16 pt-10"
+      /* The padding, the scroll container and the click routing that goes with them
+         live on the wrapper `EditorPane` renders around this, which is also where the
+         title sits — the whole note is one scrolling column, title and date included,
+         as `prototype/index.html` §2.5 and `.m-editor` both have it. All that is left
+         here is to fill the height that column hands it: `flex-1` plus the floor on
+         `.note-editor` below, so a tap under short text still lands in the editable
+         element rather than in the container's own padding. */
+      className="flex-1"
       data-testid="note-editor-pane"
-      /* Taps in the wrapper's own padding land outside ProseMirror even with its
-         full-height floor above, and on touch that tap would do nothing — no
-         caret, no keyboard. Route exactly those to the end of the document. Only
-         when the wrapper itself is the target (anything inside the text targets
-         a descendant and keeps ProseMirror's own position mapping), and never
-         mid-selection: releasing a text-selection drag over the padding must not
-         collapse what the user just selected. Scrollbar presses dispatch no
-         click, so they cannot reach this. */
-      onClick={(event) => {
-        if (event.target !== event.currentTarget) return;
-        const selection = window.getSelection();
-        if (selection !== null && !selection.isCollapsed) return;
-        editor?.commands.focus('end');
-      }}
     />
   );
 }

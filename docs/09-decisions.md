@@ -670,7 +670,7 @@ The schema turned out to be ready for this and had been waiting. `notes.title_so
 
 **Decision.** The title is a field of its own, written by `notes_set_title`. A non-empty title is stored as `title_source = 'manual'` and kept verbatim by every later save; an empty one returns the note to `auto`, which hands the title back to derivation � so clearing the field is a way of saying "derive it again", not a way of leaving the note nameless. It is one command rather than a field on `notes_save`, for the reason the pin has one: the autosave judges a write by the serialised document, so a title carried in the save input would be judged unchanged and never written.
 
-The field sits above the text with the last-changed date under it, formatted for the reader's own locale. The title is gone from the status bar and from the mobile bar, because it is in one place now and that place is editable.
+The field sits above the text with the last-changed date under it, formatted for the reader's own locale. **It sits inside the editor's scroll area, not above it** — `05-ui-ux.md` §2.6 and `prototype/index.html`'s `.editor-scroll > .note-head + .editor` both have it that way, and the first implementation put it beside the scroll container instead, which pinned it: a sibling of a scroller does not move when the scroller moves, so scrolling a long note left the title at the top for ever. The user found that on a phone the same day this ADR landed. The title is gone from the status bar and from the mobile bar, because it is in one place now and that place is editable.
 
 **Alternatives rejected.**
 

@@ -489,7 +489,11 @@ body {
 .m-card .m { font-size: 12px; color: var(--text-subtle); margin-top: 6px; }
 .m-card .pin { color: var(--accent); }
 
-.m-editor { flex: 1; overflow-y: auto; padding: 24px 20px 40px; }
+/* 24 / 20 sides / 64, not the 40 the desktop rule has: the mobile status row is
+     viewport-fixed (it has to be, or it rides up with the keyboard), so it overlays
+     the bottom of this column rather than ending it, and the floor has to clear its
+     44 px or the last line of a note sits under it. */
+  .m-editor { flex: 1; overflow-y: auto; padding: 24px 20px 64px; overscroll-behavior: contain; }
 .m-editor .editor h1 { font-size: 24px; }
 .m-editor .editor p, .m-editor .editor ul, .m-editor .editor ol { font-size: 16px; }
 /* ADR-023 on a phone: the title is one step down from the desktop size and sits
