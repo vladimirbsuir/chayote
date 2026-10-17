@@ -275,15 +275,28 @@ Added with the updater, because the gap here is wide and the failure is silent: 
 
 | Checkable automatically | Needs a real signed release |
 |---|---|
-| The tab's states, its copy, its disabled button and its reason, driven through the mock's `?seed=update` / `no-updates` / `offline` (`e2e/updates.spec.ts`) | That `latest.json` is actually published and reachable at the configured URL |
-| `app_info` reports the right version, platform and support flag for the platform it is compiled for (`cargo test`) | That a real artifact's minisign signature verifies against the public key in `tauri.conf.json` |
-| `updates_check` maps an unreachable endpoint to `NETWORK` and keeps the transport error out of the reader-facing message (`cargo test`) | That `requireSignedVersion` accepts the build's own signature and rejects a mismatched one |
-| The three download events keep their names and field spellings, which is what the TypeScript union discriminates on (`cargo test`) | That the download, the install and the restart actually replace a running app |
-| One action at a time; the result line appears only after this tab's own check | That Windows' passive installer and Linux's AppImage swap both complete on a clean machine |
+| The tab's states, its copy, its disabled button and its reason, driven through the mock's `?seed=update` / `no-updates` / `offline` (`e2e/updates.spec.ts`) | That the download, the install and the restart actually replace a running app |
+| `app_info` reports the right version, platform and support flag for the platform it is compiled for (`cargo test`) | That Windows' passive installer and Linux's AppImage swap both complete on a clean machine |
+| `updates_check` maps an unreachable endpoint to `NETWORK` and keeps the transport error out of the reader-facing message (`cargo test`) | |
+| The three download events keep their names and field spellings, which is what the TypeScript union discriminates on (`cargo test`) | |
+| One action at a time; the result line appears only after this tab's own check | |
 
-**The gate that is not automated here is the release itself.** Tagging `v<version>` must match `tauri.conf.json`'s version or `release.yml` fails the run — that is asserted in the workflow, and the workflow's own log is the evidence. Everything past it — a reachable `latest.json`, a verifying signature, a replaced binary — is only observable by tagging a real release and installing from it. **A merged branch has not proved the updater works; it has proved the tab works.** That is the honest state of it, and it is the same shape as the `adjustResize` row in §3.5a: what only a human can check, written down rather than assumed.
+**What a real release settled, on 2026-10-17.** Release `v0.1.0` was published by hand from the Actions tab, and the manifest was then checked against the key compiled into the app by reproducing `minisign-verify`'s own algorithm: BLAKE2b-512 first, because the signature's algorithm field is `ED` and that mode is prehashed, then Ed25519, then the global signature over the signature concatenated with the trusted comment.
 
-`e2e/capture.spec.ts` implements level 2 from M0. It writes to `screenshots/`, which is committed, so a reviewer can compare states between runs by eye. `e2e/search.spec.ts` writes `search-light.png` the same way, because the search field is the one control whose defects are visual only — Chromium's own cancel button and a second focus ring both passed every DOM assertion and were caught by looking.
+| Claim | Result |
+|---|---|
+| `latest.json` is reachable at the configured URL, anonymously | **Yes** - HTTP 200 at `releases/latest/download/latest.json`, a redirect to the release CDN, no token |
+| All three platform keys merge into one manifest | **Yes** - `linux-x86_64` resolves to the AppImage, `windows-x86_64` to the NSIS installer and `darwin-aarch64` to the `.app.tar.gz`, plus the `-deb` / `-nsis` / `-app` variants |
+| Every manifest entry carries a signature | **Yes** - all seven |
+| A real artifact verifies against `plugins.updater.pubkey` | **Yes** - the AppImage (84 MB), the `.deb` and the Windows installer; key id `5e5427fb4837ca00` on both sides |
+| The trusted comment is bound to the signature | **Yes** - an altered comment fails the global check |
+| `requireSignedVersion` accepts it | **Yes** - signed `0.1.0`, announced `0.1.0` |
+| A tampered artifact is refused | **Yes** - one flipped byte in the `.deb` is rejected |
+| A tag disagreeing with `tauri.conf.json` fails the run | **Yes** - the `version` job, checked by running its script against matching and mismatched tags |
+
+**What is still unproved, and cannot be from here:** that the app downloads, installs and relaunches, on either platform. Those need an installed build and a human watching it, the same shape as the `adjustResize` row in §3.5a. Every row above is about the *supply chain*, and together they establish one thing: an update offered to a user is one we signed, and anything else is refused.
+
+**One thing that release caught which nothing in this repository would have.** The release notes rendered `Chayote_${needs.version.outputs.version}_x64-setup.exe` literally, because Actions interpolates `${{ }}` and `${...}` is plain text. No gate asserts the workflow's own rendered output, and a published release is the only place it can show up.
 
 ## 5. Gates per milestone
 
