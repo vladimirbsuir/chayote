@@ -46,7 +46,8 @@ chayote/
 │   │   ├── relativeTime.ts
 │   │   ├── sanitize.ts                # DOMPurify config
 │   │   ├── contrast.ts                # M6: accent contrast measurement for the settings dialog
-│   │   └── theme.ts                   # M6: theme resolution (light/dark/system)
+│   │   ├── theme.ts                   # M6: theme resolution (light/dark/system)
+│   │   └── pinToVisualViewport.ts     # Android IME: pins #root to visualViewport.offsetTop/height
 │   ├── mock/                          # browser fallback backend, never imported by components
 │   │   ├── adapter.ts                 # implements every command in 02-architecture.md §7
 │   │   ├── derive.ts                  # title, excerpt, word_count over JsonDoc

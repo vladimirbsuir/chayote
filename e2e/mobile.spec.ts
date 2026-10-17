@@ -37,6 +37,67 @@ test.describe('mobile editor', () => {
     await expect(page.getByTestId('save-state')).toBeVisible();
   });
 
+  test('puts the back control at the left edge and the menu at the right', async ({ page }) => {
+    /* ADR-023 removed the title from the editor bar, and with it the `flex-1` that
+       used to hold the two controls apart — so the "three dots" ended up next to
+       the back arrow instead of at the right edge. Found on a device, because
+       nothing here asserted *where* in the bar a control sits: the assertions above
+       check that a control exists and that the title is gone, and both were true
+       with the menu in the wrong place. Positions are the whole claim. */
+    await openEditor(page);
+
+    const back = await page.getByRole('button', { name: 'Back to list' }).boundingBox();
+    const menu = await page.getByRole('button', { name: 'More' }).boundingBox();
+    expect(back).not.toBeNull();
+    expect(menu).not.toBeNull();
+    if (back === null || menu === null) return;
+
+    expect(back.x).toBeLessThan(24);
+    /* Right-aligned against the bar's own padding, the way it was before. */
+    expect(menu.x + menu.width).toBeGreaterThan(MOBILE.width - 24);
+    expect(menu.x).toBeGreaterThan(back.x + back.width);
+  });
+
+  test('the app is placed against the visible area, so the page cannot scroll', async ({
+    page,
+  }) => {
+    /* The other half of the same device session. With the keyboard up the WebView
+       did not shrink the layout viewport — `innerHeight` stayed 820 while the
+       visible area fell to 525 — so it pinned the visible window 295 px down and
+       the whole editor header sat above the fold with no way back. A drag moved the
+       window rather than the text.
+
+       `visualViewport` cannot be resized from here, so what this pins is the
+       wiring: the app is `position: fixed` against the visual viewport's top and
+       height, and the document itself has nothing to scroll. The keyboard half is
+       device-verified and recorded in `11-verification.md` §3.5b; this is what
+       stops it being undone by an unrelated edit. */
+    await openEditor(page);
+
+    const placement = await page.evaluate(() => {
+      const root = document.getElementById('root');
+      if (root === null) throw new Error('no root');
+      const style = getComputedStyle(root);
+      const scroller = document.scrollingElement;
+      return {
+        position: style.position,
+        top: style.top,
+        height: style.height,
+        innerHeight: window.innerHeight,
+        viewportHeight: Math.round(window.visualViewport?.height ?? window.innerHeight),
+        scrollable: scroller !== null && scroller.scrollHeight > scroller.clientHeight + 1,
+      };
+    });
+
+    expect(placement.position).toBe('fixed');
+    /* With the keyboard closed the two viewports agree, so this is the identity
+       the fix has to reduce to everywhere else. */
+    expect(placement.top).toBe('0px');
+    expect(placement.viewportHeight).toBe(placement.innerHeight);
+    expect(placement.height).toBe(`${placement.viewportHeight}px`);
+    expect(placement.scrollable).toBe(false);
+  });
+
   test('the tag editor opens centred, not hugging the screen edge', async ({ page }) => {
     /* Found on a phone: the tag popover parked at the right edge with a sliver
        of margin. Anchor-relative placement of a 260 px panel has nothing worth

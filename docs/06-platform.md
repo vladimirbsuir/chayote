@@ -128,6 +128,12 @@ guarantee now holds by default rather than by manifest.
 
 `android:windowSoftInputMode="adjustResize"` is **required**, not optional: without it the on-screen keyboard covers the editor and the app is unusable. `android init` does not add it; it is set in `app/src/main/AndroidManifest.xml`.
 
+It is also **not sufficient, which was measured on the device and not believed for
+years.** With the attribute set and the keyboard open, `window.innerHeight` does not
+change: the layout viewport keeps its full height while the *visual* viewport shrinks
+and moves down (`visualViewport.height` 820 → 525, `offsetTop` up to 295). `adjustResize`
+resizes something the web layer does not read. §4.3 says what is done about it.
+
 **`INTERNET` is declared in `app/src/main/AndroidManifest.xml` since the sync
 phase**, alongside the debug manifest's copy. The generator adds it to the
 debug manifest unconditionally because `tauri android dev` serves the WebView
@@ -155,8 +161,8 @@ The one permission a release APK *does* carry is `com.chayote.app.DYNAMIC_RECEIV
 
 | Concern | Handling |
 |---------|----------|
-| On-screen keyboard | `adjustResize`; the WebView viewport shrinks. The editor's scroll container and status bar stay reachable. |
-| Viewport units | Never size a fixed element with `vh` on Android. Use flex layout and `dvh` where a viewport unit is unavoidable, because the keyboard changes the visible viewport height. |
+| On-screen keyboard | `adjustResize` in the manifest, **plus `#root` pinned to the visual viewport**, because `adjustResize` alone leaves the layout viewport at full height and the WebView shifts the visible window down. The editor's scroll container and status bar stay reachable. See §4.3. |
+| Viewport units | Never size a fixed element with `vh` on Android. Use flex layout and `dvh` where a viewport unit is unavoidable, because the keyboard changes the visible viewport height — and read the *visual* viewport, never `vh` or `100%`, for anything that has to sit above the keyboard. |
 | `done` action | Closes the keyboard rather than inserting a newline |
 | Window resize | Flush the autosave on the `Focus`/`Pause` lifecycle event |
 | Hardware keyboard | `Ctrl/Cmd` shortcuts from §7 of `05-ui-ux.md` are active |
@@ -165,16 +171,26 @@ The one permission a release APK *does* carry is `com.chayote.app.DYNAMIC_RECEIV
 generated `MainActivity` calls `enableEdgeToEdge()`, so the WebView fills the window
 and the app draws under the status bar and the navigation bar. Measured on a device:
 the mobile top bar sat under the clock and battery with the hamburger clipped at the
-edge, and the editor status bar sat behind the three-button navigation bar — which is
-also why it disappeared entirely while the keyboard was open, contradicting the first
-row of this table.
+edge, and the editor status bar sat behind the three-button navigation bar.
+
+The keyboard hid the status row for a **different** reason than the insets did, and
+the two were conflated here for a long time. Insets are a padding problem: the row was
+drawn too low. The keyboard is a viewport problem: the row was drawn in the right place
+relative to the *document*, and the document itself was taller than the window with its
+top cut off — the user could drag, the drag moved the window, and `scrollTop` never
+left 0. No inset token reaches that.
 
 The fix is `viewport-fit=cover` in `index.html` plus `env(safe-area-inset-*)` padding
-on `#root` in `base.css`, via the `--inset-top` / `--inset-bottom` tokens.
-`viewport-fit=cover` is load-bearing and not decoration: without it both `env()`
-values are `0` on Android and the rule silently does nothing. A desktop browser also
-reports `0`, so the rule is inert there. ADR-020 records why this is CSS and not a
-`WindowInsetsCompat` listener in the generated Kotlin.
+on `#root` in `base.css`, via the `--inset-top` / `--inset-bottom` tokens, and —
+for the keyboard — `src/lib/pinToVisualViewport.ts`, which writes
+`--app-viewport-top` and `--app-viewport-height` from
+`visualViewport.offsetTop` / `.height` on `resize` and `scroll`, with `#root`
+`position: fixed` at those values. `base.css` falls back to `inset: 0` wherever the
+two viewports agree, so the app is laid out exactly as before in every case where the
+keyboard is closed. `viewport-fit=cover` is load-bearing and not decoration: without it
+both `env()` values are `0` on Android and the rule silently does nothing. A desktop
+browser also reports `0`, so the rule is inert there. ADR-020 records why insets are CSS
+and not a `WindowInsetsCompat` listener in the generated Kotlin.
 
 ### 4.4 Back navigation
 

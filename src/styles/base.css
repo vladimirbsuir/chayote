@@ -56,6 +56,25 @@ body,
   height: 100%;
 }
 
+/* The app is positioned and sized against the *visual* viewport, not the layout
+   one, so the on-screen keyboard cannot leave half of it off the screen.
+   `src/lib/pinToVisualViewport.ts` writes the two variables on every visual-viewport
+   `resize` and `scroll`; where the two viewports agree — every desktop, and any
+   phone with the keyboard closed — this is `inset: 0`, which is what it was before.
+
+   The measurements and the device this came from are in that file's comment. The
+   short version: the IME left `window.innerHeight` at 820 while the visible area
+   fell to 525, so the browser pinned the visible window 295 px down and the editor
+   header went above the fold with no way to scroll back to it. */
+#root {
+  position: fixed;
+  left: 0;
+  right: 0;
+  width: 100%;
+  top: var(--app-viewport-top, 0px);
+  height: var(--app-viewport-height, 100%);
+}
+
 /* `06-platform.md` §4.3 and §4.4: the window is drawn edge to edge, so the app
    must keep its own content clear of the system status bar and navigation bar.
 
