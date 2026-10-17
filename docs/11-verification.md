@@ -128,7 +128,7 @@ The distinction matters because "it builds" reads like "it works", and on Androi
 
 | Checkable without a device | Needs a device or emulator |
 |---|---|
-| ~~`tauri android init` scaffolds the Gradle project~~ **done at M7** | `adjustResize`: the on-screen keyboard must never cover the editor or the status bar (`06-platform.md` §4.3). **Observed on device at M7 — the viewport shrinks and the editor is never covered, portrait and landscape** |
+| ~~`tauri android init` scaffolds the Gradle project~~ **done at M7** | `adjustResize`: the on-screen keyboard must never cover the editor or the status bar (`06-platform.md` §4.3). **Present and declared, and measurably not enough.** M7 recorded "the viewport shrinks and the editor is never covered" from a screenshot; the M7 reading was wrong, and the user found the consequence on the phone. `window.innerHeight` does not change when the IME opens — the layout viewport keeps 820 while `visualViewport.height` falls to 525 and `offsetTop` moves down (§3.5b), so `adjustResize` is doing nothing the web layer can rely on and the header left the screen. Requirement now met by pinning `#root` to the visual viewport, verified on device; `adjustResize` stays in the manifest as the declared intent |
 | ~~Both Rust ABIs cross-compile and link~~ **done at M7** | ~~The **real** SQLite backend running on device: migrations, FTS5, WAL on the device filesystem~~ **done at M7** — `chayote.db` + `-wal` + `-shm` on the device filesystem, FTS5 search with `bm25` and `snippet()` returning marked results, and the row surviving a `force-stop` |
 | ~~APK size against the 20 MB budget~~ **done at M7 — 14.65 MiB** | ~~The back button walking the view stack~~ **confirmed broken at M7**, and §4.4's prescribed mechanism does not exist in Tauri 2.12. See `06-platform.md` §4.4; needs an ADR |
 | ~~The manifest requests no `INTERNET` permission~~ **done at M7** | `Pause`/`Resume` flushing the autosave (§4.5). **Observed on device at M7** — typing inside the debounce and backgrounding lost nothing |
@@ -216,6 +216,14 @@ things it settled in the ADR-023 session that four screenshots had not:
   about flex and `min-h-0` reproduces that: a `setViewportSize` harness shrinks the layout
   viewport instead, which is a different failure with a different fix, and a change written
   against it would have been a fix for nothing.
+  **This was measured twice and fixed the second time as an own-report.** The user found it
+  on the phone after the title field shipped: `document.scrollingElement.scrollTop` was 0
+  throughout, which says the page was not scrolling — the viewport was — and no overflow or
+  `min-h-0` rule of ours can touch it. The app is now sized and positioned against the
+  visual viewport instead (`src/lib/pinToVisualViewport.ts`, `resize` + `scroll`). The
+  measurement that closes it is the same call that opened the question:
+  `visualViewport.offsetTop` back to 0, `scrollTop` 0 after a swipe each way,
+  `scrollingElement.scrollHeight <= clientHeight`.
 
 Coordinates still have to be measured per tap, and **the rect has to be taken in the same
 state you will tap in**: with the IME open, `getBoundingClientRect()` is in layout
@@ -236,6 +244,13 @@ What the gear session taught, beyond §3.5a:
 - Screenshot after *every* tap and read it before the next one. Blind taps deleted a folder in M8 and missed a menu item here (two taps dismissed the editor overflow instead of pressing Move to trash — suspect a small vertical offset; `keyevent 4` closed the same dialog with no coordinates at all).
 - For an on-device check of a frontend change, build debug, not release: `npx tauri android build --apk --debug --target aarch64` is minutes (cached Rust deps, one ABI — enough for this phone), while the full release is ~25. The installed app is already a debug build under the same machine debug key, so `install -r` updates it with data intact. A release APK is unsigned and not installable as-is.
 - Device state is test data until told otherwise: creating notes, trashing them, and changing settings during verification is expected — but say what was left behind (here: one extra empty Untitled note, trash flow unretouched).
+
+What the IME session taught, beyond §3.5a:
+
+- **"The UI scrolls when the keyboard opens" is a diagnosis, not an observation.** It read as overflow and would have been fixed as overflow. One call separates the two: with `document.scrollingElement.scrollTop` at 0 the document never scrolled, so the thing under the finger was the *window*, and every rule anyone would reach for — `overflow`, `min-h-0`, `height: 100%` — acts on the document and cannot reach it. The user's phrasing was right about the symptom and wrong about the cause, which is the normal case.
+- **A screenshot cannot distinguish "moved out of view" from "not rendered."** Both look like an absent header. `getBoundingClientRect()` of the element tells them apart in one call, and a CSS transform on `#root` reproduces the device's behaviour in Chromium closely enough to be useful.
+- **`offsetTop` is the number to watch, not `innerHeight`.** It is what the WebView moves the visible window by, it is what makes taps land off, and 0 is the closed condition for the IME case.
+- **Removing an element that was only holding space is a layout change with no error.** The mobile bar's `flex-1` was the whole reason the two controls sat at opposite edges; deleting the title deleted it, and the menu moved to the middle of the bar in front of everyone. Tests that assert a control exists and a title is gone both pass while the bar is visibly wrong. Assert positions, not presence — `e2e/mobile.spec.ts` compares the back button's and the menu's `x` against the bar's own edges.
 
 **The session loop is install → exercise → screenshot → review → fix, and it applies to every change, not just device work.** A change is not done when the tests pass: install the build on the phone, perform the actions the change touches, screenshot each state, look at the shots, and change the code if they show anything wrong. Screenshots nobody reviewed are decoration. This is a standing requirement, repeated in §7 so no session needs to be reminded of it.
 
