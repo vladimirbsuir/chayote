@@ -35,16 +35,27 @@ const MENU_ESTIMATED_HEIGHT = 120;
 /** One open row menu for the whole list, held here rather than in the cards:
     per-card state lets two holds open two menus at once — found on a phone, where
     long-pressing a second row left the first menu up. The folder tree holds its
-    single menu the same way. Keyed by id, timestamp and available actions, so a
-    re-sorting list cannot leave one open over the wrong note. */
+    single menu the same way. Keyed by the note's id and the actions on offer, so a
+    re-sorting list cannot leave one open over the wrong note.
+
+    Deliberately **not** keyed by `updatedAt`. The timestamp moves on every write, so
+    keying on it made *any* write close an open menu — including the very write the
+    menu triggers, and including a background write that had nothing to do with the
+    menu. That is not theoretical: on CI a menu opened by a hold on a freshly pinned
+    row vanished between the hold and the read that followed, because the pin's own
+    response arrived after the key was taken (one flaky touch test, and a menu a
+    person can watch disappear under their finger).
+
+    Choosing an item closes the menu itself (`NoteRowMenu`), and a note leaving the
+    list stops matching by id — which is the guarantee this key exists for. */
 type MenuState = {
   id: string;
   key: string;
   placement: { top: number; left: number };
 };
 
-function menuKey(note: NoteRow, hasRowActions: boolean): string {
-  return `${note.id}:${note.updatedAt}:${String(hasRowActions)}`;
+function menuKey(hasRowActions: boolean): string {
+  return String(hasRowActions);
 }
 
 type NoteListProps = {
@@ -119,7 +130,7 @@ export function NoteList({
         rect.top > MENU_ESTIMATED_HEIGHT;
       setMenu({
         id,
-        key: menuKey(note, hasRowActions),
+        key: menuKey(hasRowActions),
         placement: {
           /* Clamped so the estimate always lands inside the viewport. Moving
              the top above the row does not move the box's bottom edge with it —
@@ -142,15 +153,13 @@ export function NoteList({
     setMenu(null);
   }, []);
 
-  /* Valid only while its note is still what it was: a pin, delete or restore
-     re-sorts the list under the menu, and the key stops matching rather than
+  /* Valid only while its note is still in the list and offering the same actions.
+     A pin, delete or restore re-sorts the list under the menu; the id lookup drops
+     a note that has left it, and the key drops a change of actions, rather than
      needing an effect to close it. */
-  const menuNote =
-    menu === null ? undefined : notes.find((candidate) => candidate.id === menu.id);
+  const menuNote = menu === null ? undefined : notes.find((candidate) => candidate.id === menu.id);
   const validMenu =
-    menu !== null &&
-    menuNote !== undefined &&
-    menu.key === menuKey(menuNote, hasRowActions)
+    menu !== null && menuNote !== undefined && menu.key === menuKey(hasRowActions)
       ? { note: menuNote, placement: menu.placement }
       : null;
 
@@ -175,12 +184,7 @@ export function NoteList({
   if (notes.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-start justify-center px-4 pt-8">
-        <EmptyState
-          title={empty.title}
-          body={empty.body}
-          icon={empty.icon}
-          action={empty.action}
-        />
+        <EmptyState title={empty.title} body={empty.body} icon={empty.icon} action={empty.action} />
       </div>
     );
   }

@@ -35,6 +35,39 @@ async function open(page: Page): Promise<void> {
   await seed(page);
   await page.goto('/');
   await expect(page.getByTestId('app-shell')).toBeVisible();
+  /* The editor is code-split and autofocuses the caret when it mounts. If the
+     chunk lands mid-test it takes focus off a sidebar input and every later
+     keypress goes to the editor instead — while the input's blur handler
+     commits (empty cancels) and unmounts it, so the test then fails waiting
+     for a node that lived one frame. The resize test below already waits this
+     way; waiting here removes the race for every sidebar test at once rather
+     than papering over it per test. See the `pressSequentially` flakes of
+     CI shard 2 (detached nodes, dialogs surviving `Escape`, tags never
+     appearing): same steal, different symptoms. Below 768 px the editor is a
+     pushed view rather than mounted next to the list, so there is nothing to
+     wait for — opening a note mounts it, which self-synchronises. */
+  const viewportWidth = page.viewportSize()?.width ?? 1280;
+  if (viewportWidth >= 768) {
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
+  }
+}
+
+/* Inline inputs are controlled: every keystroke re-renders the parent, and on a
+   loaded CI runner (two Playwright workers sharing one box) `locator.fill` /
+   `locator.pressSequentially` can hold a node that React swaps mid-action and
+   retry to the 30 s timeout ("element was detached from the DOM"). Keystrokes
+   via `page.keyboard` land on whatever holds focus — which the mount effect's
+   `focus()` + `select()` guarantees — so a swapped node costs a character at
+   worst rather than the whole string. The small per-key delay lets React commit
+   each keystroke instead of batching them under contention. Never click the
+   input here: it is already focused, and a click would drop the mount-effect
+   selection that makes typing replace on rename. */
+async function typeIntoInlineInput(page: Page, testId: string, text: string): Promise<void> {
+  const input = page.getByTestId(testId);
+  await expect(input).toBeVisible();
+  await expect(input).toBeFocused();
+  await page.keyboard.type(text, { delay: 10 });
+  await expect(input).toHaveValue(text);
 }
 
 test.describe('desktop two-pane layout', () => {
@@ -463,10 +496,11 @@ test.describe('folder organisation', () => {
     await page.getByRole('button', { name: 'New folder' }).click();
     const input = page.getByTestId('folder-name-input');
     await expect(input).toBeFocused();
-    /* Typed, not filled, and committed from the keyboard: `fill`/`press` hold
-       an element handle across React re-renders, and a node swapped mid-action
-       retries until the timeout — keystrokes land on whatever holds focus. */
-    await input.pressSequentially('Research');
+    /* Typed, not filled, and committed from the keyboard: `fill`/`press` and
+       `pressSequentially` hold an element handle across React re-renders, and a
+       node swapped mid-action retries until the timeout — keystrokes land on
+       whatever holds focus. */
+    await typeIntoInlineInput(page, 'folder-name-input', 'Research');
     await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('folder-row')).toHaveCount(before + 1);
@@ -479,7 +513,7 @@ test.describe('folder organisation', () => {
     const before = await page.getByTestId('folder-row').count();
 
     await page.getByRole('button', { name: 'New folder' }).click();
-    await page.getByTestId('folder-name-input').pressSequentially('Discarded');
+    await typeIntoInlineInput(page, 'folder-name-input', 'Discarded');
     await page.keyboard.press('Escape');
 
     await expect(page.getByTestId('folder-name-input')).toHaveCount(0);
@@ -494,8 +528,8 @@ test.describe('folder organisation', () => {
 
     const input = page.getByTestId('folder-name-input');
     await expect(input).toHaveValue('Work');
-    await input.fill('Day job');
-    await input.press('Enter');
+    await typeIntoInlineInput(page, 'folder-name-input', 'Day job');
+    await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('folder-row').filter({ hasText: 'Day job' })).toBeVisible();
     await expect(page.getByTestId('folder-row').filter({ hasText: 'Work' })).toHaveCount(0);
@@ -554,7 +588,14 @@ test.describe('folder organisation', () => {
     await page.getByTestId('folder-menu-delete').click();
     await expect(page.getByRole('dialog')).toBeVisible();
 
-    await page.keyboard.press('Escape');
+    /* Escape is handled by the dialog's focus trap, so it has to land inside
+       the panel: a global `keyboard.press` right after open can arrive before
+       the trap moves focus in (one loaded-CI flake), and the dialog never
+       closes. Pressing from the focused Cancel is the same keystroke the user
+       makes. */
+    const cancel = page.getByRole('button', { name: 'Cancel' });
+    await expect(cancel).toBeFocused();
+    await cancel.press('Escape');
 
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(work).toBeFocused();
@@ -708,13 +749,16 @@ test.describe('tag management', () => {
     await open(page);
 
     await page.getByRole('button', { name: 'New tag' }).click();
-    await page.getByTestId('tag-name-input').pressSequentially('e2e-extra');
+    await typeIntoInlineInput(page, 'tag-name-input', 'e2e-extra');
     await page.keyboard.press('Enter');
 
     /* Visible immediately, at a zero count — the hiding rule this replaces made
-       exactly this flow look broken. */
+       exactly this flow look broken. The input closing proves the Enter landed
+       (on a loaded runner focus can lag and the keystroke goes nowhere); the
+       row then arrives on the tag-query refetch, which gets its own budget. */
+    await expect(page.getByTestId('tag-name-input')).toHaveCount(0);
     const row = page.getByTestId('tag-row').filter({ hasText: 'e2e-extra' });
-    await expect(row).toBeVisible();
+    await expect(row).toBeVisible({ timeout: 10_000 });
     await expect(row).toContainText('0');
   });
 
@@ -727,7 +771,7 @@ test.describe('tag management', () => {
 
     /* The rename input mounts with its contents selected, so typing replaces.
        Keystrokes, not handles: see the folder create test. */
-    await page.getByTestId('tag-name-input').pressSequentially('e2e-renamed');
+    await typeIntoInlineInput(page, 'tag-name-input', 'e2e-renamed');
     await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('tag-row').filter({ hasText: 'e2e-renamed' })).toBeVisible();
@@ -942,8 +986,8 @@ test.describe('folder organisation', () => {
 
     const input = page.getByTestId('folder-name-input');
     await expect(input).toHaveAttribute('aria-label', 'New folder inside Work');
-    await input.fill('Clients');
-    await input.press('Enter');
+    await typeIntoInlineInput(page, 'folder-name-input', 'Clients');
+    await page.keyboard.press('Enter');
 
     const nested = page.getByTestId('folder-row').filter({ hasText: 'Clients' });
     await expect(nested).toBeVisible();
@@ -963,8 +1007,7 @@ test.describe('folder organisation', () => {
     await expect(page.getByTestId('folder-menu-create')).toBeVisible();
     await page.getByTestId('folder-menu-create').click();
 
-    const input = page.getByTestId('folder-name-input');
-    await input.pressSequentially('Clients');
+    await typeIntoInlineInput(page, 'folder-name-input', 'Clients');
     await page.keyboard.press('Enter');
 
     await expect(page.getByTestId('folder-row').filter({ hasText: 'Clients' })).toHaveAttribute(

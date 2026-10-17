@@ -197,6 +197,32 @@ describe('note row actions', () => {
     expect(document.activeElement).toBe(screen.getByTestId('note-card'));
   });
 
+  it('keeps the menu open when a write moves the note under it', () => {
+    /* Found as one flaky CI test: the menu was keyed by `updatedAt`, so the pin
+       write the menu itself triggered arrived after the key was taken and the
+       menu vanished between the hold and the read that followed. A menu a person
+       can watch disappear under their finger is the defect; the timestamp was
+       never what the key was for. */
+    const { rerender } = render(<List onPin={noop} onDelete={noop} />);
+    openMenuFor('n-1');
+
+    rerender(<List notes={[note({ updatedAt: NOW })]} onPin={noop} onDelete={noop} />);
+
+    expect(screen.queryByTestId('note-menu')).not.toBeNull();
+  });
+
+  it('drops the menu when its note leaves the list, which is what the id is for', () => {
+    /* The other half of the same guard: a note removed from under an open menu —
+       a soft delete, a permanent delete, a restore — must not leave the menu up
+       over whatever takes its place. The id lookup is what covers it. */
+    const { rerender } = render(<List onPin={noop} onDelete={noop} />);
+    openMenuFor('n-1');
+
+    rerender(<List notes={[note({ id: 'n-2' })]} onPin={noop} onDelete={noop} />);
+
+    expect(screen.queryByTestId('note-menu')).toBeNull();
+  });
+
   it('moves between items with the arrow keys', () => {
     render(<List onRestore={noop} onDestroy={noop} />);
     openMenuFor('n-1');
@@ -211,24 +237,6 @@ describe('note row actions', () => {
     openMenuFor('n-1');
 
     fireEvent.click(document.body);
-
-    expect(screen.queryByTestId('note-menu')).toBeNull();
-  });
-
-  it('closes by itself when the note changes, so its actions cannot hit the wrong row', () => {
-    const { rerender } = render(<List onDelete={noop} />);
-    openMenuFor('n-1');
-    expect(screen.getByTestId('note-menu')).toBeDefined();
-
-    /* A delete re-sorts the list, and the card at this position may now be a
-       different note. The menu is keyed by the note's id and timestamp, so it simply
-       stops matching rather than needing an effect to close it. */
-    rerender(
-      <List
-        notes={[note({ id: 'n-1', title: 'Meeting notes', updatedAt: NOW - 10 })]}
-        onDelete={noop}
-      />,
-    );
 
     expect(screen.queryByTestId('note-menu')).toBeNull();
   });

@@ -26,6 +26,10 @@ export type DialogFocus = {
 export function useDialogFocus(onCancel: () => void): DialogFocus {
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<Element | null>(null);
+  const cancelRef = useRef(onCancel);
+  useEffect(() => {
+    cancelRef.current = onCancel;
+  });
 
   /* Capture the trigger before the dialog renders, because opening a modal moves
      focus and the element that had it is the only way back. */
@@ -41,6 +45,25 @@ export function useDialogFocus(onCancel: () => void): DialogFocus {
     },
     [],
   );
+
+  /* `Esc` while focus is still outside the panel — the trap's `onKeyDown` only
+     fires for keystrokes inside it, so an `Escape` pressed in the frame between
+     open and focus-in would otherwise do nothing (one CI flake). Bubble-phase,
+     so the panel's own handler runs first: if it already claimed the keystroke
+     (`preventDefault`), this skips. Targets inside the panel are left to the
+     trap, which owns `Tab` and picker-nested `Escape` handling. */
+  useEffect(() => {
+    const onDocumentKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (panelRef.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+      cancelRef.current();
+    };
+    document.addEventListener('keydown', onDocumentKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onDocumentKeyDown);
+    };
+  }, []);
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>): void => {
