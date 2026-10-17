@@ -116,8 +116,8 @@ Column-by-column rationale:
 
 | Column | Why it exists |
 |--------|----------------|
-| `title` | **Derived.** Search and list rendering need it without walking every document. Recomputed on every write (**rule R9**). |
-| `title_source` | Records whether the user typed a title. `auto` means the title will be overwritten by derivation on the next save, so the UI must not let the user type into it. |
+| `title` | Search and list rendering need it without walking every document. Recomputed on every write when `title_source` is `auto` (**rule R9**); carried by the row when it is `manual` (ADR-023). |
+| `title_source` | Which of the two the current `title` is. `auto` means derivation owns it and the next save will recompute it, so the UI must not let the user type into it; `manual` means the user typed one and derivation must leave it alone. |
 | `doc_json` | The source of truth. The only authored content field. |
 | `plain_text` | Derived. Search index input and previews. Never read back into the editor. |
 | `excerpt` | Derived, first ~200 characters of `plain_text`, used by the note list and Android list. Avoids loading whole documents to render a list. |
@@ -128,12 +128,24 @@ Column-by-column rationale:
 
 **Deliberately absent:** `position` (no manual note order in v1), `is_favorite` (folded into `is_pinned`), `html`, `markdown`, `tags` (as text), `attachments`. Tags live in a join table; content has exactly one serialised form.
 
-**Migration count.** There are five migrations. `title_source` ships
+**Migration count.** There are six migrations. `title_source` ships
 inside `0001_initial.sql` with the rest of the table; the earlier draft of this
 document listed a separate `0004_note_title_source.sql`, which would have been a
 no-op `ALTER TABLE ADD COLUMN` against the schema above. The real fourth is
-`0004_sync.sql` — the sync `conflicts` and `sync_state` tables — and the fifth
-is `0005_sync_backoff.sql`, the outbox retry column.
+`0004_sync.sql` — the sync `conflicts` and `sync_state` tables — the fifth
+is `0005_sync_backoff.sql`, the outbox retry column, and the sixth is
+`0006_note_title_field.sql`.
+
+**`0006` has no DDL and carries a data pass instead** (ADR-023). The columns it needs
+have existed since `0001`, which is why it exists at all: notes written before the title
+became a field have their title as the document's leading H1, and both cannot keep
+claiming the same words. The pass moves that heading into `title` with
+`title_source = 'manual'`, recomputes `plain_text` / `excerpt` / `word_count` from the
+stripped document, and appends an outbox row so the change reaches other devices. It does
+not touch `updated_at` — a migration is not an edit — and a note that was only a title is
+left holding one empty paragraph, because ProseMirror has no content model without a
+block. The pass runs in Rust inside the migration's own transaction, since `plain_text`
+is a recursive walk that SQL cannot express (§4.2).
 
 ### 3.4 `tags`
 
@@ -321,11 +333,18 @@ Computed in Rust inside the save transaction (**rule R9**). None of these are ev
 ### 4.1 Title
 
 ```
-if title_source = 'manual'  -> keep title as-is
+if title_source = 'manual'  -> keep title as-is          (ADR-023: the user typed it)
 else if title_source = 'first_heading' -> title = text of the first heading in the doc
 else -> title = text of the first non-empty block, truncated to 120 chars
    -> if the result is empty: "Untitled"
 ```
+
+A typed title is trimmed and given the same 120-character cap as a derived one, then
+stored as `manual`. **`save` reads the stored `title` as well as `title_source`**, because
+the `manual` branch has no document to read and would otherwise blank the title on the
+next keystroke in the body — the one thing a field that looks saved and is not would do.
+Clearing the field writes `title_source = 'auto'` and re-derives, which is why the `manual`
+branch is reachable from the UI at all rather than only through a migration.
 
 ### 4.2 Plain text
 

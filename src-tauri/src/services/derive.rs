@@ -86,10 +86,11 @@ fn walk(node: &Value, out: &mut String) {
 
 /// `03-data-model.md` §4.1.
 ///
-/// There is no title input in v1 (`04-editor.md` §7): the title is the first
-/// heading, else the first non-empty block, truncated on a word boundary.
-/// `title_source = 'manual'` exists for sync, where a remote device may carry
-/// a typed title, and keeps whatever it is given.
+/// A `manual` title is the one value in this module that is not derived from the
+/// document, because the user typed it (ADR-023). `title` therefore returns
+/// nothing for it — it has no document to read — and the caller keeps the stored
+/// value instead. Every other title is the first heading, else the first
+/// non-empty block, truncated on a word boundary.
 pub fn title(doc: &Value, title_source: &str) -> String {
     if title_source == "manual" {
         return String::new();
@@ -134,6 +135,27 @@ fn truncate_on_word(text: &str, max: usize) -> String {
         Some(index) if index > 0 => clipped[..index].to_owned(),
         _ => clipped,
     }
+}
+
+/// The same 120-character cap a derived title gets, applied to a typed one
+/// (ADR-023). A list row and a search result are built for a title this size, so
+/// a field that ignored the cap would put a paragraph where a line belongs.
+pub fn truncate_title(text: &str) -> String {
+    truncate_on_word(text, MAX_TITLE)
+}
+
+/// The text of the document's first block, when that block is a heading.
+///
+/// Only `0006_note_title_field.sql` asks this: it moves a leading heading into
+/// the note's title field and off the first line of the body (ADR-023), and it has
+/// to read the heading before removing it. Keeping the question here rather than in
+/// the migration means one place decides what "a heading" is.
+pub fn leading_heading_text(doc: &Value) -> Option<String> {
+    let first = doc.get("content")?.as_array()?.first()?;
+    if first.get("type").and_then(Value::as_str) != Some("heading") {
+        return None;
+    }
+    Some(block_text(first).trim().to_owned())
 }
 
 /// `03-data-model.md` §4.3: collapsed to single spaces, truncated at 200

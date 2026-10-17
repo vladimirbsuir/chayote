@@ -181,9 +181,11 @@ Reason: a device that has been offline across a release must be able to catch up
 
 ### R9 — Everything derived is derived, never authoritative
 
-`title` and `plain_text` are recomputed from the document on every write. Nothing in the UI is allowed to write them directly. They may be cached for search, but the document is authoritative.
+`plain_text` is recomputed from the document on every write, and nothing in the UI is allowed to write it directly. It may be cached for search, but the document is authoritative.
 
-Reason: a remote device must be able to reproduce every derived value, or two devices will disagree permanently.
+**`title` is the one exception, and it is a narrow one (ADR-023).** It is recomputed the same way whenever `title_source` is `auto`; when the user has typed one it is `manual` and is carried by the row and synced like any other field. The document is still authoritative for everything the title describes — the body is not a fallback for a title the user set, and clearing the field returns the note to derivation.
+
+Reason: a remote device must be able to reproduce every derived value, or two devices will disagree permanently. A typed title is not a derived value, which is why it is carried rather than recomputed — the rule underneath R9 is reachability, and a carried field satisfies it.
 
 ## 7. IPC surface
 
@@ -197,6 +199,7 @@ Tauri commands exposed to the frontend. This is the complete API for v1; adding 
 | `notes_save` | `SaveNoteInput { id, doc, folder_id, tag_ids, is_pinned }` | `Note` |
 | `notes_move` | `{ id, folder_id }` | `Note` |
 | `notes_set_pinned` | `{ id, is_pinned }` | `Note` |
+| `notes_set_title` | `{ id, title }` | `Note` |
 | `notes_soft_delete` | `note_id` | `()` |
 | `notes_restore` | `note_id` | `()` |
 | `notes_destroy` | `note_id` | `()` |
@@ -252,6 +255,18 @@ survive the next keystroke.
 sorts above everything in every selection, so pinning one is a change to where it
 appears rather than to what it contains. A note pinned six months ago comes to the
 top when it is pinned now, not back to its old position.
+
+**`notes_set_title`.** Added at ADR-023, and for the same reason as the pin above. The
+autosave judges a write by the serialised document (`04-editor.md` §5.1), so a title
+carried in `SaveNoteInput` would be compared against an unchanged document and skipped —
+the field would move on screen and never reach the database. Its own command is also
+what keeps a document off the write path: the title is metadata, and rewriting every
+note's derived columns on every keystroke of a heading is a cost the title does not
+impose on anything else.
+
+Empty is not a note with no name. It returns the note to `title_source = 'auto'`, which
+hands the title back to derivation — so clearing the field is how a user asks for the old
+behaviour, with no setting to explain.
 
 **Deletes.** `folders_delete` and `tags_delete` are permanent in v1: a folder
 takes its subtree and its notes become unfiled, a tag takes its `note_tags`

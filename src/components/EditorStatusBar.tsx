@@ -2,7 +2,6 @@ import { Folder, Hash, Pin } from 'lucide-react';
 import type { SaveState } from '../stores/editor';
 
 type EditorStatusBarProps = {
-  title: string;
   wordCount: number;
   saveState: SaveState;
   /** `05-ui-ux.md` §6.3a: the pin control in the editor. The same `Ctrl/Cmd+D` is
@@ -32,10 +31,11 @@ type EditorStatusBarProps = {
    states and §10 puts the changing one in an `aria-live` region, so a screen
    reader announces "Saved" without the focus moving.
 
-   M2 shipped title, word count, and save state. §9 also lists folder and tags;
-   those arrive with M4's data in the same commit as the editors that populate
-   them, so this row never shows a control that does nothing. The pin is here
-   already because pinning *is* M4 and the data exists.
+   **The row no longer names the note.** It did from M2 until ADR-023, and the
+   title was here on desktop and in the bar above it on mobile — in two places,
+   neither of them editable. It is the field in `NoteHeader` now, which is the
+   only place in the editor the note's name can be changed, and a title shown
+   twice is a title that can disagree with itself.
 
    **The mobile variant is not a subset chosen by taste — it is what the prototype
    already draws.** `prototype/index.html` §3's Android editor view shows folder,
@@ -59,7 +59,6 @@ const DOT: Record<SaveState, string> = {
 };
 
 export function EditorStatusBar({
-  title,
   wordCount,
   saveState,
   isPinned,
@@ -75,12 +74,11 @@ export function EditorStatusBar({
     <div
       /* Status text is chrome, not content: folder, tags, word count and save
          state are read, never copied — copying happens in the editor. */
+      data-testid="editor-status-bar"
       className={`flex shrink-0 items-center gap-3 border-t border-[var(--border)] bg-[var(--surface-raised)] text-[12px] text-[var(--text-muted)] select-none ${
         mobile ? 'h-11 gap-2 px-1' : 'h-7 px-3'
       }`}
     >
-      {mobile ? null : <span className="truncate">{title}</span>}
-
       <SlotButton
         testId="status-folder"
         label={folderName ?? 'No folder'}
@@ -117,9 +115,7 @@ export function EditorStatusBar({
           data-testid="editor-pin-toggle"
           onClick={onTogglePin}
           className={`grid h-[20px] w-[20px] flex-none place-items-center rounded transition-colors ${
-            isPinned
-              ? 'text-[var(--accent)]'
-              : 'text-[var(--text-subtle)] hover:text-[var(--text)]'
+            isPinned ? 'text-[var(--accent)]' : 'text-[var(--text-subtle)] hover:text-[var(--text)]'
           }`}
         >
           <Pin className="icon i-16" aria-hidden="true" />

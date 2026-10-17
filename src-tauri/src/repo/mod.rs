@@ -181,6 +181,15 @@ pub trait NotesRepo: Send + Sync {
     /// loading one to change a boolean would put the body of every pinned note on
     /// the save path. `save` stays the whole-document write the editor uses.
     fn set_pinned(&self, id: &str, is_pinned: bool) -> Result<Note, crate::error::AppError>;
+    /// Writes `title` and `title_source` without touching `doc_json` (ADR-023).
+    ///
+    /// A non-empty title is stored as `manual` and kept verbatim through every
+    /// later save; an empty one returns the note to `auto`, which hands the title
+    /// back to derivation. The document is not loaded or rewritten, for the same
+    /// reason `set_pinned` does not: the title is metadata, and putting a body on
+    /// the write path to change one word would rewrite every note's derived
+    /// columns on every keystroke.
+    fn set_title(&self, id: &str, title: &str) -> Result<Note, crate::error::AppError>;
     /// Sets `deleted_at`; the row stays, so the deletion can propagate (R3).
     fn soft_delete(&self, id: &str) -> Result<(), crate::error::AppError>;
     fn restore(&self, id: &str) -> Result<(), crate::error::AppError>;

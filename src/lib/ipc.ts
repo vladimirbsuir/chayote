@@ -76,6 +76,10 @@ export const notesApi = {
   move: (id: Uuid, folderId: Uuid | null): Promise<Note> => invoke('notes_move', { id, folderId }),
   setPinned: (id: Uuid, isPinned: boolean): Promise<Note> =>
     invoke('notes_set_pinned', { id, isPinned }),
+  /** ADR-023. Its own command rather than a field on `notes_save`, for the reason
+      the pin has one: the autosave judges a write by the serialised document, so a
+      title carried in the save input would be judged unchanged and never written. */
+  setTitle: (id: Uuid, title: string): Promise<Note> => invoke('notes_set_title', { id, title }),
   softDelete: (id: Uuid): Promise<void> => invoke('notes_soft_delete', { id }),
   restore: (id: Uuid): Promise<void> => invoke('notes_restore', { id }),
   destroy: (id: Uuid): Promise<void> => invoke('notes_destroy', { id }),
@@ -107,8 +111,7 @@ export const syncApi = {
   status: (): Promise<SyncStatus> => invoke('sync_get_status', {}),
   setConfig: (connectionString: string, enabled: boolean): Promise<void> =>
     invoke('sync_set_config', { connectionString, enabled }),
-  now: (openNoteId: Uuid | null): Promise<SyncSummary> =>
-    invoke('sync_now', { openNoteId }),
+  now: (openNoteId: Uuid | null): Promise<SyncSummary> => invoke('sync_now', { openNoteId }),
   reupload: (): Promise<number> => invoke('sync_reupload', {}),
   conflicts: (): Promise<SyncConflict[]> => invoke('sync_list_conflicts', {}),
   resolve: (id: string, keepLocal: boolean): Promise<void> =>

@@ -1092,7 +1092,12 @@ test.describe('note list', () => {
     await expect(
       page.locator(`[data-testid="note-card"][data-note-id="${SECOND_NOTE}"]`),
     ).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('textbox', { name: 'Note content' })).toContainText('Q3 roadmap');
+    /* The clicked note's text, not its name: "Q3 roadmap draft" is the title field
+       now, and the body it used to lead with is the note's text (ADR-023). */
+    await expect(page.getByRole('textbox', { name: 'Note content' })).toContainText(
+      'Rough outline of the priorities',
+    );
+    await expect(page.getByTestId('note-title-input')).toHaveValue('Q3 roadmap draft');
   });
 
   test('mounts a bounded window of cards at 10 000 notes', async ({ page }) => {
@@ -1298,7 +1303,9 @@ test.describe('trash', () => {
     /* Closing the editor after a restore would make undo look like it acted on the
        wrong note, so a restored note comes back open. */
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
-    await expect(page.locator('.ProseMirror')).toContainText(title);
+    /* The restored note is the one that was trashed, named in the title field —
+       where a note's name lives now, rather than at the top of its text (ADR-023). */
+    await expect(page.getByTestId('note-title-input')).toHaveValue(title);
   });
 
   test('permanent delete asks first, and then really goes', async ({ page }) => {

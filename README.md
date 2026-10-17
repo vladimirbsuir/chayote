@@ -65,7 +65,7 @@ Three documents carry the weight and are worth more attention than the rest: `02
 | UI prototype                      | **Complete and approved** — `prototype/index.html`                                                                                                                                                                                                         |
 | Application code                  | **M0–M6 complete** — scaffold, tokens, icon layer, IPC seam, SQLite data layer, editor with autosave, UI shell with sidebar and virtualised note list, organisation: folders, tags, pinning, trash, search, and themes, settings and the full keyboard map |
 | Current milestone                 | **M8** — packaging: icons, `INSTALL.md`, release workflow, Windows NSIS + portable verified locally                                                                                                                                                        |
-| Frozen decisions                  | 18. ADR-019 was added at M6: the accent is per-theme                                                                                                                                                                                                       |
+| Frozen decisions | 23. ADR-019 was added at M6: the accent is per-theme. ADR-023 was added on 2026-10-17: the note title is a field of its own, not a value derived from the first line of the body |
 
 **M6 shipped on 2026-10-10; M7 followed on the same day.** M0 and M1 shipped on 2026-10-07, M2 on 2026-10-08, M3 on 2026-10-09, M4, M5 and M6 on 2026-10-10. `npm run tauri dev` shows the window and creates `chayote.db` with the full schema; `npm run dev` runs the frontend in a browser through the mock backend; 36 Rust tests, 388 TypeScript tests, and 141 Playwright tests cover the data layer, the editor, the shell, organisation, search and themes, and the gate commands are clean. The editor chunk is loaded after first paint, so the shell still paints at the M0 cost. The sidebar's folder tree is keyboard-navigable and draggable, folders and tags are created, renamed and deleted in place, notes can be pinned, filed, tagged, trashed and restored, the editor's status bar changes a note's folder and tags, `Ctrl+F` finds notes by title or body with the matching words marked and `Esc` restoring the list, and the settings dialog themes the app per theme with an accent that is verified for contrast in both. The whole app is operable from the keyboard alone, checked as one continuous flow in `e2e/keyboard.spec.ts`.
 
@@ -99,6 +99,7 @@ Do not re-litigate any of these. The reasoning for each, and the alternatives th
 | 015 | Icons are **Lucide vectors**. No emoji in the UI, ever                                 |
 | 016 | The prototype is a **permanent** visual reference, changed with the docs               |
 | 019 | The accent is **per-theme**; a custom accent is used verbatim                          |
+| 023 | The note title is a **field of its own**; the body's leading line is not it             |
 
 Full table with dates in [`docs/09-decisions.md`](docs/09-decisions.md).
 

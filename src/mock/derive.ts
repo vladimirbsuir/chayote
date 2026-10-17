@@ -14,6 +14,10 @@ export type MockTag = { id: Uuid; name: string };
 export type MockNote = {
   id: Uuid;
   doc: JsonDoc;
+  /** ADR-023: a title the user typed. Empty, and therefore ignored, unless
+      `titleSource` says otherwise — which is how `notes` works in SQLite. */
+  title: string;
+  titleSource: 'auto' | 'manual';
   folderId: Uuid | null;
   isPinned: boolean;
   createdAt: number;
@@ -66,13 +70,32 @@ export function firstNonEmptyText(doc: JsonDoc): string {
   return '';
 }
 
+/** The same cap `deriveTitle` applies, shared so a typed title and a derived one
+    cannot end up different sizes. `03-data-model.md` §4.1. */
+const MAX_TITLE = 120;
+
+export function capTitle(text: string): string {
+  /* Code points, not UTF-16 units, so the cap cannot land in the middle of a
+     character — the same reason the Rust side caps with `chars().take`. */
+  const characters = Array.from(text);
+  if (characters.length <= MAX_TITLE) return text;
+  const clipped = characters.slice(0, MAX_TITLE).join('');
+  const lastSpace = clipped.lastIndexOf(' ');
+  return lastSpace > 0 ? clipped.slice(0, lastSpace) : clipped;
+}
+
 export function deriveTitle(doc: JsonDoc): string {
   const raw = firstNonEmptyText(doc);
   if (raw.length === 0) return 'Untitled';
-  if (raw.length <= 120) return raw;
-  const clipped = raw.slice(0, 120);
-  const lastSpace = clipped.lastIndexOf(' ');
-  return lastSpace > 0 ? clipped.slice(0, lastSpace) : clipped;
+  return capTitle(raw);
+}
+
+/** `03-data-model.md` §4.1 as the browser backend implements it: a typed title
+    wins, and everything else is derived from the document. Mirrors
+    `services/derive.rs`, including the 120-character cap. */
+export function titleOf(note: MockNote): string {
+  if (note.titleSource === 'manual' && note.title.length > 0) return note.title;
+  return deriveTitle(note.doc);
 }
 
 export function deriveExcerpt(plain: string): string {
@@ -107,7 +130,7 @@ export function toSummary(note: MockNote, db: MockDatabase): NoteSummary {
   const plain = plainTextOf(note.doc);
   return {
     id: note.id,
-    title: deriveTitle(note.doc),
+    title: titleOf(note),
     excerpt: deriveExcerpt(plain),
     folderId: note.folderId,
     folderName: db.folders.find((folder) => folder.id === note.folderId)?.name ?? null,

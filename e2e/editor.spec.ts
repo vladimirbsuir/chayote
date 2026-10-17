@@ -65,7 +65,12 @@ test('renders the fixture document with every block in the schema', async ({ pag
   await openRichNote(page);
   const editor = page.getByRole('textbox', { name: 'Note content' });
 
-  await expect(editor.locator('h1')).toHaveText('Meeting notes');
+  /* The fixture's *leading* heading is gone from the body: migration 0006 lifted
+     it into the title field (ADR-023), so the first H1 here is a section inside
+     the note rather than the note's name. Asserting the one that is left is what
+     keeps this test covering the H1 node at all. */
+  await expect(page.getByTestId('note-title-input')).toHaveValue('Meeting notes');
+  await expect(editor.locator('h1')).toHaveText('Apologies');
   await expect(editor.locator('h2').first()).toHaveText('Decisions');
   await expect(editor.locator('ul').first()).toBeVisible();
   await expect(editor.locator('blockquote')).toBeVisible();
@@ -74,10 +79,13 @@ test('renders the fixture document with every block in the schema', async ({ pag
   await expect(editor.locator('a')).toHaveCount(0);
 });
 
-test('shows the derived title and word count in the status bar', async ({ page }) => {
+test('shows the note title and the word count', async ({ page }) => {
   await openRichNote(page);
 
   await expect(page.getByTestId('word-count')).toContainText('words');
+  /* The title is in the field above the text (ADR-023), not in the status bar —
+     `title.spec.ts` proves the field end to end, and this is the one assertion
+     that the editor pane renders it. */
   await expect(page.locator('section[aria-label="Editor"]')).toContainText('Meeting notes');
 });
 

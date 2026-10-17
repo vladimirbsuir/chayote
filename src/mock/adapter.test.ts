@@ -81,17 +81,35 @@ describe('mock adapter', () => {
   it('finds a body match by prefix and marks it in the snippet', async () => {
     const backend = createMockBackend(buildMockDatabase());
 
-    /* `roadmap` appears in the body of two fixtures and in the title of one.
-       Asserting on a hit rather than on the array's type is the point: the old
-       substring test would also have matched, so this is what stops a mock from
-       quietly answering a different question than FTS5 does. */
+    /* `launch` appears in the body of a fixture and nowhere in its title, so this
+       is a body match and the snippet has to carry the mark. Asserting on a hit
+       rather than on the array's type is the point: the old substring test would
+       also have matched, so this is what stops a mock from quietly answering a
+       different question than FTS5 does. */
+    const page = await backend.invoke('search_query', {
+      input: { query: 'laun', filter: filterAll, limit: 20, offset: 0 },
+    });
+
+    expect(page.total).toBeGreaterThan(0);
+    expect(page.hits.some((hit) => hit.snippet.includes('<mark>launch</mark>'))).toBe(true);
+    expect(page.hits.every((hit) => hit.snippet.includes('<mark>'))).toBe(true);
+  });
+
+  it('finds a note by its title alone, and marks nothing in its body', async () => {
+    const backend = createMockBackend(buildMockDatabase());
+
+    /* Migration 0006 moved `roadmap` out of a note's first heading and into its
+       title, so this note now matches on the title and not on the body at all. Both
+       halves are worth asserting: the title is still indexed (which is what makes a
+       typed name searchable), and a title-only hit has a snippet that says so
+       rather than a mark that is not there. */
     const page = await backend.invoke('search_query', {
       input: { query: 'roadm', filter: filterAll, limit: 20, offset: 0 },
     });
 
-    expect(page.total).toBeGreaterThan(0);
-    expect(page.hits.some((hit) => hit.snippet.includes('<mark>roadmap</mark>'))).toBe(true);
-    expect(page.hits.every((hit) => hit.snippet.includes('<mark>'))).toBe(true);
+    expect(page.total).toBe(1);
+    expect(page.hits[0]?.title).toBe('Q3 roadmap draft');
+    expect(page.hits[0]?.snippet).not.toContain('<mark>roadmap</mark>');
   });
 
   it('does not match a token that only appears inside another word', async () => {
@@ -131,6 +149,13 @@ describe('mock adapter', () => {
     const target = list[0];
     if (target === undefined) throw new Error('fixture empty');
 
+    /* The first fixture came out of migration 0006 with its title lifted into the
+       field, so it is `manual` — and a save must not recompute a title the user
+       owns. Clearing the title first is the way back to derivation, which is what
+       the two halves below are: the recomputation, and the fact that it does not
+       happen while a title is typed. */
+    await backend.invoke('notes_set_title', { id: target.id, title: '' });
+
     const saved = await backend.invoke('notes_save', {
       input: {
         id: target.id,
@@ -152,5 +177,18 @@ describe('mock adapter', () => {
 
     expect(saved.title).toBe('Renamed heading');
     expect(saved.wordCount).toBe(2);
+
+    /* And once a title is typed, the next save leaves it alone (ADR-023). */
+    const titled = await backend.invoke('notes_set_title', { id: target.id, title: 'Typed' });
+    const afterSave = await backend.invoke('notes_save', {
+      input: {
+        id: target.id,
+        doc: { type: 'doc', content: [{ type: 'paragraph' }] },
+        folderId: titled.folderId,
+        tagIds: [],
+        isPinned: false,
+      },
+    });
+    expect(afterSave.title).toBe('Typed');
   });
 });

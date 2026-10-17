@@ -73,6 +73,7 @@ chayote/
 │   │   ├── useSearch.ts
 │   │   ├── useAutosave.ts
 │   │   ├── useTogglePin.ts            # M7: the one pin path for cards and the editor
+│   │   ├── useNoteTitle.ts            # ADR-023: the title field's debounced write
 │   │   └── useTrashActions.ts         # per-selection trash actions for the row menu
 │   ├── editor/
 │   │   ├── extensions.ts              # TipTap extension set
@@ -95,6 +96,7 @@ chayote/
 │   │   ├── UndoToast.tsx              # M4: six-second delete undo, names the note
 │   │   ├── EditorPane.tsx
 │   │   ├── EditorStatusBar.tsx
+│   │   ├── NoteHeader.tsx             # ADR-023: title field + last-changed date
 │   │   ├── StatusPopovers.tsx         # M4: FolderPicker + TagEditor, one listbox component
 │   │   ├── popoverPlacement.ts        # click-handler geometry for the status-bar popovers
 │   │   ├── EditorOverflowMenu.tsx     # M7: mobile three-dots menu (pin, trash)
@@ -294,7 +296,7 @@ Required tests, because each verifies a rule that is easy to break silently:
 
 1. Every write appends an outbox row in the same transaction; a failure leaves neither.
 2. A failed write leaves no orphan outbox row.
-3. `title`, `plain_text`, `excerpt`, `word_count` are recomputed on every save.
+3. `plain_text`, `excerpt`, `word_count` are recomputed on every save, and `title` is recomputed on every save **unless** `title_source` is `manual`, in which case the stored value survives it (ADR-023).
 4. IDs are UUIDv7 and strictly increasing within a test run.
 5. Soft delete sets `deleted_at` and leaves the row present.
 6. The FTS index stays consistent with `notes` across insert, update, delete, and hard delete.
@@ -316,6 +318,14 @@ something that is invisible to a single-element assertion:
     `* { padding: 0 }` beats every `px-*` in the app regardless of specificity. The
     result looks almost right, which is why the fix belongs in `@layer base` and the
     test exists as an alarm.
+
+And one that ADR-023 added, for the same reason — it is invisible from either side:
+
+15. **A typed title survives the next keystroke in the body.** `save()` recomputes the
+    title whenever `title_source` is not `manual`, and derivation has no document to read
+    in that case — so the field would look right on screen and be blank in the database
+    one keystroke later. Only a test that types a title and then saves can catch it, and
+    the failure is the kind nobody sees until a note has lost its name.
 
 ### Driving the editor from Playwright
 

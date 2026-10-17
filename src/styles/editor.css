@@ -38,15 +38,21 @@
 
 .note-editor p {
   font-size: 17px;
-  line-height: 1.7;
-  margin-bottom: 14px;
+  /* ADR-022: 1.5 rather than the 1.7 this ran at since M2, with a 10 px gap
+     between paragraphs rather than 14. The editor's own type scale, not the note
+     list's, sets how much air a paragraph gets — 1.7 at 17 px was generous enough
+     that a screen of ordinary prose showed four lines. Every value below moves
+     with it: one rhythm for the body, rather than paragraphs on one interval and
+     lists on another. */
+  line-height: 1.5;
+  margin-bottom: 10px;
 }
 
 .note-editor ul,
 .note-editor ol {
   font-size: 17px;
-  line-height: 1.7;
-  margin: 0 0 14px;
+  line-height: 1.5;
+  margin: 0 0 10px;
   padding-left: 24px;
 }
 
@@ -68,7 +74,7 @@
 .note-editor blockquote {
   border-left: 3px solid var(--border-strong);
   padding-left: 16px;
-  margin: 0 0 14px;
+  margin: 0 0 10px;
   color: var(--text-muted);
 }
 
@@ -81,7 +87,7 @@
   font-size: 15px;
   line-height: 1.55;
   overflow-x: auto;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .note-editor code {
