@@ -117,7 +117,7 @@ jobs:
 
             Download | Asset
             --- | ---
-            Windows | `Chayote_${needs.version.outputs.version}_x64-setup.exe`
+            Windows | `Chayote_${{ needs.version.outputs.version }}_x64-setup.exe`
             macOS | `.app.tar.gz` or `.dmg`
             Linux | `.AppImage` or `.deb`
           includeUpdaterJson: true
