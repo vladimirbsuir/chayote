@@ -54,7 +54,7 @@ Feature set agreed for the first shippable version.
 - Smart typography: automatic curly quotes, dashes, ellipses.
 - Markdown input rules: `# `, `## `, `### `, `- `, `* `, `1. `, `> `, ` ``` `, `--- `.
 - Paste from any source with HTML sanitisation.
-- Title derived automatically from the first line of the note (no separate title field).
+- **A title field of its own** above the text, with the note's last-changed date beneath it, in the reader's own date format (ADR-023). Left blank, the title is derived from the first line of the body exactly as before, so a note that is never named still gets a sensible name in the list.
 
 ### 5.2 Organisation
 

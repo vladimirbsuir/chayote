@@ -8,9 +8,10 @@ import { useSelectionStore } from '../stores/selection';
    shortcut rather than the only way to reach it — the same reasoning as the folder
    rename being both `F2` and a menu item. */
 
-function bar(overrides: Partial<React.ComponentProps<typeof EditorStatusBar>> = {}): React.ReactElement {
+function bar(
+  overrides: Partial<React.ComponentProps<typeof EditorStatusBar>> = {},
+): React.ReactElement {
   const props: React.ComponentProps<typeof EditorStatusBar> = {
-    title: 'Meeting notes',
     wordCount: 342,
     saveState: 'saved',
     isPinned: false,
@@ -51,9 +52,9 @@ describe('EditorStatusBar', () => {
     );
 
     render(bar({ isPinned: true }));
-    expect(screen.getAllByRole('button', { name: 'Unpin note' })[0]?.getAttribute('aria-pressed')).toBe(
-      'true',
-    );
+    expect(
+      screen.getAllByRole('button', { name: 'Unpin note' })[0]?.getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 
   it('names the shortcut in the tooltip, since the control is the discovery path for it', () => {
@@ -74,11 +75,10 @@ describe('EditorStatusBar', () => {
   it('still renders word count and save state beside the pin', () => {
     render(bar());
 
-    /* §9 lists five elements in one 28 px row; the pin is the third, not a
-       replacement for the other two. */
+    /* §9's row carries the pin alongside what was already there; the pin is the
+       third element, not a replacement for the other two. */
     expect(screen.getByTestId('word-count').textContent).toBe('342 words');
     expect(screen.getByTestId('save-state').textContent).toBe('Saved');
-    expect(screen.getByText('Meeting notes')).toBeDefined();
   });
 
   it('singularises the word count at one', () => {
@@ -93,12 +93,6 @@ describe('EditorStatusBar', () => {
      desktop row does at 360 px: every element truncated, and `342 words` wrapping
      onto a second line. `05-ui-ux.md` §9's five-element row is the desktop row. */
   describe('mobile variant', () => {
-    it('drops the title, which the bar above already carries', () => {
-      render(bar({ variant: 'mobile' }));
-
-      expect(screen.queryByText('Meeting notes')).toBeNull();
-    });
-
     it('drops the pin, which moves to the editor overflow menu', () => {
       render(bar({ variant: 'mobile', isPinned: true }));
 

@@ -81,6 +81,46 @@ describe('mock adapter against the real command surface', () => {
     });
   });
 
+  it('types a title that derivation cannot take back, until the field is cleared', async () => {
+    /* ADR-023, asserted against the browser backend because that is what the
+       Playwright suite drives: a typed title survives a later document save, which
+       is the half that silently broke before the Rust side read the stored
+       column, and clearing it hands the title back to derivation rather than
+       leaving the note nameless. */
+    const backend = createMockBackend(buildMockDatabase());
+    const created = await backend.invoke('notes_create', { folderId: null });
+
+    const titled = await backend.invoke('notes_set_title', { id: created.id, title: '  Plan  ' });
+    expect(titled.title).toBe('Plan');
+    /* The body is untouched: the command writes the title without loading or
+       rewriting a document. */
+    expect(titled.doc).toEqual(created.doc);
+
+    const saved = await backend.invoke('notes_save', {
+      input: {
+        id: created.id,
+        doc: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'A first line' }] }],
+        },
+        folderId: null,
+        tagIds: [],
+        isPinned: false,
+      },
+    });
+    expect(saved.title).toBe('Plan');
+
+    const cleared = await backend.invoke('notes_set_title', { id: created.id, title: '   ' });
+    expect(cleared.title).toBe('A first line');
+
+    await expect(
+      backend.invoke('notes_set_title', { id: created.id, title: 'ok' }),
+    ).resolves.toHaveProperty('title', 'ok');
+    await expect(
+      backend.invoke('notes_set_title', { id: '01980000-0000-7000-8000-999999999999', title: 'x' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('empties the trash and reports how many rows went', async () => {
     const backend = createMockBackend(buildMockDatabase());
     const [first] = await backend.invoke('notes_list', { filter: all });
@@ -204,9 +244,9 @@ describe('mock adapter against the real command surface', () => {
 
   it('refuses invalid input with VALIDATION, matching the Rust side', async () => {
     const backend = createMockBackend(buildMockDatabase());
-    await expect(backend.invoke('folders_create', { name: '   ', parentId: null })).rejects.toMatchObject(
-      { code: 'VALIDATION' },
-    );
+    await expect(
+      backend.invoke('folders_create', { name: '   ', parentId: null }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
     await expect(backend.invoke('tags_create', { name: '' })).rejects.toMatchObject({
       code: 'VALIDATION',
     });

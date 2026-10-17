@@ -44,14 +44,31 @@ test.describe('search', () => {
     const before = await page.getByTestId('note-card').count();
     expect(before).toBeGreaterThan(0);
 
-    await search(page, 'roadmap');
+    /* `launch` is in a note's body. `roadmap` no longer is: migration 0006 lifted
+       it out of that note's first heading and into its title, so a search for it
+       now matches the title and returns a snippet with no mark in it (ADR-023).
+       Marking a snippet requires the word to be in the body, which is what this
+       test is about. */
+    await search(page, 'launch');
 
-    await expect(page.getByTestId('list-header')).toHaveText('Results for “roadmap”');
+    await expect(page.getByTestId('list-header')).toHaveText('Results for “launch”');
     await expect(page.locator('[data-testid="note-snippet"] mark').first()).toBeVisible();
 
     /* The structure stays (§6.5: "the sidebar structure stays visible so the
        search can be scoped"), so the region above the list is untouched. */
     await expect(page.getByRole('tree', { name: /folder/i })).toBeVisible();
+  });
+
+  test('finds a note by its title alone', async ({ page }) => {
+    await open(page);
+
+    /* The other half of the test above: a name the user typed is indexed beside
+       the body, so a note whose title matches and whose text does not is still a
+       result — carrying a snippet, and no mark that is not there. */
+    await search(page, 'roadmap');
+
+    await expect(page.getByTestId('list-header')).toHaveText('Results for “roadmap”');
+    await expect(page.getByTestId('note-card').first()).toContainText('Q3 roadmap draft');
   });
 
   test('does not search below two characters', async ({ page }) => {
@@ -178,7 +195,9 @@ test.describe('search', () => {
        the Suspense fallback rather than the state. */
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
 
-    await search(page, 'roadmap');
+    /* `launch`, because `roadmap` is a title match now and a title match has no
+       mark in its snippet — the screenshot is here to show a real highlight. */
+    await search(page, 'launch');
     await expect(page.locator('[data-testid="note-snippet"] mark').first()).toBeVisible();
     await page.screenshot({ path: 'screenshots/search-light.png', fullPage: false });
   });

@@ -12,9 +12,10 @@ import { useSelectionStore } from '../stores/selection';
    that neither of those would catch: a slot that looks interactive and is not, and a
    slot that names its value but not its action. */
 
-function bar(overrides: Partial<React.ComponentProps<typeof EditorStatusBar>> = {}): React.ReactElement {
+function bar(
+  overrides: Partial<React.ComponentProps<typeof EditorStatusBar>> = {},
+): React.ReactElement {
   const props: React.ComponentProps<typeof EditorStatusBar> = {
-    title: 'Meeting notes',
     wordCount: 342,
     saveState: 'saved',
     isPinned: false,
@@ -40,7 +41,7 @@ describe('EditorStatusBar folder and tag slots', () => {
     expect((container.firstChild as HTMLElement).className).toContain('select-none');
   });
 
-  it('shows the note\'s folder by name', () => {
+  it("shows the note's folder by name", () => {
     render(bar({ folderName: 'Work' }));
 
     expect(screen.getByTestId('status-folder').textContent).toContain('Work');

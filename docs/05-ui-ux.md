@@ -88,11 +88,11 @@ Back behaviour: the Android system back button pops the view stack. At the root 
 
 The list view's bar carries a settings gear, the app name, and a new-note button. The gear opens the settings dialog directly: the bar has no room for the desktop's overflow menu, and the slot previously held a `menu` "Open sidebar" button that did nothing — the sidebar content *is* the list view, so there was nothing to open. A hamburger that opens settings would be the same control wearing the wrong icon, so the gear says what it does.
 
-The editor view has its own top bar because it needs a back affordance, the note title, and a delete action. It does not reuse the desktop top bar.
+The editor view has its own top bar because it needs a back affordance and a delete action. It does not reuse the desktop top bar. **It no longer carries the title** (ADR-023): the title is the field in the body below, where it can be edited, and a bar that repeats it is a second place to read a stale name from. The bar is back and the actions now.
 
 **The editor's status bar is a different row on mobile, and M7 measured what the desktop one costs at 360 px.** `04-editor.md` §9's five-element row is the *desktop* row. Rendered unchanged on a phone, every one of them failed at once: the title truncated to an ellipsis, the folder to a single letter, and `342 words` wrapped onto a second line that pushed the save state out of the row. Nothing was missing; everything was unreadable, and no DOM assertion could have caught it.
 
-So below 768 px the row carries **folder, tags, `342 w`, and Saved** — what `prototype/index.html` §3 already drew. The title is absent because the bar above it carries the title, and the pin is absent because §2.4 gives the editor its own bar for actions and the pin goes in that bar's overflow menu, beside the delete action. §9's row is unchanged.
+So below 768 px the row carries **folder, tags, `342 w`, and Saved** — what `prototype/index.html` §3 already drew. The pin is absent because §2.4 gives the editor its own bar for actions and the pin goes in that bar's overflow menu, beside the delete action. The title is absent on both widths now, for the reason above rather than for space.
 
 The row is also **44 px tall on mobile rather than 28**, because §9 requires 44 × 44 px touch targets on Android and a 28 px row cannot contain one. The bar grows rather than the target overflowing a row too short to hold it, which would look wrong to someone who can see exactly where the tap lands.
 
@@ -101,6 +101,15 @@ The row is also **44 px tall on mobile rather than 28**, because §9 requires 44
 ### 2.5 Editor measure
 
 Body text is constrained to a 720 px column, centred in the editor pane, with 32 px minimum padding. This is a deliberate readability limit. ProseMirror's default `white-space: pre-wrap` plus `word-break: break-word` handles long unbroken strings and long words without horizontal scrolling.
+
+### 2.6 The note's heading block
+
+Above the text, inside the same 720 px column: the note's name, and under it the moment it was last changed (ADR-023). `NoteHeader` draws both, and `prototype/index.html` §1 and §3 show them.
+
+- **The title is a field, not a heading.** 28 px / 650 / 1.2 on desktop, 24 px on mobile. It grows to fit and scrolls past four lines, which is where the 120-character cap arrives (`04-editor.md` §7).
+- **The date is 12 px in `--text-subtle`,** omitted rather than faked when a note has no saved state. It is the smallest thing on the screen because it is the least: a note's name and its text matter, and when it was last touched is metadata about them.
+- **The block is inside the editor's scroll area,** so it scrolls away with the text. A sticky title is a different decision and would have to be argued for separately — at 720 px a long title already takes the first two lines.
+- **It is chrome on the top bar's terms, not body text:** the field keeps `select-text` even though everything around it is `select-none` (§9), because it is a field the user types in.
 
 ## 3. Design tokens
 
@@ -155,7 +164,9 @@ Rules: the dark palette is not a mechanical inversion — contrast is verified p
 
 | Role | Size / weight / line height |
 |-------|---------------------------|
-| Editor body | 17 px · 400 · 1.7 |
+| Note title field | 28 px desktop · 24 px mobile · 650 · 1.2 |
+| Note last-changed | 12 px · 400 |
+| Editor body | 17 px · 400 · **1.5**, 10 px between paragraphs |
 | Editor H1 | 28 px · 650 · 1.25 |
 | Editor H2 | 22 px · 600 · 1.3 |
 | Editor H3 | 19 px · 600 · 1.4 |
@@ -164,6 +175,13 @@ Rules: the dark palette is not a mechanical inversion — contrast is verified p
 | Note list timestamp | 12 px · 400 · 1.3 |
 | UI label | 13 px · 500 |
 | Sidebar section header | 11 px · 600, uppercase, 0.06 em tracking |
+
+**The body's line height is 1.5, and the gap between paragraphs is 10 px** (ADR-023). It
+ran at 1.7 with a 14 px gap from M2, which is generous enough that a screen of ordinary
+prose showed four lines — at 17 px the reader was paying for air between lines that a
+screen at that size does not need. Every value moved with it, so paragraphs and lists
+share one rhythm rather than two. The title field is deliberately *tighter* at 1.2: it is
+a heading, and a heading with body leading looks like an accident.
 
 The sidebar resize separator is painted as a 1 px rule in `--border`, hovering or
 focused in `--accent`, and is hit-tested at 9 px rather than 1 px. See §9 for why.
@@ -268,7 +286,8 @@ Icons sit on a 2 px optical gap from adjacent text and are vertically centred wi
 | `EditorOverflowMenu` | Mobile three-dots menu: pin and trash for the open note. |
 | `EditorPane` | Owns the TipTap instance, autosave state machine, status bar. |
 | `FormattingToolbar` | Static formatting row above the editor content (desktop and mobile): the four marks, H1–H3, bullet / ordered / task lists, increase / decrease indent, blockquote, code block, horizontal rule, undo / redo. Horizontally scrollable; 32 px targets on desktop, 44 px on Android. No paragraph button: pressing an active block button toggles it back to a paragraph, so a dedicated control would duplicate every one of them. The indent buttons are context-sensitive: inside a list they nest / unnest (a nested ordered list restarts at 1), elsewhere they indent / outdent the paragraph, heading, or whole blockquote in 24 px steps up to 7 levels (`04-editor.md` §1.2). |
-| `EditorStatusBar` | Folder, tags, word count, save state (`04-editor.md` §9). |
+| `EditorStatusBar` | Folder, tags, pin, word count, save state (`04-editor.md` §9). It no longer carries the title (ADR-023). |
+| `NoteHeader` | The note's heading block: the title field and the last-changed date under it (§2.6). |
 | `StatusPopovers` | One listbox component behind both popovers: `TagEditor` for adding and removing tags, `FolderPicker` for changing a note's folder. |
 | `ConfirmDialog` | Destructive confirmation only. Used by permanent delete and empty trash. Never for save or navigation. |
 | `ThemeToggle` | Light / Dark / System cycle. |

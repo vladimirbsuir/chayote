@@ -175,9 +175,15 @@ impl NotesRepo for SqliteNotesRepo {
         let is_pinned = input.is_pinned;
 
         self.db.with_conn(move |conn| {
-            let title_source: String = {
-                let mut stmt = conn.prepare("SELECT title_source FROM notes WHERE id = ?1")?;
-                stmt.query_row([&note_id], |row| row.get(0))
+            /* Both halves of the row's title state, not just the source: a manual
+            title is not derivable from the document, so `derive::title` returns
+            nothing for it and the stored value is what a save has to keep.
+            Without the stored column a save would blank the title on the next
+            keystroke after it was typed. */
+            let (stored_title, title_source): (String, String) = {
+                let mut stmt =
+                    conn.prepare("SELECT title, title_source FROM notes WHERE id = ?1")?;
+                stmt.query_row([&note_id], |row| Ok((row.get(0)?, row.get(1)?)))
                     .map_err(|err| match err {
                         rusqlite::Error::QueryReturnedNoRows => AppError::NotFound,
                         other => AppError::from(other),
@@ -185,6 +191,11 @@ impl NotesRepo for SqliteNotesRepo {
             };
             let base_rev = base_rev(conn, &note_id)?;
             let derived = derive::derive(&input.doc, &title_source);
+            let title = if title_source == "manual" {
+                stored_title
+            } else {
+                derived.title
+            };
 
             let payload = serde_json::json!({
                 "id": note_id,
@@ -203,7 +214,7 @@ impl NotesRepo for SqliteNotesRepo {
                   WHERE id = ?1",
                 rusqlite::params![
                     note_id,
-                    derived.title,
+                    title,
                     doc_json,
                     derived.plain_text,
                     derived.excerpt,
@@ -267,6 +278,68 @@ impl NotesRepo for SqliteNotesRepo {
             tx.execute(
                 "UPDATE notes SET is_pinned = ?2, dirty = 1, updated_at = ?3 WHERE id = ?1",
                 rusqlite::params![note_id, i64::from(is_pinned), now],
+            )?;
+            append_outbox(&tx, "note", &note_id, "upsert", Some(&payload), base_rev)?;
+            tx.commit()?;
+            self.load(conn, &note_id)
+        })
+    }
+
+    /// Writes the title alone. `03-data-model.md` §4.1: a non-empty title is
+    /// stored as `manual` and kept as-is by every later save, and an empty one
+    /// returns the note to `auto`, which hands the title back to derivation — so
+    /// clearing the field is a way of saying "derive it again", not a way of
+    /// leaving the note nameless.
+    ///
+    /// `derive::title` returns nothing for `manual` — it has no document to read —
+    /// so the stored value is what is written. Everything else is left alone: the
+    /// body is not loaded and no derived column is recomputed, which is what makes
+    /// this cheap enough to run on every keystroke of the title field.
+    fn set_title(&self, id: &str, title: &str) -> Result<Note, AppError> {
+        let note_id = id.to_owned();
+        let trimmed = title.trim().to_owned();
+        let now = crate::clock::now_ms();
+
+        self.db.with_conn(move |conn| {
+            let (stored_title, title_source, doc_json): (String, String, String) = {
+                let mut stmt =
+                    conn.prepare("SELECT title, title_source, doc_json FROM notes WHERE id = ?1")?;
+                stmt.query_row([&note_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .map_err(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => AppError::NotFound,
+                    other => AppError::from(other),
+                })?
+            };
+
+            /* An empty field is not a title of "": it is the note handing the
+            title back to derivation, so the stored document has to be read to
+            derive from. That is the one path here that touches the body, and it
+            only runs when the user has cleared the field. */
+            let (title, title_source) = if trimmed.is_empty() {
+                let doc: serde_json::Value = serde_json::from_str(&doc_json).map_err(|err| {
+                    AppError::internal(format!("stored document is not valid JSON: {err}"))
+                })?;
+                (derive::title(&doc, "auto"), "auto".to_owned())
+            } else {
+                let capped = derive::truncate_title(&trimmed);
+                if capped.is_empty() {
+                    (stored_title, title_source)
+                } else {
+                    (capped, "manual".to_owned())
+                }
+            };
+
+            let base_rev = base_rev(conn, &note_id)?;
+            let payload = serde_json::json!({ "id": note_id, "title": title }).to_string();
+
+            let tx = conn.transaction()?;
+            tx.execute(
+                "UPDATE notes
+                    SET title = ?2, title_source = ?3, dirty = 1, updated_at = ?4
+                  WHERE id = ?1",
+                rusqlite::params![note_id, title, title_source, now],
             )?;
             append_outbox(&tx, "note", &note_id, "upsert", Some(&payload), base_rev)?;
             tx.commit()?;

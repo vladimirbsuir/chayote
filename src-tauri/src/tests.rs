@@ -112,7 +112,8 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
             "0002_fts.sql",
             "0003_outbox.sql",
             "0004_sync.sql",
-            "0005_sync_backoff.sql"
+            "0005_sync_backoff.sql",
+            "0006_note_title_field.sql"
         ]
     );
     assert_eq!(applied[0].0, 1);
@@ -120,7 +121,174 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
     // Reopening must apply nothing new (R8).
     let reopened = Arc::new(Database::open(f._dir.path()).expect("reopen"));
     let again = crate::db::migrate::applied_all(&reopened).expect("readable again");
-    assert_eq!(again.len(), 5);
+    assert_eq!(again.len(), 6);
+}
+
+#[test]
+fn the_title_field_migration_moves_a_leading_heading_out_of_the_body() {
+    let f = fixture("migrate-title");
+    let repo = notes(&f.db);
+
+    /* Written the way every note was written before ADR-023: the title *is* the
+    document's leading H1, and `title_source` is `auto`. */
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    repo.save(&on(
+        &id,
+        SaveNoteInput {
+            doc: json!({
+                "type": "doc",
+                "content": [
+                    {"type": "heading", "attrs": {"level": 1},
+                     "content": [{"type": "text", "text": "Old note"}]},
+                    {"type": "paragraph",
+                     "content": [{"type": "text", "text": "the body"}]}
+                ]
+            }),
+            ..note_with_text("")
+        },
+    ))
+    .expect("save");
+    assert_eq!(
+        scalar(
+            &f.db,
+            "SELECT COUNT(*) FROM notes WHERE title_source = 'manual'"
+        ),
+        0
+    );
+
+    /* The migration already ran with the schema, so it is applied by hand here:
+    what is under test is the data pass, not the runner. */
+    f.db.with_conn(|conn| {
+        let tx = conn.transaction()?;
+        crate::db::migrate::lift_leading_heading_into_title_for_tests(&tx)?;
+        tx.commit()?;
+        Ok::<_, crate::error::AppError>(())
+    })
+    .expect("data pass");
+
+    let migrated = repo.get(&id).expect("reload");
+    assert_eq!(
+        migrated.summary.title, "Old note",
+        "the heading became the title"
+    );
+    assert_eq!(
+        f.db.with_conn(|conn| {
+            let source: String =
+                conn.query_row("SELECT title_source FROM notes", [], |row| row.get(0))?;
+            Ok(source)
+        })
+        .expect("title_source"),
+        "manual"
+    );
+    assert_eq!(
+        migrated.summary.word_count, 2,
+        "the heading left the plain text too"
+    );
+    let first_block = migrated.doc["content"][0]["type"]
+        .as_str()
+        .unwrap_or_default();
+    assert_eq!(first_block, "paragraph", "body starts at the paragraph now");
+    assert_eq!(
+        migrated.doc["content"][0]["content"][0]["text"].as_str(),
+        Some("the body")
+    );
+
+    /* Queued like any other write: a change to a title another device has not
+    seen is exactly what the outbox is for (R5). */
+    f.db.with_conn(|conn| {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM outbox WHERE entity = 'note' AND entity_id = ?1",
+            [&id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    })
+    .expect("outbox count");
+    assert!(
+        f.db.with_conn(|conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE entity = 'note' AND entity_id = ?1",
+                [&id],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
+        })
+        .expect("outbox count"),
+        "the moved title is queued for sync"
+    );
+}
+
+#[test]
+fn the_title_field_migration_leaves_a_note_with_no_leading_heading_alone() {
+    let f = fixture("migrate-title-plain");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    repo.save(&on(&id, note_with_text("just a paragraph")))
+        .expect("save");
+
+    f.db.with_conn(|conn| {
+        let tx = conn.transaction()?;
+        crate::db::migrate::lift_leading_heading_into_title_for_tests(&tx)?;
+        tx.commit()?;
+        Ok::<_, crate::error::AppError>(())
+    })
+    .expect("data pass");
+
+    let after = repo.get(&id).expect("reload");
+    assert_eq!(after.summary.title, "just a paragraph", "still derived");
+    assert_eq!(
+        after.doc["content"][0]["content"][0]["text"].as_str(),
+        Some("just a paragraph")
+    );
+}
+
+#[test]
+fn a_note_that_was_only_a_title_keeps_a_body_to_type_into() {
+    let f = fixture("migrate-title-only");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    repo.save(&on(
+        &id,
+        SaveNoteInput {
+            doc: json!({
+                "type": "doc",
+                "content": [
+                    {"type": "heading", "attrs": {"level": 1},
+                     "content": [{"type": "text", "text": "Only a title"}]}
+                ]
+            }),
+            ..note_with_text("")
+        },
+    ))
+    .expect("save");
+
+    f.db.with_conn(|conn| {
+        let tx = conn.transaction()?;
+        crate::db::migrate::lift_leading_heading_into_title_for_tests(&tx)?;
+        tx.commit()?;
+        Ok::<_, crate::error::AppError>(())
+    })
+    .expect("data pass");
+
+    /* An empty document is not a document: ProseMirror has no content model
+    without a block, so stripping the heading from a note that had nothing else
+    would leave the editor with nothing to put a caret in. */
+    let migrated = repo.get(&id).expect("reload");
+    assert_eq!(migrated.summary.title, "Only a title");
+    assert_eq!(migrated.doc["content"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        migrated.doc["content"][0]["type"].as_str(),
+        Some("paragraph")
+    );
+    assert!(
+        crate::doc::validate::validate(&migrated.doc).is_ok(),
+        "still valid"
+    );
 }
 
 /// An in-memory database cannot do WAL or cascades across connections, so every
@@ -829,6 +997,121 @@ fn pinned_notes_sort_first_in_every_selection() {
         .expect("pinned filter");
     assert_eq!(pinned_only.len(), 1);
     assert_eq!(pinned_only[0].id, pinned.summary.id);
+}
+
+#[test]
+fn a_typed_title_is_kept_verbatim_and_survives_every_later_save() {
+    let f = fixture("title-manual");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    repo.save(&on(&id, note_with_text("body"))).expect("save");
+
+    let titled = repo
+        .set_title(&id, "  Roadmap review  ")
+        .expect("set title");
+    assert_eq!(titled.summary.title, "Roadmap review", "trimmed");
+    assert_eq!(
+        titled.doc,
+        repo.get(&id).expect("reload").doc,
+        "document untouched"
+    );
+
+    /* The property the whole feature rests on: a title the user typed is not
+    derivable from the document, so a later save must not recompute it. The
+    document here starts with a paragraph called something else entirely, which
+    is what derivation would have used. */
+    let after = repo
+        .save(&on(&id, note_with_text("A different first line")))
+        .expect("save again");
+
+    assert_eq!(after.summary.title, "Roadmap review", "title kept");
+}
+
+#[test]
+fn clearing_a_typed_title_hands_it_back_to_derivation() {
+    let f = fixture("title-clear");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    repo.save(&on(&id, note_with_text("First line of the body")))
+        .expect("save");
+    repo.set_title(&id, "Typed").expect("set title");
+
+    /* Empty is not a note with no name: it is the note saying "derive it again",
+    which is the only way back to the old behaviour without a setting. */
+    let cleared = repo.set_title(&id, "   ").expect("clear title");
+
+    assert_eq!(cleared.summary.title, "First line of the body");
+    let resaved = repo
+        .save(&on(&id, note_with_text("Second line of the body")))
+        .expect("save");
+    assert_eq!(
+        resaved.summary.title, "Second line of the body",
+        "and derivation owns it again"
+    );
+}
+
+#[test]
+fn a_typed_title_is_capped_like_a_derived_one() {
+    let f = fixture("title-cap");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let long = "word ".repeat(40);
+    let titled = repo
+        .set_title(&created.summary.id, long.trim())
+        .expect("set title");
+
+    assert!(
+        titled.summary.title.chars().count() <= 120,
+        "capped at 120, got {}",
+        titled.summary.title.chars().count()
+    );
+    assert!(!titled.summary.title.ends_with(' '), "no trailing space");
+}
+
+#[test]
+fn setting_a_title_on_a_note_that_does_not_exist_is_not_found() {
+    let f = fixture("title-missing");
+    let repo = notes(&f.db);
+
+    let err = repo.set_title("00000000-0000-7000-8000-000000000000", "Nope");
+    assert!(
+        matches!(err, Err(crate::error::AppError::NotFound)),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn a_titled_note_reports_its_new_title_in_the_list_and_in_search() {
+    let f = fixture("title-listing");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    repo.save(&on(&id, note_with_text("a body with a distinctive word")))
+        .expect("save");
+    repo.set_title(&id, "Quarterly plan").expect("set title");
+
+    let listed = repo.list(&NoteFilter::new(Selection::All)).expect("list");
+    assert_eq!(listed[0].title, "Quarterly plan", "the list carries it");
+
+    /* The FTS index is built from `title` and `plain_text` by trigger, so a title
+    a device has never pushed is findable immediately — and a title-only hit is
+    the one case that would break if the trigger were not watching the column. */
+    let hits = SearchService::new(Arc::clone(&f.db))
+        .query(&SearchInput {
+            query: "quarterly".into(),
+            filter: NoteFilter::new(Selection::All),
+            limit: 20,
+            offset: 0,
+        })
+        .expect("search");
+    assert_eq!(hits.hits.len(), 1, "found by its title");
+    assert_eq!(hits.hits[0].summary.title, "Quarterly plan");
 }
 
 #[test]

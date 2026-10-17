@@ -326,16 +326,37 @@ Undo history lives in the editor only and is never persisted. It is scoped to on
 
 Undo must not be able to reach into another note. When `note_id` changes, create a new editor instance rather than reusing the existing one; `editor.commands.setContent` does not clear history and will produce cross-note undo.
 
-## 7. Title derivation
+## 7. The title field
 
-There is no title input in v1. `title` is derived from the document (`03-data-model.md` §4.1):
+**The title is a field of its own, above the text** (ADR-023). It was the document's first
+heading until then, which meant the note's name was a block inside the note's own content:
+it showed up in every outline and export as a heading, and there was nowhere in the UI to
+rename a note as a *title* — only to type an H1.
+
+| Rule | Why |
+|------|-----|
+| A textarea that grows to fit, capped at four lines | A title is 120 characters, which is three or four lines at 28 px. An `<input>` scrolls sideways past the first line instead of wrapping, so the text being edited runs off the screen. |
+| `Enter` moves the caret to the start of the body | A newline inside a title is a space everywhere it is shown but one. `Shift+Enter` is left alone. |
+| Blur commits | Same contract as the document: reaching for something else is not cancelling. |
+| Writes are debounced 800 ms and flushed on blur, `Enter`, note switch, window blur and app background | The same rule and the same flush conditions as §5.1. The field has no autosave controller behind it, so these are the only chances to write — `src/hooks/useNoteTitle.ts` holds them. |
+| An empty field hands the title back to derivation | Otherwise clearing a name would leave the note nameless in the list forever, with no way back. `notes_set_title` writes `title_source = 'auto'` and re-derives (`03-data-model.md` §4.1). |
+| The last-changed date sits under it, in the reader's locale | A local-first app with no account has no better answer than the machine's locale. It is omitted rather than faked when a note has no saved state yet. |
+
+**Left empty, `title` is still derived** exactly as it always was (`03-data-model.md` §4.1):
 
 1. If the first block is a heading, its text is the title.
 2. Otherwise the first non-empty block's text is the title.
 3. Truncated to 120 characters on a word boundary.
 4. Empty result displays as "Untitled".
 
-The note list shows `Untitled` for such notes. The user gets a title by typing a heading, which is the behaviour Bear and Apple Notes have trained people to expect.
+So the note list shows `Untitled` for a note nobody has named, and a note written without
+touching the field behaves precisely as it did before — which is what makes the field an
+addition rather than a migration of everyone's notes.
+
+**The title is in one place.** It was in the desktop status bar and in the mobile bar above
+the editor until ADR-023, neither of them editable, so two labels for one note could
+disagree. The status row and the mobile bar no longer carry it; `prototype/index.html` §3
+changed with them.
 
 ## 8. Validation, recovery, limits
 
@@ -366,22 +387,27 @@ A single 28 px row at the bottom of the editor pane:
 
 ```
 [left]                                     [right]
-Untitled · Work · #work +2 · [pin]   342 words    Saved
+Work · #work +2 · [pin]              342 words    Saved
 ```
 
 | Element | Source |
 |---------|--------|
-| Title | Derived, `03-data-model.md` §4.1 |
 | Folder | Note's folder name, click to change |
 | Tags | Note's tags, click to add or remove |
 | Pin | `notes_set_pinned`, click to toggle, `Ctrl/Cmd+D` |
 | Word count | Derived at save |
 | Save state | Frontend save state machine, §5.2 |
 
-**This is the desktop row.** Below 768 px it carries folder, tags, an abbreviated word count and the save state only — the title is in the bar above and the pin is in that bar's overflow menu. `05-ui-ux.md` §2.4 has the reasoning and the measurement; at 360 px all six elements were present and all six were unreadable. The mobile row is also 44 px rather than 28, so §5.2's states and §9's slots have a 44 px touch target as `05-ui-ux.md` §9 requires on Android.
+**The title is no longer one of these elements.** It was, from M2 until ADR-023, and it
+was in the mobile bar too — two read-only labels for one note, neither of them editable,
+which is the arrangement §7 removes. It is the field above the text, and this row starts
+at the folder.
 
-M2 ships title, word count, and save state. The folder, tag and pin elements need
-M4's data and arrive with it, rather than as controls that do nothing.
+**This is the desktop row.** Below 768 px it carries folder, tags, an abbreviated word count and the save state only, and the pin is in the bar above's overflow menu. `05-ui-ux.md` §2.4 has the reasoning and the measurement; at 360 px all six elements were present and all six were unreadable. The mobile row is also 44 px rather than 28, so §5.2's states and §9's slots have a 44 px touch target as `05-ui-ux.md` §9 requires on Android.
+
+M2 shipped title, word count, and save state; ADR-023 took the title back out of the row.
+The folder, tag and pin elements needed M4's data and arrived with it, rather than as
+controls that do nothing.
 
 The save state carries the note it belongs to. A failure on a note the user has
 already left must not paint the status bar of the note now open, so the store

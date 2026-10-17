@@ -6,6 +6,7 @@ import { AlertCircle, ArrowLeft, RotateCw } from 'lucide-react';
 import { notesApi, tagsApi } from '../lib/ipc';
 import { registerSyncFlusher } from '../lib/syncFlush';
 import { useAutosave } from '../hooks/useAutosave';
+import { useNoteTitle } from '../hooks/useNoteTitle';
 import { isLetterShortcut } from '../lib/shortcuts';
 import { useFolders, folderNamesById } from '../hooks/useFolders';
 import { useTags } from '../hooks/useTags';
@@ -19,6 +20,7 @@ import type { Note, NoteFilter, NoteSummary, SaveNoteInput } from '../types/ipc'
 import { applySaveToList } from '../lib/noteOrder';
 import { NoteEditor } from '../editor/NoteEditor';
 import { EditorStatusBar } from './EditorStatusBar';
+import { NoteHeader } from './NoteHeader';
 import { FormattingToolbar } from './FormattingToolbar';
 import { EmptyState } from './EmptyState';
 import { summaryOf } from './summaryOf';
@@ -83,6 +85,13 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
      nothing until the debounce commits, which is the same lie the pin had. */
   const [folderId, setFolderId] = useState<Uuid | null>(null);
   const [tagIds, setTagIds] = useState<Uuid[]>([]);
+  /* ADR-023: the note's name, mirrored for the same reason `pinned` is — the
+     field has to render what the note is called, and a ref write renders
+     nothing. It is also the pending value rather than the saved one: a title
+     that waited for the debounce before appearing would be the same lie the pin
+     had. */
+  const [title, setTitle] = useState('');
+  const { write: writeTitle, flush: flushTitle } = useNoteTitle();
 
   /* The mounted TipTap instance. Held so a status-bar change can be turned into a
      save target without the editor having to be a piece of component state: the
@@ -212,12 +221,36 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
       setPinned(data.isPinned);
       setFolderId(data.folderId);
       setTagIds(ids);
+      setTitle(displayTitle(data.title));
       editorRef.current = editor;
       setToolbarEditor(editor);
       autosave.setBaseline(targetOf(editor) as SaveNoteInput);
     },
     [autosave, noteId, queryClient, targetOf],
   );
+
+  /* ADR-023. Queued on every keystroke like the document is, and flushed on the
+     same conditions — so a title typed and then abandoned by a note switch is not
+     lost. */
+  const changeTitle = useCallback(
+    (next: string): void => {
+      setTitle(next);
+      if (noteId !== null) writeTitle(noteId, next);
+    },
+    [noteId, writeTitle],
+  );
+
+  const commitTitle = useCallback((): void => {
+    flushTitle();
+  }, [flushTitle]);
+
+  /* Enter in the title field lands the caret at the start of the body, which is
+     where writing continues — not at the end, because the end of a note that was
+     last read a week ago is not where anyone resumes. */
+  const enterBodyFromTitle = useCallback((): void => {
+    flushTitle();
+    editorRef.current?.commands.focus('start');
+  }, [flushTitle]);
 
   /* The save target for whatever is on screen now, or `null` before the editor has
      mounted. Shared by the document path and the folder/tag path so both read the
@@ -442,7 +475,6 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
       <Shell
         status={
           <EditorStatusBar
-            title=""
             wordCount={0}
             saveState="saved"
             isPinned={false}
@@ -476,7 +508,6 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
     <Shell
       status={
         <EditorStatusBar
-          title={data === undefined ? '' : displayTitle(data.title)}
           wordCount={data?.wordCount ?? 0}
           saveState={saveState}
           isPinned={pinned}
@@ -539,14 +570,21 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
               </span>
             ) : null}
             <MobileEditorBar
-              title={displayTitle(data.title)}
               onBack={onClose}
               isPinned={pinned}
               onTogglePin={togglePin}
               onTrash={onTrash ?? NOOP}
-            />
+            />{' '}
             <FormattingToolbar
               editor={toolbarEditor}
+              variant={onClose === undefined ? 'desktop' : 'mobile'}
+            />
+            <NoteHeader
+              title={title}
+              updatedAt={data.updatedAt}
+              onChange={changeTitle}
+              onCommit={commitTitle}
+              onEnter={enterBodyFromTitle}
               variant={onClose === undefined ? 'desktop' : 'mobile'}
             />
             <NoteEditor
@@ -606,13 +644,11 @@ function Centred({ children }: { children: ReactNode }) {
    in ProseMirror, not in the button, so `Ctrl+Enter` then toggles nothing. Not
    rendering is also the honest answer: there is no back affordance to offer. */
 function MobileEditorBar({
-  title,
   onBack,
   isPinned,
   onTogglePin,
   onTrash,
 }: {
-  title: string;
   onBack?: () => void;
   isPinned: boolean;
   onTogglePin: () => void;
@@ -620,13 +656,14 @@ function MobileEditorBar({
 }) {
   if (onBack === undefined) return null;
   return (
-    /* Bar chrome is not selectable: the title is read, never copied — copying
-       happens in the editor below it. */
+    /* ADR-023: the bar no longer names the note. It used to, and so did the
+       desktop status bar, so the title was in two places and neither was editable;
+       it is the field under this bar now. What is left is back and the actions —
+       which is all a 52 px row ever needed. */
     <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 select-none">
       <IconButton label="Back to list" onClick={onBack} size="mobile">
         <ArrowLeft className="icon i-24" aria-hidden="true" />
       </IconButton>
-      <span className="flex-1 truncate text-[14px] font-semibold">{title}</span>
       <EditorOverflowMenu isPinned={isPinned} onTogglePin={onTogglePin} onTrash={onTrash} />
     </header>
   );
@@ -639,7 +676,6 @@ function RecoveryScreen({ code, onRetry }: { code: string; onRetry: () => void }
     <Shell
       status={
         <EditorStatusBar
-          title=""
           wordCount={0}
           saveState="saved"
           isPinned={false}

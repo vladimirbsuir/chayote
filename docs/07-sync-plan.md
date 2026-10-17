@@ -80,6 +80,17 @@ For the both-changed document case:
 
 Automatic three-way merging at the paragraph level is explicitly rejected for now. A silently wrong merge is worse than a visible conflict, and the conflict rate for a personal notes app is low enough that a manual prompt is acceptable.
 
+**The title follows the document's conflict, and it travels with it** (ADR-023). The
+title stopped being derived from the document, so it is no longer something a remote
+device can recompute for itself: it is pushed and pulled as a column beside `doc_json`,
+and a pull that adopts the remote document adopts the remote title in the same write —
+`conflicts` already carries a `remote_title` for exactly this. A note whose title is still
+derived (`title_source = 'auto'`) keeps `title_source` in the same push, so the other
+device recomputes rather than adopting a value the first device merely guessed. Keep-mine
+and use-theirs therefore move the two together, which is the only coherent outcome: a
+remote document under one name and a remote title belonging to another is a note nobody
+wrote.
+
 Documents compare by parsed value, never by string: the server column is
 `jsonb`, and `jsonb::text` re-spaces and reorders keys on every read, so a
 round-tripped document is never string-equal to the compact text the device

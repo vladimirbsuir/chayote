@@ -1,6 +1,8 @@
 import type { Uuid, JsonDoc } from '../types/note';
 import { EMPTY_DOC } from '../types/note';
 import { uuidFrom } from './generate';
+import { capTitle } from './derive';
+import type { MockNote } from './derive';
 
 export const CONTENT_SAMPLES: JsonDoc[] = [
   {
@@ -17,8 +19,7 @@ export const CONTENT_SAMPLES: JsonDoc[] = [
       },
       { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Decisions' }] },
       {
-        type: 'bulletList',
-        content: [
+        type: 'bulletList',        content: [
           {
             type: 'listItem',
             content: [
@@ -84,6 +85,18 @@ export const CONTENT_SAMPLES: JsonDoc[] = [
             ],
           },
         ],
+      },
+      /* An H1 *inside* the body. Migration 0006 lifts only a note's leading one
+         into the title field, so without this the fixture would stop exercising
+         the H1 node altogether — and `editor.spec.ts` asserts every block in the
+         schema renders. A top-level section in a long note is ordinary, which is
+         the point: headings below the first are content, not a title. It goes
+         above the divider so the document still ends on the same paragraph, which
+         is where several tests put their caret. */
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Apologies' }] },
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'Dana is back; the design review moved to Friday.' }],
       },
       { type: 'horizontalRule' },
       { type: 'paragraph', content: [{ type: 'text', text: 'Follow-up on Monday.' }] },
@@ -165,6 +178,43 @@ export const EMPTY_NOTE: Fixture = {
   deletedAt: null,
   tagIds: [],
 };
+
+/** ADR-023: what migration `0006_note_title_field.sql` does to a note, expressed
+    for seeded data. A note whose title used to be its leading H1 has that heading
+    moved into the field and out of the body, because both claiming the same words
+    is the duplication the field exists to remove — and the fixtures have to come
+    out the way a real database does after the upgrade, or the editor shows the
+    note's name twice and the tests assert a state nothing will ever be in again.
+
+    The rules are the Rust pass's, deliberately: only a *leading* heading moves, a
+    heading with no text is left where it is, and a note that was nothing but a
+    heading keeps an empty paragraph, because ProseMirror has no content model
+    without a block. */
+export function liftLeadingHeading(fixture: Fixture): MockNote {
+  const blocks = Array.isArray(fixture.doc.content) ? [...fixture.doc.content] : [];
+  const first = blocks[0];
+  const isHeading = first !== undefined && first.type === 'heading';
+  const heading = isHeading ? textOf(first) : '';
+  const title = heading.trim();
+
+  if (title.length === 0) {
+    return { ...fixture, title: '', titleSource: 'auto', doc: fixture.doc };
+  }
+
+  blocks.shift();
+  const content = blocks.length > 0 ? blocks : [{ type: 'paragraph' }];
+  return {
+    ...fixture,
+    title: capTitle(title),
+    titleSource: 'manual',
+    doc: { type: 'doc', content },
+  };
+}
+
+function textOf(node: JsonDoc): string {
+  if (typeof node.text === 'string') return node.text;
+  return (node.content ?? []).map(textOf).join('');
+}
 
 export const FIXTURE_NOTES: Fixture[] = [
   {

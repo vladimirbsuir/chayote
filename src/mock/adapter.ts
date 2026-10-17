@@ -9,11 +9,11 @@ import type {
 import type { Uuid } from '../types/note';
 import { EMPTY_DOC } from '../types/note';
 import type { MockDatabase, MockFolder, MockNote } from './derive';
-import { deriveTitle, plainTextOf, toNote, toSummary, toTree } from './derive';
+import { capTitle, deriveTitle, plainTextOf, toNote, toSummary, toTree } from './derive';
 import { matchesTokens, rankFor, snippetFor, toSearchTokens } from './search';
 import { buildDatabase, uuidFrom } from './generate';
 import { cycleDetected, notFound, validation } from './errors';
-import { EMPTY_NOTE, FIXTURE_NOTES, FIXTURE_NOW, FIXTURE_TRASH } from './fixtures';
+import { EMPTY_NOTE, FIXTURE_NOTES, FIXTURE_NOW, FIXTURE_TRASH, liftLeadingHeading } from './fixtures';
 
 function nowMs(): number {
   return Date.now();
@@ -81,6 +81,8 @@ export function createMockBackend(db: MockDatabase): Backend {
       const note: MockNote = {
         id: uuidFrom(`n-${timestamp}-${state.notes.length}`),
         doc: EMPTY_DOC,
+        title: '',
+        titleSource: 'auto',
         folderId,
         isPinned: false,
         createdAt: timestamp,
@@ -95,9 +97,14 @@ export function createMockBackend(db: MockDatabase): Backend {
     notes_save: ({ input }) => {
       const existing = state.notes.find((note) => note.id === input.id);
       const timestamp = nowMs();
+      /* The title is kept, not re-derived: a typed one is not derivable from the
+         document, so a save that recomputed it would blank the field on the next
+         keystroke in the body. The Rust `save` reads the same two columns. */
       const saved: MockNote = {
         id: input.id,
         doc: input.doc,
+        title: existing?.title ?? '',
+        titleSource: existing?.titleSource ?? 'auto',
         folderId: input.folderId,
         isPinned: input.isPinned,
         createdAt: existing?.createdAt ?? timestamp,
@@ -130,6 +137,24 @@ export function createMockBackend(db: MockDatabase): Backend {
     notes_set_pinned: ({ id, isPinned }) => {
       const note = requireNote(id);
       note.isPinned = isPinned;
+      note.updatedAt = nowMs();
+      return toNote(note, state);
+    },
+
+    notes_set_title: ({ id, title }) => {
+      const note = requireNote(id);
+      const trimmed = title.trim();
+      /* Empty is not a note with no name — it is the note handing the title back
+         to derivation, which needs the document. One write either way: no
+         document on the write path, and no derived column recomputed, matching the
+         Rust `set_title`. */
+      if (trimmed.length === 0) {
+        note.title = '';
+        note.titleSource = 'auto';
+      } else {
+        note.title = capTitle(trimmed);
+        note.titleSource = note.title.length > 0 ? 'manual' : 'auto';
+      }
       note.updatedAt = nowMs();
       return toNote(note, state);
     },
@@ -417,13 +442,19 @@ function collectSubtree(db: MockDatabase, rootId: Uuid): Uuid[] {
 }
 
 /** The seeded database the browser fallback starts from: nested folders, tags
-    with counts, pinned and unpinned notes, and one trashed note. */
+    with counts, pinned and unpinned notes, and one trashed note.
+
+    Fixtures go through the same leading-heading lift migration `0006` applies, so
+    the seeded library looks like a database that has been upgraded: each note's
+    name lives in the field and not at the top of its text. A fixture left with a
+    heading in its body would show the note's name twice in the editor and pin a
+    state nothing will ever be in again. */
 export function buildMockDatabase(): MockDatabase {
   const generated = buildDatabase({ noteCount: 0 });
   return {
     folders: generated.folders,
     tags: generated.tags,
-    notes: [...FIXTURE_NOTES, ...FIXTURE_TRASH, { ...EMPTY_NOTE }],
+    notes: [FIXTURE_NOTES, FIXTURE_TRASH, [EMPTY_NOTE]].flat().map(liftLeadingHeading),
   };
 }
 
