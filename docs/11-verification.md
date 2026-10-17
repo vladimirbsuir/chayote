@@ -189,6 +189,47 @@ and every tap after measuring landed first try. Aim at the middle of the item
 box rather than its text core — at a scaled root font the items are far taller
 than their text, and an edge tap lands in the neighbour.
 
+**Reading the page on the device — CDP over `adb forward`, no build change needed.** A
+screenshot shows what is on the glass; it cannot say what the page thinks. The WebView in a
+debug build is already inspectable, so a layout claim can be *measured* on the phone:
+
+```powershell
+$line = & $adb shell cat /proc/net/unix | Select-String webview_devtools   # PID changes on every relaunch
+& $adb forward tcp:9222 "localabstract:webview_devtools_remote_$pid"
+# then over the WebSocket at ws://127.0.0.1:9222/devtools/page/<id>, Runtime.evaluate:
+#   JSON.stringify({innerH: window.innerHeight, visualH: Math.round(window.visualViewport.height),
+#                   offsetTop: Math.round(window.visualViewport.offsetTop),
+#                   focus: document.activeElement?.getAttribute('data-testid')})
+```
+
+Node 24 has a global `WebSocket`, so this needs nothing installed in the project. Two
+things it settled in the ADR-023 session that four screenshots had not:
+
+- **Which element holds focus.** A tap that appears to miss a field is often a tap that
+  landed somewhere else entirely, and `document.activeElement` names the truth in one
+  call. It is also how "the text I typed went into the body instead of the title" was
+  found rather than guessed at.
+- **What the keyboard does to the viewport.** With the IME open on this device,
+  `innerHeight` stays 820 while `visualViewport.height` falls to 525 and `offsetTop`
+  becomes 220 — the layout viewport is *not* resized, so the WebView shifts the visible
+  window down and everything above the caret leaves the screen. No amount of reasoning
+  about flex and `min-h-0` reproduces that: a `setViewportSize` harness shrinks the layout
+  viewport instead, which is a different failure with a different fix, and a change written
+  against it would have been a fix for nothing.
+
+Coordinates still have to be measured per tap, and **the rect has to be taken in the same
+state you will tap in**: with the IME open, `getBoundingClientRect()` is in layout
+coordinates while the screen shows `layout − offsetTop`, so a point can be measured
+accurately and still be 68 px off-screen. Close the IME first, or add the offset back.
+
+**Restoring what a session touched.** Take the copy with the app stopped, and copy all
+three files — `db`, `-wal` and `-shm` — or the `-wal` pages are missing from the
+restored database. **Do not open the only copy in `sqlite3`**: it replays the WAL into the
+main file and deletes the `-wal`, which is exactly the evidence you wanted kept. Copy the
+backup somewhere else, open that, and query the original only for a byte-level comparison.
+Byte-identical `db` and `-wal` sizes before and after a device session are a cheap check
+that nothing was written at all.
+
 What the gear session taught, beyond §3.5a:
 
 - `screencap` returns the full `1080×2460`, so image pixels are device pixels 1:1 — but CSS pixels are ×3 *and* offset by the status bar and the safe-area insets, so eyeballed taps land ~100 px off (the M8 note). Measure the target in the previous screenshot instead of guessing.
