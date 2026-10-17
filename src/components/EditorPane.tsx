@@ -658,13 +658,22 @@ function MobileEditorBar({
   return (
     /* ADR-023: the bar no longer names the note. It used to, and so did the
        desktop status bar, so the title was in two places and neither was editable;
-       it is the field under this bar now. What is left is back and the actions —
-       which is all a 52 px row ever needed. */
+       it is the field under this bar now.
+
+       What is left is back on the left and the menu on the right, which is what
+       `ml-auto` is here for: the title's `flex-1` was what used to hold them apart,
+       and removing it without a replacement put the two controls next to each
+       other at the left edge. Caught on a device, not by a test — the mobile
+       geometry assertions in `e2e/mobile.spec.ts` do not look at where in the bar
+       a control sits, and `e2e/title.spec.ts` only asserts the title is *absent*
+       from the bars. */
     <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 select-none">
       <IconButton label="Back to list" onClick={onBack} size="mobile">
         <ArrowLeft className="icon i-24" aria-hidden="true" />
       </IconButton>
-      <EditorOverflowMenu isPinned={isPinned} onTogglePin={onTogglePin} onTrash={onTrash} />
+      <div className="ml-auto">
+        <EditorOverflowMenu isPinned={isPinned} onTogglePin={onTogglePin} onTrash={onTrash} />
+      </div>
     </header>
   );
 }
