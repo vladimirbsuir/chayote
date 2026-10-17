@@ -30,6 +30,50 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 021 | Tags stay listed at a zero count; the sidebar creates them | Accepted |
 | 022 | AGENTS.md is the agent onboarding document; work lands via pull request | Accepted |
 | 023 | The note title is a field of its own; the editor's leading line is not it | Accepted |
+| 024 | Releases are GitHub Releases, and the app updates itself on desktop only | Accepted |
+
+---
+
+## ADR-024 - Releases are GitHub Releases, and the app updates itself on desktop only
+
+**Status:** Accepted · **Date:** 2026-10-17
+
+**Context.** The user asked for automatic updates for the desktop and Android apps, and for a Settings tab with a button to start a check. Nothing in the repository could serve that request, and the reason was not only the missing plugin.
+
+Three things stood in the way.
+
+**The release pipeline published nothing an updater could read.** `release.yml` ran `tauri build` and handed the output to `actions/upload-artifact@v4` (a deprecated major, while `ci.yml` already used `v5`). An artifact bucket is not an HTTP endpoint: reading one needs an authenticated session. `tauri-plugin-updater` fetches a URL. So the first tagged release would have had no `latest.json` for anyone to fetch, and the updater would have been a button that always said "up to date" because every check failed.
+
+**macOS cannot update without code signing, and §3.7 of `06-platform.md` says signing is out of scope for v1.** An unsigned `.app` bundle is not trusted to replace another `.app`. This is a different mechanism from the updater's own signature and the two are easy to confuse: the minisign signature proves the artifact came from the build holding the private key, and has no bearing on whether macOS will accept the bundle inside it. Both must hold.
+
+**The updater cannot install on Android at all.** The Tauri documentation's platform table lists Android as supported, and it is not. The plugin's own manifest says `android = { level = "none" }`, and `install_inner` is `Err(Error::UnsupportedOs)` under `cfg(mobile)`. There is no `REQUEST_INSTALL_PACKAGES` handling, no `PackageInstaller` session and no install intent anywhere in the crate. `check()` and `download()` work; installing does not. Enabling it on Android would produce an app that downloads an APK it cannot install.
+
+**Decision.** `release.yml` publishes a **GitHub Release** per `v*` tag, using `tauri-apps/tauri-action`, and attaches the signed artifacts plus a generated `latest.json`. `plugins.updater.endpoints` is `https://github.com/vladimirbsuir/chayote/releases/latest/download/latest.json`: static, HTTPS, and readable without a token because the repository is public, so there is no proxy and no credential to rotate. `bundle.createUpdaterArtifacts` is `true` and the public half of a minisign keypair lives in `plugins.updater.pubkey`; the private half is a GitHub Actions secret.
+
+**Windows and Linux update in place. macOS and Android do not**, and the UI says so rather than failing: a disabled button and one line of copy naming the platform, which is the same shape as the existing "Sync is unavailable here." fallback in the same dialog. The honest reason is recorded per platform in `06-platform.md` §3.8.
+
+`requireSignedVersion` is on. The endpoint response is not signed, so without it a tampered `latest.json` could announce `0.9.0` while pointing at a validly signed `0.2.0` artifact — a rollback the signature alone does not prevent.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Keep uploads as workflow artifacts, point the updater elsewhere | There is nowhere else to point it. Every alternative is a host this project does not have, bought to avoid one workflow rewrite. |
+| Hand-write `latest.json` in the workflow | Doable, and it is about thirty lines — but across a three-OS matrix it has to pick one artifact per platform key and embed the right signature, and a mistake is a silently broken update path that no test in this repository would catch. `tauri-action` merges the matrix's platform keys into one document and is the tool Tauri documents for exactly this. |
+| Ad-hoc sign the macOS bundle (`signingIdentity: "-"`) so macOS can update too | It can be made to produce an artifact, but every update would trip Gatekeeper and ask the user to whitelist the app in Privacy & Security — a worse experience than downloading a `.dmg`, which is what `INSTALL.md` already tells them to do. Deferred behind real Apple signing, which needs a paid account and a device. |
+| Write the Android installer by hand — an `ACTION_INSTALL_PACKAGE` intent from a `FileProvider`, roughly the shape of ADR-020's Kotlin bridge | Deferred rather than rejected. It is real work: a release keystore in CI, `REQUEST_INSTALL_PACKAGES`, and a device to verify on, none of which this branch can prove. `08-roadmap.md` §3 carries it. Enabling the plugin meanwhile would have shipped the failure mode instead. |
+| A dynamic update server with a release channel query | A server is a thing to run, secure, back up and keep online, in exchange for channels this project does not have. One public URL and `latest` is the whole requirement. |
+| Point the endpoint at a tag rather than at `releases/latest` | Fixes the manifest to one tag, so `latest` has to be moved by hand for every release — a manual step whose omission is invisible until users stop receiving updates. |
+
+**Consequences.**
+
+- **`npm run tauri build` now requires `TAURI_SIGNING_PRIVATE_KEY`.** `createUpdaterArtifacts` makes the bundler refuse to emit unsigned artifacts, which is the intended behaviour and not a defect. `npm run tauri dev` is unaffected. `.gitignore` excludes `*.key` so the key cannot be committed by accident.
+- **Losing the private key, or its password, permanently breaks updates for every build already on an updater-enabled version.** There is no recovery short of a new identifier and a new key. The public key is compiled into the app, so it cannot be rotated for existing installs either.
+- **A tag that disagrees with `tauri.conf.json` fails the release.** `tauri build` and `latest.json` both take their version from the config, so a tag of `v0.9.0` against a config of `0.1.0` publishes a Release whose name lies about its contents — and `requireSignedVersion` then rejects every update it offers. The `version` job in `release.yml` asserts they match, and a manual dispatch publishes the config's version instead of a branch name.
+- **Linux resolves to the AppImage.** Both `.deb` and `.AppImage` are built and both appear in `latest.json`; the plugin's own merge ranks the AppImage signature first, and the AppImage is the one that needs no `sudo` to replace itself.
+- **The Android APK is still built locally, not in CI**, and `INTERNET` and `ACCESS_NETWORK_STATE` remain the only runtime permissions (`06-platform.md` §4.2). `REQUEST_INSTALL_PACKAGES` is explicitly *not* added: it would grant an app nothing it can use (§3.8.1).
+- `tauri-plugin-updater` is a **desktop-only** dependency, gated `cfg(not(any(target_os = "android", target_os = "ios")))`, so it is never compiled into an APK.
+- `docs/06-platform.md` §3.7 and §3.8, `INSTALL.md`, `05-ui-ux.md` §6.6, `02-architecture.md` §7 and `08-roadmap.md` §3 changed with it, and `prototype/index.html` in the same commit (ADR-016).
 
 ---
 

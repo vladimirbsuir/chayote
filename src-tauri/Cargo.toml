@@ -34,6 +34,14 @@ tokio-postgres-rustls = "0.14.0"
 webview2-com = "0.39"
 windows-core = "0.62"
 
+# The updater is a desktop-only dependency (ADR-024). Its own manifest declares
+# `android = { level = "none" }` and `install_inner` returns `Error::UnsupportedOs`
+# under `cfg(mobile)`, so compiling it on Android would buy an APK download with
+# no way to install it — and would put a plugin in the app that can only fail.
+# Excluding the target also keeps `REQUEST_INSTALL_PACKAGES` off the manifest.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+
 [profile.release]
 codegen-units = 1
 lto = true

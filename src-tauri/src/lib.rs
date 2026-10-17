@@ -23,7 +23,7 @@ const SETTINGS_FILE: &str = "settings.json";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let built = tauri::Builder::default()
+    let built = with_updater(tauri::Builder::default())
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(commands::handler())
         .setup(|app| {
@@ -48,6 +48,20 @@ pub fn run() {
             std::process::exit(1);
         }
     }
+}
+
+/// ADR-024: the updater plugin is desktop-only, matching its `Cargo.toml` gate.
+/// `plugins.updater` stays in `tauri.conf.json` unconditionally because it is
+/// also where the public key lives, and the key is compiled into every target —
+/// a build that could never verify an update does not need one.
+#[cfg(desktop)]
+fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.plugin(tauri_plugin_updater::Builder::new().build())
+}
+
+#[cfg(mobile)]
+fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
 }
 
 /// Present so the settings filename has one home. Read from

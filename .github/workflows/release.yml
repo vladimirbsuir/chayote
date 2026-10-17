@@ -1,10 +1,19 @@
 name: Release
 
-# M8 packaging: every bundle in 06-platform.md §3.7 is produced on a clean
-# runner, one job per OS. Run by hand from the Actions tab, or by pushing a
-# tag like v0.1.0. The Android APK is intentionally not built here: it needs
-# the NDK, the Rust Android targets and a signing key, and M7 already proved
-# the documented local build (`npx tauri android build --apk`) on hardware.
+# ADR-024. Every bundle in `06-platform.md` §3.7 is produced on a clean runner,
+# one job per OS, and published as a GitHub Release rather than as an Actions
+# artifact. That change is what makes the updater possible: `tauri-plugin-updater`
+# reads a static `latest.json` over HTTPS, and an artifact bucket is not an
+# endpoint. It also fixes the old workflow's deprecated `upload-artifact@v4` and
+# gives bundles stable download URLs.
+#
+# Triggered by pushing a `v*` tag. A manual dispatch publishes the version
+# currently in `src-tauri/tauri.conf.json`, which the `version` job below asserts
+# is the same thing a tag would have had to be.
+#
+# The Android APK is intentionally not built here, for the reasons in the header
+# of the M8 note below, and `06-platform.md` §4.6 records why the app cannot
+# update itself on Android at all.
 
 on:
   workflow_dispatch:
@@ -12,9 +21,50 @@ on:
     tags:
       - 'v*'
 
+# Creating and updating a Release needs a write token. `contents: write` and
+# nothing else: no `actions: write`, no packages, no deployments.
+permissions:
+  contents: write
+
+# Two tags pushed in quick succession must not race for `releases/latest`, which
+# is the endpoint `plugins.updater.endpoints` reads. Serialising per branch means
+# the second waits, and `latest` settles on the higher version.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      tag: ${{ steps.read.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: read
+        name: Read the version and prove the tag agrees with it
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tag_name="$GITHUB_REF_NAME"
+            if [ "${tag_name#v}" != "$version" ]; then
+              echo "::error::tag $tag_name does not match src-tauri/tauri.conf.json version $version"
+              echo "The release name would lie about its contents: latest.json and"
+              echo "every artifact signature carry the config version, and"
+              echo "requireSignedVersion compares the signed version against the announced one."
+              exit 1
+            fi
+            echo "tag=$tag_name" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          fi
+
   desktop:
     name: Bundle (${{ matrix.os }})
+    needs: version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -42,13 +92,42 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
       - run: npm ci
-      - run: npx tauri build --bundles ${{ matrix.bundles }}
+      # `createUpdaterArtifacts` in tauri.conf.json makes the bundler sign every
+      # artifact, and a bundle with no signature cannot be updated from. The key
+      # is a repository secret and is never written to the runner's disk.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ needs.version.outputs.tag }}
+          releaseName: Chayote ${{ needs.version.outputs.version }}
+          releaseBody: |
+            Chayote ${{ needs.version.outputs.version }}.
+
+            Windows and Linux builds update themselves from **Settings → Updates**.
+            macOS and Android builds do not, for the reasons in
+            [`docs/06-platform.md`](https://github.com/vladimirbsuir/chayote/blob/main/docs/06-platform.md).
+
+            Download | Asset
+            --- | ---
+            Windows | `Chayote_${needs.version.outputs.version}_x64-setup.exe`
+            macOS | `.app.tar.gz` or `.dmg`
+            Linux | `.AppImage` or `.deb`
+          includeUpdaterJson: true
+          args: --bundles ${{ matrix.bundles }}
+      # Only the portable executable is uploaded as a workflow artifact. The
+      # bundles reach users through the Release above, which has stable URLs and
+      # is what the updater resolves; keeping a second copy in the artifact store
+      # would be a second place to look for a build that could drift.
       - name: Portable executable (Windows)
         if: matrix.os == 'windows-latest'
         run: npx tauri build --no-bundle
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
+        if: matrix.os == 'windows-latest'
         with:
-          name: chayote-${{ matrix.os }}
-          path: |
-            src-tauri/target/release/bundle/
-            src-tauri/target/release/chayote.exe
+          name: chayote-portable-${{ matrix.os }}
+          path: src-tauri/target/release/chayote.exe
+          retention-days: 30
+          if-no-files-found: error
