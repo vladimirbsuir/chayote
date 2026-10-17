@@ -14,40 +14,6 @@ The concrete consequence: no decoration, no gradients, no shadows for depth, no 
 
 ### 2.1 Desktop (≥ 1024 px)
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  Chayote     [icon-search Search notes…         ]      [+] [sun] [···] │  52 px
-├────────────────────────────┬─────────────────────────────────────────┤
-│  All   [pin] Pinned         │                                         │
-│  ──────────────────────    │   Meeting notes                          │
-│  [folder] Folders      [+]  │                                         │
-│    ▸ [folder] Work          │   Discussed the launch date with the    │
-│       [folder] Projects     │   team. Action items below.              │
-│       [folder] Personal     │                                         │
-│    ▸ [folder] Reading       │   [ ] Draft the announcement  │
-│  ──────────────────────    │   [ ] Prepare the demo build  │
-│  [hash] Tags            [+] │                                         │
-│    [hash] work      14       │                                         │
-│    [hash] ideas      3       │                                         │
-│  ──────────────────────    │                                         │
-│  12 notes                  │                                         │
-│  ┌──────────────────────┐  │                                         │
-│  │ [pin] Meeting notes  │  │                                         │
-│  │ Discussed the launch…│  │  ← note list (virtualised)              │
-│  │ 2 min ago            │  │                                         │
-│  ├──────────────────────┤  │                                         │
-│  │ Reading list         │  │                                         │
-│  │ Books for the quarte…│  │                                         │
-│  │ yesterday            │  │                                         │
-│  └──────────────────────┘  │                                         │
-├────────────────────────────┴─────────────────────────────────────────┤
-│  Personal · #work #ideas                          342 words  Saved   │  28 px
-└──────────────────────────────────────────────────────────────────────┘
-     320 px                        flex                          max 720 px
-```
-
-`[folder]`, `[pin]`, `[hash]` denote icons, per §3.3. The 720 px editor column is the readable measure; the pane itself is fluid.
-
 The sidebar is three stacked regions, not three columns. Filters, then structure, then the list, separated by hairlines. Only one is interactive at a time.
 
 ### 2.2 Sidebar anatomy
@@ -67,22 +33,6 @@ Sidebar overlays the editor as a drawer, 320 px, with a scrim. `Esc` or scrim ta
 ### 2.4 Android (< 768 px)
 
 Single pane. One view visible at a time; navigation pushes a view onto an in-app stack.
-
-```
-  Desktop layout      Android: list view         Android: editor view
-┌─────────┬────────┐  ┌──────────────────────┐   ┌──────────────────────┐
-│ sidebar │ editor │  │[gear] Chayote    [+] │   │[back] Chayote    [···]│
-└─────────┴────────┘  │[search] Search…      │   │                      │
-                      │ All   [pin] Pinned    │   │  Meeting notes       │
-                      │ [folder] Folders      │   │                      │
-                      │ 12 notes              │   │  Discussed the…      │
-                      │ [note list]           │   │                      │
-                      └──────────────────────┘   │  [ ] Draft…            │
-                                                   │                      │
-                                                   │  Personal #work     │
-                                                   │  342 w  Saved       │
-                                                   └──────────────────────┘
-```
 
 Back behaviour: the Android system back button pops the view stack. At the root it moves the task to the background. The list → editor transition is a horizontal slide matching the platform convention. Leaving the editor closes the note with the view: the list shows no open marker, because on a single pane there is no open note once the editor is gone — a marker there reads as a stuck selection.
 

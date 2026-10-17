@@ -44,15 +44,6 @@ you download the APK with, then open the APK to install. The signing key is
 a debug key kept outside this repository; a store release with a stable
 release key is out of scope for v1.
 
-## First launch
-
-The app opens empty: no folders, no tags, no sample notes, no sign-in. Use
-`+` (or `Ctrl+N`) to create your first note. Everything is saved
-automatically as you type.
-
-Chayote makes **zero network requests**. If the device is in airplane mode,
-nothing changes.
-
 ## Your data
 
 | Store          | Desktop                                         | Android                                        |

@@ -1,8 +1,6 @@
-# 07 — Sync Plan (Supabase / Postgres)
+# 07 — Sync Plan
 
-**Status:** Direction frozen; MVP implemented on branch `feat/sync-mvp` (single general Postgres engine, no Auth, Settings → Sync tab, status + conflict UI). Phase E polish (backoff, open-editor guard, never-synced delete guard) implemented on the same branch. Last updated 2026-10-14.
-
-**v1 ships without sync.** This document exists so the v1 code does not paint us into a corner, and so the later phase has a design instead of a blank page. Nothing here is implemented in v1. What *is* implemented in v1 is the outbox table and the schema fields that this plan depends on — see `03-data-model.md` §3.7.
+**Status:** Frozen; Last updated 2026-10-14.
 
 ---
 
@@ -43,9 +41,6 @@ who never configures it runs exactly the v1 build.
 | C | Pull: incremental fetch by `rev` watermark, apply with conflict checks | done |
 | D | Bootstrap: falls out of the drain; switching servers re-queues everything | done |
 | E | Retry/backoff polish, open-editor guard, never-synced delete guard, re-upload recovery, two-device live coverage | done |
-
-Phases F (cross-device search) and G (realtime push) were dropped, not
-deferred: there is no server search and no live updates, by decision.
 
 ## 4. Server schema
 
@@ -109,8 +104,6 @@ updates cleanly instead of parking again.
   never arrived): the note is unfiled instead of failing the cycle — the same
   `ON DELETE SET NULL` semantics a local folder delete gets. Crashing the
   cycle over a filing hint would block every row behind it.
-
-A tree cannot be merged structurally in v1. Documented limitation.
 
 ### 5.3 `note_tags` — set union, then LWW
 
