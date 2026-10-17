@@ -123,9 +123,7 @@ pub async fn updates_check(
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn updates_install(
-    // Unused on Windows, where the installer launched by the install step owns
-    // the exit and restarting here would race it.
-    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] app: AppHandle,
+    app: AppHandle,
     pending: tauri::State<'_, PendingUpdate>,
     on_event: tauri::ipc::Channel<DownloadEvent>,
 ) -> Result<(), AppError> {
@@ -149,12 +147,26 @@ pub async fn updates_install(
         )
         .await
         .map_err(network)?;
-    /* On Linux the new AppImage is on disk but the running process is the old
-    one, so the restart is ours to do. Windows never reaches this line. */
-    #[cfg(target_os = "linux")]
-    app.restart();
+    restart_after_install(&app);
     Ok(())
 }
+
+/// Linux replaces the AppImage on disk, so the running process is still the old
+/// one and the restart is ours to do. Windows exits the process as part of
+/// installing and the installer takes over; macOS never reaches this command
+/// (`06-platform.md` §3.8).
+///
+/// A function rather than an `#[cfg]` attribute at the call site, for one reason:
+/// `AppHandle::restart` returns `!`, so a `cfg`-gated call leaves the `Ok(())`
+/// after it looking unreachable on Linux and clippy rejects the build there.
+/// Returning `()` puts the divergence inside a function whose signature says so.
+#[cfg(target_os = "linux")]
+fn restart_after_install(app: &AppHandle) {
+    app.restart();
+}
+
+#[cfg(not(target_os = "linux"))]
+fn restart_after_install(_app: &AppHandle) {}
 
 #[cfg(desktop)]
 fn lock(
