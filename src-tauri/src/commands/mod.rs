@@ -69,6 +69,14 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         crate::commands::sync::sync_reupload,
         crate::commands::sync::sync_list_conflicts,
         crate::commands::sync::sync_resolve_conflict,
+        crate::commands::updates::app_info,
+        /* ADR-024: the updater plugin is not compiled on Android, so neither are
+        these two. `app_info` stays everywhere — it is how the Android build
+        learns it cannot update. */
+        #[cfg(desktop)]
+        crate::commands::updates::updates_check,
+        #[cfg(desktop)]
+        crate::commands::updates::updates_install,
     ]
 }
 
@@ -89,3 +97,4 @@ pub mod notes;
 pub mod search;
 pub mod sync;
 pub mod tags;
+pub mod updates;

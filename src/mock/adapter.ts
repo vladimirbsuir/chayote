@@ -12,12 +12,40 @@ import type { MockDatabase, MockFolder, MockNote } from './derive';
 import { capTitle, deriveTitle, plainTextOf, toNote, toSummary, toTree } from './derive';
 import { matchesTokens, rankFor, snippetFor, toSearchTokens } from './search';
 import { buildDatabase, uuidFrom } from './generate';
-import { cycleDetected, notFound, validation } from './errors';
+import { cycleDetected, notFound, unreachable, validation } from './errors';
 import { EMPTY_NOTE, FIXTURE_NOTES, FIXTURE_NOW, FIXTURE_TRASH, liftLeadingHeading } from './fixtures';
 
 function nowMs(): number {
   return Date.now();
 }
+
+/** The version the browser fallback reports. `tauri.conf.json` says `0.1.0`;
+    it is restated here rather than imported because the frontend cannot read a
+    file from `src-tauri`, and a build that drifted from the real one would show
+    a version the app does not have. */
+const MOCK_VERSION = '0.1.0';
+
+/** The one update the fallback can offer, for `?seed=update`. */
+const MOCK_UPDATE = {
+  version: '0.2.0',
+  notes: 'Faster search, and the Updates tab.',
+  date: '2026-10-17T09:00:00Z',
+};
+
+/** Which updater story the fallback tells.
+    - `none` — supported, and nothing newer. The everyday case.
+    - `available` — supported, with 0.2.0 waiting. The install path.
+    - `unsupported` — cannot update at all, as on macOS and Android
+      (`06-platform.md` §3.8). The disabled button and its reason.
+    - `offline` — supported, but the endpoint cannot be reached. A failure is a
+      screen like any other and has to be reachable in a browser. */
+export type MockUpdateFeed = 'none' | 'available' | 'unsupported' | 'offline';
+
+export type MockOptions = {
+  updateFeed: MockUpdateFeed;
+};
+
+export const DEFAULT_MOCK_OPTIONS: MockOptions = { updateFeed: 'none' };
 
 function matchesFilter(note: MockNote, filter: Selection): boolean {
   switch (filter.kind) {
@@ -47,7 +75,10 @@ function foldCase(value: string): string {
   return value.toLocaleLowerCase();
 }
 
-export function createMockBackend(db: MockDatabase): Backend {
+export function createMockBackend(
+  db: MockDatabase,
+  options: MockOptions = DEFAULT_MOCK_OPTIONS,
+): Backend {
   const state = db;
   const syncState = { connectionString: '', enabled: false };
 
@@ -375,6 +406,38 @@ export function createMockBackend(db: MockDatabase): Backend {
     sync_list_conflicts: () => [],
 
     sync_resolve_conflict: () => undefined,
+
+    /* ADR-024. The updater has no endpoint in a browser, so the three commands
+       answer from a fixed feed rather than a request. `updateFeed` is chosen by
+       the caller — `ipc.ts` reads it off `?seed=` — because both the
+       update-available and the cannot-update branch are real screens and neither
+       is reachable from the default. */
+    app_info: () => ({
+      version: MOCK_VERSION,
+      os: options.updateFeed === 'unsupported' ? 'macOS' : 'Linux',
+      updatesSupported: options.updateFeed !== 'unsupported',
+    }),
+
+    updates_check: () => {
+      /* `MockBackendError`, not a bare object: `only-throw-error` is right, and
+         the tab's handling duck-types on `code` and `message` precisely so it
+         works for an `Error` here and the bare `{ code, message }` a real
+         rejected `invoke` carries. */
+      if (options.updateFeed === 'offline') {
+        throw unreachable();
+      }
+      return options.updateFeed === 'available' ? MOCK_UPDATE : null;
+    },
+
+    /* Resolves rather than restarting anything: a browser has no process to
+       replace, and the tab must reach its "installed" state to be testable at
+       all. The channel arg is inert here — there is no transfer to report on. */
+    updates_install: () => {
+      if (options.updateFeed === 'offline') {
+        throw unreachable();
+      }
+      return undefined;
+    },
   };
 
   function invoke<C extends CommandName>(

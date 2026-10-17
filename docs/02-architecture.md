@@ -220,7 +220,18 @@ Tauri commands exposed to the frontend. This is the complete API for v1; adding 
 | `sync_reupload` | `()` | `i64` (rows queued) |
 | `sync_list_conflicts` | `()` | `SyncConflict[]` |
 | `sync_resolve_conflict` | `{ id, keepLocal }` | `()` |
+| `app_info` | `()` | `AppInfo { version, os, updatesSupported }` |
+| `updates_check` | `()` | `UpdateSummary \| null` (ADR-024) |
+| `updates_install` | `{ onEvent }` | `()` (desktop only) |
 | `window_ready` | `()` | `()` |
+
+**The updater commands (ADR-024).** The updater runs in Rust and the frontend reaches it only through these three, so R6 holds with no second import site and the browser fallback can answer the same calls (`src/mock/adapter.ts`, ADR-018).
+
+`app_info` exists on every platform and exists because the other two do not: it is how a macOS or Android build learns it cannot update, before the UI offers a button whose only possible outcome is a failure. `updates_check` and `updates_install` are registered behind `#[cfg(desktop)]`, because `tauri-plugin-updater` is a desktop-only dependency (`06-platform.md` §3.8.1).
+
+`updates_check` returns `null` for "checked, nothing newer" and an error for "could not check". That distinction is the whole difference between the tab saying "up to date" and saying "could not check", so it is modelled in the return type rather than inferred.
+
+`updates_install` takes a `tauri::ipc::Channel` rather than returning progress: the frontend owns the progress display, and a channel keeps the transfer's start / length / finish events in order without the tab re-reading anything. The `Update` found by the check is held in managed state between the two commands — it cannot be reconstructed from a version string, and holding it is what makes the install verify against the *checked* artifact rather than against whatever the endpoint says a moment later.
 
 Settings are read and written with `@tauri-apps/plugin-store`, not with a command.
 

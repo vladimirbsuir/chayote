@@ -3,6 +3,7 @@ import type { FolderNode } from './folder';
 import type { TagWithCount } from './tag';
 import type { SearchInput, SearchPage } from './search';
 import type { SyncConflict, SyncStatus, SyncSummary } from './sync';
+import type { AppInfo, UpdateSummary } from './update';
 
 /* Domain shapes crossing the IPC boundary. Rust structs carry
    #[serde(rename_all = "camelCase")], so every field is camelCase here.
@@ -95,6 +96,9 @@ export type CommandName =
   | 'sync_reupload'
   | 'sync_list_conflicts'
   | 'sync_resolve_conflict'
+  | 'app_info'
+  | 'updates_check'
+  | 'updates_install'
   | 'window_ready';
 
 export type CommandArgs = {
@@ -125,6 +129,14 @@ export type CommandArgs = {
   sync_reupload: Record<string, never>;
   sync_list_conflicts: Record<string, never>;
   sync_resolve_conflict: { id: string; keepLocal: boolean };
+  app_info: Record<string, never>;
+  updates_check: Record<string, never>;
+  /* `onEvent` is a live `tauri::ipc::Channel`, not data: nothing about it
+   serialises, the browser fallback has no channel to construct, and the mock
+   ignores it. `unknown` rather than the event union is the honest type — the one
+   place that knows what it really is and builds it is `lib/ipc.ts`, and a
+   `Channel` type here would put a Tauri import in the pure types module. */
+updates_install: { onEvent: unknown };
   window_ready: Record<string, never>;
 };
 
@@ -156,6 +168,11 @@ export type CommandOutput = {
   sync_reupload: number;
   sync_list_conflicts: SyncConflict[];
   sync_resolve_conflict: undefined;
+  app_info: AppInfo;
+  /* `null` is "checked, nothing newer" — distinct from an error, which is how
+     the tab can say "up to date" instead of "could not check". */
+  updates_check: UpdateSummary | null;
+  updates_install: undefined;
   window_ready: undefined;
 };
 

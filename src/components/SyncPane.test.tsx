@@ -242,20 +242,160 @@ function dialog(tab: 'general' | 'sync') {
 describe('SettingsDialog tabs', () => {
   it('opens on general by default, with the sync pane absent', () => {
     dialog('general');
-    expect(screen.getByRole('tab', { name: 'general' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByTestId('sync-pane')).toBeNull();
   });
 
   it('switches to the sync tab on click', () => {
     dialog('general');
-    fireEvent.click(screen.getByRole('tab', { name: 'sync' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Sync' }));
     expect(screen.getByTestId('sync-pane')).toBeDefined();
-    expect(screen.getByRole('tab', { name: 'sync' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Sync' }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('opens on sync directly when asked, for the conflict badge', () => {
     dialog('sync');
     expect(screen.getByTestId('sync-pane')).toBeDefined();
+  });
+});
+
+/* ADR-024: the Updates tab, and the tablist it made a tablist. With two tabs the
+   arrow handler was a pair-flip, which is why `Home`/`End` did nothing and
+   nothing noticed; three tabs is where that stops being invisible. */
+describe('the third Settings tab', () => {
+  function updatesDialog(initialTab: 'general' | 'sync' | 'updates' = 'updates'): void {
+    render(
+      <SettingsDialog
+        theme="light"
+        effective="light"
+        accent={null}
+        lastCustomHex="#2f6fed"
+        defaultFolderId={null}
+        folders={[]}
+        onThemeChange={() => {}}
+        onAccentChange={() => {}}
+        onDefaultFolderChange={() => {}}
+        onClose={() => {}}
+        confirmReset={null}
+        initialTab={initialTab}
+        updates={{
+          info: { version: '0.1.0', os: 'Windows', updatesSupported: true },
+          isChecking: false,
+          update: null,
+          hasChecked: false,
+          checkError: null,
+          checkErrorCode: null,
+          isInstalling: false,
+          downloaded: 0,
+          total: null,
+          installError: null,
+          lastCheckedAt: null,
+          onCheck: () => Promise.resolve(null),
+          onInstall: () => Promise.resolve(),
+        }}
+      />,
+    );
+  }
+
+  it('offers three tabs, each pointing at its own panel', () => {
+    dialog('general');
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(3);
+    for (const tab of tabs) {
+      const id = tab.getAttribute('id') ?? '';
+      const controls = tab.getAttribute('aria-controls') ?? '';
+      expect(id).toMatch(/^settings-tab-/);
+      expect(controls).toBe(id.replace('settings-tab-', 'settings-panel-'));
+    }
+  });
+
+  it('opens on updates directly when asked', () => {
+    updatesDialog();
+    expect(screen.getByTestId('update-pane')).toBeDefined();
+    expect(screen.getByRole('tab', { name: 'Updates' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByTestId('sync-pane')).toBeNull();
+  });
+
+  it('shows only the selected tab’s panel', () => {
+    updatesDialog('general');
+    expect(screen.queryByTestId('update-pane')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Updates' }));
+    expect(screen.getByTestId('update-pane')).toBeDefined();
+    expect(screen.queryByTestId('sync-pane')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+    expect(screen.queryByTestId('update-pane')).toBeNull();
+  });
+
+  it('keeps one tab stop across the tablist, on the selected tab', () => {
+    dialog('general');
+    const stops = screen.getAllByRole('tab').filter((tab) => tab.getAttribute('tabindex') === '0');
+    expect(stops).toHaveLength(1);
+    expect(stops[0]?.getAttribute('id')).toBe('settings-tab-general');
+  });
+
+  it('walks all three with the arrow keys and wraps at both ends', () => {
+    dialog('general');
+    const list = screen.getByTestId('settings-tabs');
+    const press = (key: string): void => {
+      fireEvent.keyDown(list, { key });
+    };
+    const selected = (): string | null =>
+      screen.getAllByRole('tab').find((tab) => tab.getAttribute('aria-selected') === 'true')
+        ?.getAttribute('id') ?? null;
+
+    expect(selected()).toBe('settings-tab-general');
+    press('ArrowRight');
+    expect(selected()).toBe('settings-tab-sync');
+    press('ArrowRight');
+    expect(selected()).toBe('settings-tab-updates');
+    press('ArrowRight');
+    expect(selected()).toBe('settings-tab-general');
+    press('ArrowLeft');
+    expect(selected()).toBe('settings-tab-updates');
+    press('ArrowLeft');
+    expect(selected()).toBe('settings-tab-sync');
+  });
+
+  it('jumps to the ends with Home and End, which the two-tab version ignored', () => {
+    dialog('general');
+    const list = screen.getByTestId('settings-tabs');
+    const selected = (): string | null =>
+      screen.getAllByRole('tab').find((tab) => tab.getAttribute('aria-selected') === 'true')
+        ?.getAttribute('id') ?? null;
+
+    fireEvent.keyDown(list, { key: 'End' });
+    expect(selected()).toBe('settings-tab-updates');
+    fireEvent.keyDown(list, { key: 'Home' });
+    expect(selected()).toBe('settings-tab-general');
+  });
+
+  it('leaves other keys to the dialog', () => {
+    dialog('general');
+    const list = screen.getByTestId('settings-tabs');
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    fireEvent.keyDown(list, { key: 'a' });
+    expect(screen.getByRole('tab', { name: 'General' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('says the tab is unavailable rather than rendering half of it', () => {
+    render(
+      <SettingsDialog
+        theme="light"
+        effective="light"
+        accent={null}
+        lastCustomHex="#2f6fed"
+        defaultFolderId={null}
+        folders={[]}
+        onThemeChange={() => {}}
+        onAccentChange={() => {}}
+        onDefaultFolderChange={() => {}}
+        onClose={() => {}}
+        confirmReset={null}
+        initialTab="updates"
+      />,
+    );
+    expect(screen.queryByTestId('update-pane')).toBeNull();
+    expect(screen.getByText('Updates are unavailable here.')).toBeDefined();
   });
 });
 

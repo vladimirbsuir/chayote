@@ -3,6 +3,20 @@
 Chayote is a local-first notes app. It works fully offline, needs no
 account, and stores your notes in a single SQLite file on your device.
 
+## Updating
+
+On **Windows** and **Linux**, Chayote updates itself. Open
+`Settings → Updates` and press `Check for updates`; if a newer version exists,
+press `Install and restart`. The app checks once a day on its own and tells
+nobody, so opening the tab is all you need to do.
+
+Every update is verified against a signing key compiled into the app. An
+update that does not match is refused rather than installed.
+
+On **macOS** and **Android** the app cannot update itself, and the Updates tab
+says so. Download the new build from the releases page instead; your notes are
+untouched by the switch.
+
 ## Windows
 
 Two downloads are published for every release:
@@ -15,6 +29,9 @@ Two downloads are published for every release:
 The installer is **unsigned** in v1. Windows SmartScreen will warn that the
 publisher is unknown. Click `More info`, then `Run anyway`.
 
+An in-app update replaces the installed app in place, so you do not need the
+installer twice.
+
 ## macOS
 
 | File            | What it is                                                                                       |
@@ -24,6 +41,11 @@ publisher is unknown. Click `More info`, then `Run anyway`.
 The build is **unsigned and unnotarised** in v1. On first launch, macOS will
 refuse to open it. Right-click (or Ctrl-click) Chayote, choose `Open`, then
 choose `Open` again in the dialog. You only do this once.
+
+macOS does not update in place. Replacing the app in `/Applications` over the
+old one is what the installer would have done; drag the new `.app` across and
+choose `Replace`. Chayote cannot do this for you, because an unsigned bundle
+cannot replace itself — see `docs/06-platform.md` §3.8.
 
 ## Linux
 
@@ -43,6 +65,10 @@ On the device, allow `Install unknown apps` for the browser or file manager
 you download the APK with, then open the APK to install. The signing key is
 a debug key kept outside this repository; a store release with a stable
 release key is out of scope for v1.
+
+Android updates are never pushed by Chayote. Install each new APK by hand
+over the old one, which keeps your notes and your tags, or remove the app and
+install again — the notes database survives either way.
 
 ## Your data
 

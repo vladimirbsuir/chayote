@@ -58,6 +58,38 @@ for (const theme of THEMES) {
     await expect(page.getByTestId('settings-dialog')).toBeVisible();
     await page.screenshot({ path: `screenshots/settings-${theme}.png`, fullPage: false });
   });
+
+  /* The Updates tab, in both of the states a reviewer needs to look at: an
+     update waiting, and a platform that cannot update. Both themes, because the
+     tab's text ladder is the thing most likely to be wrong in one of them
+     (`05-ui-ux.md` §3.2). `?seed=` is how the browser answers for the updater
+     (ADR-018); the tab itself is the real component either way. */
+  test(`captures updates-available-${theme}`, async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.emulateMedia({ colorScheme: theme });
+    await seedSettings(page, { theme, accent: null });
+
+    await page.goto('/?seed=update');
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('topbar-overflow-settings').click();
+    await page.getByRole('tab', { name: 'Updates' }).click();
+    await page.getByTestId('update-check').click();
+    await expect(page.getByTestId('update-install')).toBeEnabled();
+    await page.screenshot({ path: `screenshots/updates-available-${theme}.png`, fullPage: false });
+  });
+
+  test(`captures updates-unsupported-${theme}`, async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.emulateMedia({ colorScheme: theme });
+    await seedSettings(page, { theme, accent: null });
+
+    await page.goto('/?seed=no-updates');
+    await page.getByRole('button', { name: 'More' }).click();
+    await page.getByTestId('topbar-overflow-settings').click();
+    await page.getByRole('tab', { name: 'Updates' }).click();
+    await expect(page.getByTestId('update-unsupported')).toBeVisible();
+    await page.screenshot({ path: `screenshots/updates-unsupported-${theme}.png`, fullPage: false });
+  });
 }
 
 /* The status-bar popovers in dark, where the accent token and the text ladder

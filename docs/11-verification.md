@@ -269,6 +269,20 @@ Approach, in increasing cost:
 
 **Recommendation: do level 1 from M3, level 2 from M6.** Level 3 is probably not worth the maintenance. A brittle visual test that fails on an inconsequential 1 px difference trains people to ignore it.
 
+### 4.1 What the updater can and cannot be proved from (ADR-024)
+
+Added with the updater, because the gap here is wide and the failure is silent: a broken updater does not crash, it reports "up to date" for ever.
+
+| Checkable automatically | Needs a real signed release |
+|---|---|
+| The tab's states, its copy, its disabled button and its reason, driven through the mock's `?seed=update` / `no-updates` / `offline` (`e2e/updates.spec.ts`) | That `latest.json` is actually published and reachable at the configured URL |
+| `app_info` reports the right version, platform and support flag for the platform it is compiled for (`cargo test`) | That a real artifact's minisign signature verifies against the public key in `tauri.conf.json` |
+| `updates_check` maps an unreachable endpoint to `NETWORK` and keeps the transport error out of the reader-facing message (`cargo test`) | That `requireSignedVersion` accepts the build's own signature and rejects a mismatched one |
+| The three download events keep their names and field spellings, which is what the TypeScript union discriminates on (`cargo test`) | That the download, the install and the restart actually replace a running app |
+| One action at a time; the result line appears only after this tab's own check | That Windows' passive installer and Linux's AppImage swap both complete on a clean machine |
+
+**The gate that is not automated here is the release itself.** Tagging `v<version>` must match `tauri.conf.json`'s version or `release.yml` fails the run — that is asserted in the workflow, and the workflow's own log is the evidence. Everything past it — a reachable `latest.json`, a verifying signature, a replaced binary — is only observable by tagging a real release and installing from it. **A merged branch has not proved the updater works; it has proved the tab works.** That is the honest state of it, and it is the same shape as the `adjustResize` row in §3.5a: what only a human can check, written down rather than assumed.
+
 `e2e/capture.spec.ts` implements level 2 from M0. It writes to `screenshots/`, which is committed, so a reviewer can compare states between runs by eye. `e2e/search.spec.ts` writes `search-light.png` the same way, because the search field is the one control whose defects are visual only — Chromium's own cancel button and a second focus ring both passed every DOM assertion and were caught by looking.
 
 ## 5. Gates per milestone

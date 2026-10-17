@@ -16,6 +16,12 @@ import {
   useSyncNow,
   useSyncStatus,
 } from './hooks/useSync';
+import {
+  useAppInfo,
+  useCheckForUpdate,
+  useDailyUpdateCheck,
+  useInstallUpdate,
+} from './hooks/useUpdates';
 import type { SettingsTab } from './components/SettingsDialog';
 import type { SyncSummary } from './types/sync';
 import { UndoToast } from './components/UndoToast';
@@ -213,6 +219,29 @@ function Shell() {
   const [syncSaving, setSyncSaving] = useState(false);
   const [syncLastResult, setSyncLastResult] = useState<SyncSummary | null>(null);
   const [syncLastReupload, setSyncLastReupload] = useState<number | null>(null);
+
+  /* The updater is server state too, and the daily tick runs from here rather
+     than from the tab — a check that only happened while Settings was open would
+     not be a daily check. It surfaces nothing; the tab is where an update
+     appears (ADR-024, `05-ui-ux.md` §6.6). */
+  const { info: appInfo } = useAppInfo();
+  const {
+    check: checkForUpdate,
+    isChecking: isCheckingUpdate,
+    update: foundUpdate,
+    hasChecked: hasCheckedUpdate,
+    error: updateCheckError,
+    errorCode: updateCheckErrorCode,
+  } = useCheckForUpdate();
+  const {
+    install: installUpdate,
+    isInstalling: isInstallingUpdate,
+    downloaded: updateDownloaded,
+    total: updateTotal,
+    error: updateInstallError,
+  } = useInstallUpdate();
+  const lastUpdateCheckAt = useSettingsStore((state) => state.lastUpdateCheckAt);
+  useDailyUpdateCheck();
 
   /* Failures surface where they happened: SyncPane shows the thrown message
      itself (R7 copy), so this only tracks the spinner. */
@@ -882,6 +911,21 @@ function Shell() {
               await flushEditorsForSync();
               return resolveConflict(id, keepLocal);
             },
+          }}
+          updates={{
+            info: appInfo,
+            isChecking: isCheckingUpdate,
+            update: foundUpdate,
+            hasChecked: hasCheckedUpdate,
+            checkError: updateCheckError,
+            checkErrorCode: updateCheckErrorCode,
+            isInstalling: isInstallingUpdate,
+            downloaded: updateDownloaded,
+            total: updateTotal,
+            installError: updateInstallError,
+            lastCheckedAt: lastUpdateCheckAt,
+            onCheck: checkForUpdate,
+            onInstall: installUpdate,
           }}
           onThemeChange={(next) => {
             useSettingsStore.getState().setTheme(next);

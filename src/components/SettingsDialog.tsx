@@ -12,10 +12,12 @@ import { useDialogFocus } from './useDialogFocus';
 import { flattenFolders, popoverPlacement } from './popoverPlacement';
 import { FolderPicker, NONE_LABEL } from './StatusPopovers';
 import { SyncPane } from './SyncPane';
+import { UpdatePane } from './UpdatePane';
 import { hexToHsl, hslToHex, normalizeHexInput } from '../lib/color';
 import { ACCENT_PRESETS, presetValue } from '../lib/settings';
 import type { AccentChoice, Theme } from '../lib/settings';
 import type { SyncConflict, SyncStatus, SyncSummary } from '../types/sync';
+import type { AppInfo, UpdateSummary } from '../types/update';
 import type { FolderNode } from '../types/folder';
 import type { Uuid } from '../types/note';
 
@@ -72,9 +74,27 @@ type SettingsDialogProps = {
   /* One object, optional so the general tab stays usable wherever sync is
      not wired (tests, prototype). `App` always provides it. */
   sync?: SyncTabState;
+  /* Likewise for the updater, and for the same reason: the tab has to render
+     without the platform behind it so the rest of the dialog stays drivable in a
+     plain browser (ADR-018). */
+  updates?: UpdatesTabState;
 };
 
-export type SettingsTab = 'general' | 'sync';
+export type SettingsTab = 'general' | 'sync' | 'updates';
+
+/** In tab order, so the arrow-key handler below can move between neighbours
+    rather than hard-coding a pair. `05-ui-ux.md` §6.6: the order is what the
+    user reads most often first — look after your writing, then sync, then the
+    once-a-month chore. */
+const TABS: readonly SettingsTab[] = ['general', 'sync', 'updates'];
+
+/** The label each tab shows. Derived from the id rather than `capitalize`d from
+    it, so `updates` does not depend on a CSS transform to read as a word. */
+const TAB_LABELS: Record<SettingsTab, string> = {
+  general: 'General',
+  sync: 'Sync',
+  updates: 'Updates',
+};
 
 export type SyncTabState = {
   status: SyncStatus | undefined;
@@ -92,6 +112,28 @@ export type SyncTabState = {
   onResolve: (id: string, keepLocal: boolean) => Promise<void>;
 };
 
+/** ADR-024. `lastCheckedAt` comes from the settings store rather than from the
+    check itself, so the line survives the app being closed and reopened: it
+    answers "when did this app last look", not "when did this session look". */
+export type UpdatesTabState = {
+  info: AppInfo | undefined;
+  isChecking: boolean;
+  update: UpdateSummary | null;
+  /** Whether *this tab's* check completed. The silent daily tick writes
+      `lastCheckedAt` without reporting anything into the tab, so the two are not
+      the same question and the pane asks this one. */
+  hasChecked: boolean;
+  checkError: string | null;
+  checkErrorCode: string | null;
+  isInstalling: boolean;
+  downloaded: number;
+  total: number | null;
+  installError: string | null;
+  lastCheckedAt: number | null;
+  onCheck: () => Promise<UpdateSummary | null>;
+  onInstall: () => Promise<void>;
+};
+
 export function SettingsDialog({
   theme,
   effective,
@@ -106,6 +148,7 @@ export function SettingsDialog({
   confirmReset,
   initialTab,
   sync,
+  updates,
 }: SettingsDialogProps) {
   const { panelRef, onKeyDown: trapKeyDown } = useDialogFocus(onClose);
   /* Two tabs — general settings and sync — so the connection string, status
@@ -227,13 +270,28 @@ export function SettingsDialog({
           aria-label="Settings sections"
           data-testid="settings-tabs"
           onKeyDown={(event) => {
-            if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+            /* Arrows move between neighbours and wrap, which is what a tablist
+               does; `Home`/`End` jump to the ends. With two tabs this was a
+               pair-flip, which is why neither key worked and nothing noticed. */
+            const at = TABS.indexOf(tab);
+            let next: number | null = null;
+            if (event.key === 'ArrowRight') {
+              next = (at + 1) % TABS.length;
+            } else if (event.key === 'ArrowLeft') {
+              next = (at - 1 + TABS.length) % TABS.length;
+            } else if (event.key === 'Home') {
+              next = 0;
+            } else if (event.key === 'End') {
+              next = TABS.length - 1;
+            }
+            if (next === null) return;
             event.preventDefault();
-            setTab((current) => (current === 'general' ? 'sync' : 'general'));
+            const target = TABS[next];
+            if (target !== undefined) setTab(target);
           }}
           className="flex flex-none gap-1 px-5 pt-3"
         >
-          {(['general', 'sync'] as const).map((name) => {
+          {TABS.map((name) => {
             const selected = tab === name;
             return (
               <button
@@ -247,13 +305,13 @@ export function SettingsDialog({
                 onClick={() => {
                   setTab(name);
                 }}
-                className={`rounded-[var(--r-input)] px-3 py-1.5 text-[13px] font-medium capitalize ${
+                className={`rounded-[var(--r-input)] px-3 py-1.5 text-[13px] font-medium ${
                   selected
                     ? 'bg-[var(--surface-raised)] text-[var(--text)]'
                     : 'text-[var(--text-muted)]'
                 }`}
               >
-                {name}
+                {TAB_LABELS[name]}
               </button>
             );
           })}
@@ -550,6 +608,35 @@ export function SettingsDialog({
               />
             ) : (
               <p className="text-[12px] text-[var(--text-subtle)]">Sync is unavailable here.</p>
+            )}
+          </div>
+        ) : null}
+
+        {tab === 'updates' ? (
+          <div
+            id="settings-panel-updates"
+            role="tabpanel"
+            aria-labelledby="settings-tab-updates"
+            className="overflow-y-auto px-5 py-4"
+          >
+            {updates !== undefined ? (
+              <UpdatePane
+                info={updates.info}
+                isChecking={updates.isChecking}
+                update={updates.update}
+                hasChecked={updates.hasChecked}
+                checkError={updates.checkError}
+                checkErrorCode={updates.checkErrorCode}
+                isInstalling={updates.isInstalling}
+                downloaded={updates.downloaded}
+                total={updates.total}
+                installError={updates.installError}
+                lastCheckedAt={updates.lastCheckedAt}
+                onCheck={updates.onCheck}
+                onInstall={updates.onInstall}
+              />
+            ) : (
+              <p className="text-[12px] text-[var(--text-subtle)]">Updates are unavailable here.</p>
             )}
           </div>
         ) : null}
