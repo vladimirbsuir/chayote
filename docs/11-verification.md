@@ -359,15 +359,49 @@ the only reason both were caught at all.
 - **That the update is accepted over an installed copy.** The certificate match
   above is the precondition; the acceptance itself needs a second signed build
   with a higher `versionCode`.
-- **That CI produces the same APK.** The `android` job has never run. Its first
-  execution is the real test of `release.yml`, of the three secrets, and of the
-  manifest merge under bash rather than PowerShell.
+- **That CI produces the same APK.** It has now run, and the result is below.
+  What it cannot show is that this particular signed APK installs over a
+  particular installed copy.
 
 **The debug-to-release key change costs one uninstall.** An APK signed with the
 debug key cannot be updated by one signed with the release key, and Android's
 only remedy is uninstalling — which deletes `chayote.db`. Any device that has
 run a debug build needs its notes backed up before the first release APK, and
 then it can update in place for ever after (§3.8.1).
+
+### 4.1b What release `v0.2.0` produced, and how it was checked
+
+The android job has now run, and the three secrets reached it. The release is
+`v0.2.0` and the checks below were run against the published URLs rather than
+against anything local, because that is what a device will read.
+
+| Claim | How | Result |
+|-------|-----|--------|
+| Every job in the release is green | the Release run | `version`, three desktop bundles, `APK (Android)` all success |
+| The APK and its signature are published | `gh release view v0.2.0` | `app-universal-release.apk` 20,658,670 bytes, `.sig` 432 bytes |
+| `latest.json` carries both Android keys | fetched from `releases/latest/download` | `android-aarch64` and `android-armv7`, pointing at the same APK |
+| Desktop keys survived the merge | same fetch | all seven desktop keys present alongside them |
+| The signature's version matches the manifest | base64-decoded the embedded signature and read its trusted comment | `timestamp:1792321148 file:app-universal-release.apk version:0.2.0` against manifest `0.2.0` |
+| The published APK carries the project certificate | `apksigner verify --print-certs` on the **downloaded** APK | SHA-256 `F5:32:4F:…:4D:F9`, matching §4.1a's key |
+| It is a valid signature over that file | `apksigner verify` | exit 0 |
+| It will be accepted over the installed build | `aapt2 dump badging` | `versionCode` 2000 against the installed 0.1.0's 1000 |
+| It is the version the manifest announces | same | `versionName` 0.2.0 |
+| Both ABIs, and the permissions | same | `arm64-v8a`, `armeabi-v7a`; `REQUEST_INSTALL_PACKAGES` declared |
+
+**The first run failed, and the failure was in the workflow rather than in
+anything Chayote builds.** `android-actions/setup-android@v3` installs the
+standalone `tools` SDK package; Google removed it from the repository, so the
+action's own `sdkmanager` call exited 1 on `Failed to find package 'tools'`
+before a single line of the app was compiled. It was replaced with an explicit
+`sdkmanager --install`, whose package names were read off the local SDK rather
+than guessed — `platforms;android-37.0`, not `android-37`, because Android 17
+ships a minor SDK version. `v0.2.0` was then re-tagged and rebuilt; the first
+`v0.2.0` release, which carried desktop assets and no APK, was deleted.
+
+**Still not proved, and it is the same gap as before:** that an app replaces
+itself on a device. Everything above is a property of the published files. The
+step that proves the feature is a person pressing Install and watching Android
+do it.
 
 ## 5. Gates per milestone
 
