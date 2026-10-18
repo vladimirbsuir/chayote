@@ -19,15 +19,16 @@ function nowMs(): number {
   return Date.now();
 }
 
-/** The version the browser fallback reports. `tauri.conf.json` says `0.1.0`;
+/** The version the browser fallback reports. `tauri.conf.json` says `0.2.0`;
     it is restated here rather than imported because the frontend cannot read a
     file from `src-tauri`, and a build that drifted from the real one would show
-    a version the app does not have. */
-const MOCK_VERSION = '0.1.0';
+    a version the app does not have. Bumping the release means bumping this and
+    `MOCK_UPDATE.version` below, which must stay above it. */
+const MOCK_VERSION = '0.2.0';
 
 /** The one update the fallback can offer, for `?seed=update`. */
 const MOCK_UPDATE = {
-  version: '0.2.0',
+  version: '0.3.0',
   notes: 'Faster search, and the Updates tab.',
   date: '2026-10-17T09:00:00Z',
 };

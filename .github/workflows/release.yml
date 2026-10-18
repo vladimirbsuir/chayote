@@ -11,9 +11,10 @@ name: Release
 # currently in `src-tauri/tauri.conf.json`, which the `version` job below asserts
 # is the same thing a tag would have had to be.
 #
-# The Android APK is intentionally not built here, for the reasons in the header
-# of the M8 note below, and `06-platform.md` §4.6 records why the app cannot
-# update itself on Android at all.
+# The Android APK is built by its own job below, not by the desktop matrix.
+# ADR-025: it keeps the plugin's check and download and supplies its own
+# install, so it needs a keystore and a manifest key that `tauri-action` has no
+# way to merge. See `docs/06-platform.md` §3.8.1.
 
 on:
   workflow_dispatch:
@@ -111,8 +112,8 @@ jobs:
           releaseBody: |
             Chayote ${{ needs.version.outputs.version }}.
 
-            Windows and Linux builds update themselves from **Settings → Updates**.
-            macOS and Android builds do not, for the reasons in
+            Windows, Linux and Android builds update themselves from
+            **Settings → Updates**. macOS builds do not, for the reasons in
             [`docs/06-platform.md`](https://github.com/vladimirbsuir/chayote/blob/main/docs/06-platform.md).
 
             Download | Asset
@@ -120,6 +121,15 @@ jobs:
             Windows | `Chayote_${{ needs.version.outputs.version }}_x64-setup.exe`
             macOS | `.app.tar.gz` or `.dmg`
             Linux | `.AppImage` or `.deb`
+            Android | `app-universal-release.apk`
+
+            **Android:** install the APK once by hand to replace any earlier
+            build, then every update after that arrives in the app. Android
+            refuses an update signed with a different certificate than the
+            installed one, so a build installed with a debug key has to be
+            removed before a released one will take — and removing it deletes
+            its notes, so back them up first. The first update asks for one
+            permission, granted in system settings rather than in a pop-up.
           includeUpdaterJson: true
           args: --bundles ${{ matrix.bundles }}
       # Only the portable executable is uploaded as a workflow artifact. The
@@ -161,6 +171,14 @@ jobs:
         with:
           ndk-version: r27c
       - uses: android-actions/setup-android@v3
+      # Pinned rather than inherited from the runner. AGP 9.3 needs a JDK it can
+      # rely on, and "whatever ubuntu-latest happens to ship today" is not a
+      # thing to build a signed release against; 21 is what M7 was verified on
+      # (`06-platform.md` §4.5).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - run: npm ci
 
       # Android refuses an update whose signing certificate differs from the
@@ -195,7 +213,7 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
           TAURI_ANDROID_PROJECT_PATH: ${{ github.workspace }}/src-tauri/gen/android
-        run: npx tauri android build --apk --target aarch64 --target armv7
+        run: npx tauri android build --apk --ci --target aarch64 --target armv7
 
       - name: Sign the APK as an updater artifact
         env:

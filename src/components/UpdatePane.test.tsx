@@ -13,14 +13,14 @@ import type { AppInfo, UpdateSummary } from '../types/update';
    Plain Testing Library assertions, no `jest-dom` — this project does not take
    that dependency, so `toHaveTextContent` and `toBeDisabled` are spelled out. */
 
-const WINDOWS: AppInfo = { version: '0.1.0', os: 'Windows', updatesSupported: true };
-const MACOS: AppInfo = { version: '0.1.0', os: 'macOS', updatesSupported: false };
+const WINDOWS: AppInfo = { version: '0.2.0', os: 'Windows', updatesSupported: true };
+const MACOS: AppInfo = { version: '0.2.0', os: 'macOS', updatesSupported: false };
 /** ADR-025: Android updates itself, so it is the supported fixture. It was the
     unsupported one until the Kotlin installer existed. */
-const ANDROID: AppInfo = { version: '0.1.0', os: 'Android', updatesSupported: true };
+const ANDROID: AppInfo = { version: '0.2.0', os: 'Android', updatesSupported: true };
 
 const FOUND: UpdateSummary = {
-  version: '0.2.0',
+  version: '0.3.0',
   notes: 'Faster search, and the Updates tab.',
   date: '2026-10-17T09:00:00Z',
 };
@@ -56,7 +56,7 @@ function isDisabled(testId: string): boolean {
 describe('UpdatePane', () => {
   it('shows the running version, and never a claim about anything else', () => {
     render(<UpdatePane {...pane()} />);
-    expect(text('update-version')).toContain('Chayote 0.1.0');
+    expect(text('update-version')).toContain('Chayote 0.2.0');
     /* Before a check has run the tab knows nothing about updates, so it says
        nothing. "Up to date" here would be a claim about a version it has not
        looked up. */
@@ -91,7 +91,7 @@ describe('UpdatePane', () => {
 
   it('offers the install only when a check found something newer', () => {
     render(<UpdatePane {...pane({ update: FOUND, lastCheckedAt: 1_780_000_000_000 })} />);
-    expect(text('update-available')).toContain('Version 0.2.0 is available.');
+    expect(text('update-available')).toContain('Version 0.3.0 is available.');
     expect(text('update-available')).toContain(FOUND.notes);
     expect(screen.queryByTestId('update-current')).toBeNull();
     expect(text('update-install')).toContain('Install and restart');
@@ -100,7 +100,7 @@ describe('UpdatePane', () => {
   it('omits the notes block rather than rendering an empty one', () => {
     render(<UpdatePane {...pane({ update: { ...FOUND, notes: '   ' } })} />);
     const available = screen.getByTestId('update-available');
-    expect(available.textContent).toContain('Version 0.2.0 is available.');
+    expect(available.textContent).toContain('Version 0.3.0 is available.');
     /* Two paragraphs would be the headline and an empty one. */
     expect(available.querySelectorAll('p')).toHaveLength(1);
   });
@@ -188,7 +188,7 @@ describe('UpdatePane', () => {
   });
 
   it('falls back to a general reason on a platform it has no words for', () => {
-    const unknown: AppInfo = { version: '0.1.0', os: 'Unknown', updatesSupported: false };
+    const unknown: AppInfo = { version: '0.2.0', os: 'Unknown', updatesSupported: false };
     render(<UpdatePane {...pane({ info: unknown })} />);
     expect(text('update-unsupported')).toContain('not available on this platform');
   });

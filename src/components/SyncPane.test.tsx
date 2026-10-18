@@ -279,7 +279,7 @@ describe('the third Settings tab', () => {
         confirmReset={null}
         initialTab={initialTab}
         updates={{
-          info: { version: '0.1.0', os: 'Windows', updatesSupported: true },
+          info: { version: '0.2.0', os: 'Windows', updatesSupported: true },
           isChecking: false,
           update: null,
           hasChecked: false,
