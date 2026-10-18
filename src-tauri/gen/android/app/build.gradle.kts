@@ -126,6 +126,17 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    // ADR-025. `rustls-platform-verifier` is a Rust crate that also has a Kotlin
+    // component, and the Rust half panics on Android with "Expect
+    // rustls-platform-verifier to be initialized" until that component is in the
+    // build and has run. It is what makes the updater's HTTPS work: this is the
+    // certificate check that `download()` performs before it will return a byte.
+    //
+    // No version on purpose. The root build script reads it out of Cargo.lock at
+    // configuration time, because it must equal the version of
+    // `rustls-platform-verifier-android` cargo resolved, and a version written
+    // here would drift from that the next time either moves.
+    implementation("org.rustls:rustls-platform-verifier")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")

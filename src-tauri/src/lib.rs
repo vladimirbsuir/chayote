@@ -11,6 +11,42 @@ mod sync;
 #[cfg(test)]
 mod tests;
 
+/// ADR-025. Hands Android's certificate verifier the handles it needs.
+///
+/// `reqwest` reaches the system trust store through `rustls-platform-verifier`,
+/// which can only do that by calling back into the JVM, and it refuses to guess:
+/// until `init_with_env` has run it panics on the first verification with
+/// "Expect rustls-platform-verifier to be initialized". The app never recovered
+/// from that — the panic lands on a tokio worker, a panicking worker aborts the
+/// process, and the app closed about a second after launch with nothing on
+/// screen to say why.
+///
+/// Called from `ChayoteApplication.attachBaseContext`, which is early enough:
+/// `Application` is constructed before any Activity, so this runs before the
+/// WebView exists and long before the first update check can run.
+///
+/// The name is the JNI symbol for `ChayoteApplication.nativeInit`, so renaming
+/// the Kotlin class or the method without renaming this breaks the link — and
+/// breaks it silently, which is why it is spelled out rather than left to
+/// convention.
+///
+/// Failing here is reported and swallowed rather than propagated: the caller is
+/// `attachBaseContext`, which has no way to recover, and an update check that
+/// cannot verify a certificate should surface as an error in the Updates tab,
+/// not as an app that will not open.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_com_chayote_app_ChayoteApplication_nativeInit<'local>(
+    mut unowned_env: jni::EnvUnowned<'local>,
+    _class: jni::objects::JClass<'local>,
+    context: jni::objects::JObject<'local>,
+) {
+    /* `EnvUnowned` rather than `Env`: `Env` is not FFI-safe, and a JNI function
+    has to be. `with_env` turns it into the borrow the crate wants. */
+    let _ = unowned_env
+        .with_env(|mut env| rustls_platform_verifier::android::init_with_env(&mut env, context));
+}
+
 use std::sync::Arc;
 
 use tauri::Manager;

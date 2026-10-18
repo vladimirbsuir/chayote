@@ -389,10 +389,12 @@ dependencies = [
 
 [[package]]
 name = "chayote"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "jni 0.22.4",
  "rusqlite",
  "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "tauri",

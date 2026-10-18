@@ -398,10 +398,60 @@ than guessed — `platforms;android-37.0`, not `android-37`, because Android 17
 ships a minor SDK version. `v0.2.0` was then re-tagged and rebuilt; the first
 `v0.2.0` release, which carried desktop assets and no APK, was deleted.
 
-**Still not proved, and it is the same gap as before:** that an app replaces
-itself on a device. Everything above is a property of the published files. The
-step that proves the feature is a person pressing Install and watching Android
-do it.
+### 4.1c The APK in v0.2.0 could not open, and why only a device found it
+
+`v0.2.0` published correctly and the checks in §4.1b all passed. The APK it
+published **crashed about a second after launch, with nothing on screen**. That
+is recorded here rather than quietly fixed, because the failure mode is the point:
+every check in §4.1b is a property of a file, and the defect was not in a file.
+
+`adb logcat` on a real device, from the launch that killed it:
+
+```
+RustStdoutStderr: thread 'tokio-rt-worker' panicked at
+  rustls-platform-verifier-0.7.1/src/android.rs:90:10:
+  Expect rustls-platform-verifier to be initialized
+libc: Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE) in tid 29243 (tokio-rt-worker)
+```
+
+**The chain.** ADR-025 made `tauri-plugin-updater` an Android dependency, and
+that is the first time anything in this app has made an HTTPS request from Rust
+on Android. `reqwest` reaches Android's trust store through
+`rustls-platform-verifier`, which can only do that by calling back into the JVM.
+It refuses to guess at the handles it needs: until `init_with_env` has run it
+panics on the first verification. The app never recovered — the panic lands on a
+tokio worker, a panicking worker aborts the process, and the release profile's
+`panic = abort` turns that into the SIGABRT above.
+
+Nothing about it was visible locally. `cargo check` for both ABIs passed,
+Gradle compiled, the APK built, `apksigner` accepted it, `aapt2` reported the
+right version, permissions and ABIs, and every other class the manifest named was
+in the release dex. The app compiled perfectly and could not start.
+
+**What it took.** Three things, all documented by the crate and none of them
+discoverable by reading this repository:
+
+1. The Kotlin component, from the `org.rustls:rustls-platform-verifier` AAR, with
+   its version read out of `Cargo.lock` at configuration time so it cannot drift
+   from the Rust half.
+2. A ProGuard rule. R8 cannot see a JNI call it is not part of, so it read the
+   component's three classes as dead code and removed them — verified by
+   searching the release dex for `platformverifier` and finding nothing.
+3. An explicit `init_with_env` from a JNI-exported function, called from
+   `ChayoteApplication.attachBaseContext`, which is early enough to run before
+   any Activity and therefore before the first update check.
+
+After all three, the same APK builds, launches, survives, and logs no panic:
+
+| Check | Result |
+|-------|--------|
+| `org.rustls.platformverifier.*` in the release dex | present — 3 classes, plus the descriptor classes the keep rule asks for |
+| Process alive 12 s after launch | alive |
+| `panicked` / `Fatal signal` / `SIGABRT` in logcat | none |
+| Activity resumed and drawing frames | yes (`onWindowsDrawn`, frames queued) |
+
+**Still not proved:** that an app replaces *itself* on a device. That is now the
+one remaining gap, and it needs an install, not a launch.
 
 ## 5. Gates per milestone
 
