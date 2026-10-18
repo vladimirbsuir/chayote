@@ -238,7 +238,11 @@ fn the_title_field_migration_leaves_a_note_with_no_leading_heading_alone() {
     .expect("data pass");
 
     let after = repo.get(&id).expect("reload");
-    assert_eq!(after.summary.title, "just a paragraph", "still derived");
+    /* The note has no leading heading, so the migration leaves it alone. That
+     * used to be described as "still derived", because a save re-derived the
+     * title from the body; the title is no longer derived at all, so the note
+     * simply has none and reads as "Untitled". */
+    assert_eq!(after.summary.title, "", "untouched, and untitled");
     assert_eq!(
         after.doc["content"][0]["content"][0]["text"].as_str(),
         Some("just a paragraph")
@@ -423,28 +427,34 @@ fn dirty_rows_and_outbox_rows_agree() {
 // ------------------------------------------------------- required test 3
 
 /// Required test 3: derived values are recomputed on every save.
+///
+/// The title is no longer one of them. `plain_text`, `excerpt` and `word_count`
+/// are derived from the document and change on every save; `title` is not derived
+/// at all, and asserting it here was what pinned the leak where typing in the
+/// first line of the body renamed the note.
 #[test]
 fn derived_values_are_recomputed_on_every_save() {
     let f = fixture("derived");
     let repo = notes(&f.db);
 
     let created = repo.create(None).expect("create");
-    assert_eq!(created.summary.title, "Untitled");
+    assert_eq!(created.summary.title, "", "no title stored");
     assert_eq!(created.summary.word_count, 0);
     assert_eq!(created.summary.excerpt, "");
 
     let first = on(&created.summary.id, note_with_text("first title"));
     let after_first = repo.save(&first).expect("save");
-    assert_eq!(after_first.summary.title, "first title");
+    assert_eq!(after_first.summary.title, "", "the title is not derived");
     assert_eq!(after_first.summary.word_count, 2);
     assert!(after_first.summary.excerpt.starts_with("first title"));
 
     let second = on(&created.summary.id, note_with_text("a different title"));
     let after_second = repo.save(&second).expect("save");
-    assert_eq!(after_second.summary.title, "a different title");
+    assert_eq!(after_second.summary.title, "", "and stays that way");
     assert_eq!(after_second.summary.word_count, 3);
 
-    // A heading wins over the first paragraph.
+    // A heading is still what the excerpt is built from, even though it is no
+    // longer what the title is built from.
     let heading = SaveNoteInput {
         id: created.summary.id.clone(),
         doc: json!({
@@ -459,7 +469,36 @@ fn derived_values_are_recomputed_on_every_save() {
         is_pinned: false,
     };
     let after_heading = repo.save(&heading).expect("save heading");
-    assert_eq!(after_heading.summary.title, "The Heading");
+    assert_eq!(after_heading.summary.title, "");
+    assert!(
+        after_heading.summary.excerpt.contains("The Heading"),
+        "the heading is still in the derived text"
+    );
+}
+
+#[test]
+fn a_typed_title_survives_every_later_save() {
+    let f = fixture("title-survives");
+    let repo = notes(&f.db);
+
+    let created = repo.create(None).expect("create");
+    let id = created.summary.id.clone();
+    repo.save(&on(&id, note_with_text("body"))).expect("save");
+    repo.set_title(&id, "The real title").expect("set title");
+
+    /* Rewriting the first line of the body used to rename the note. This is the
+     * regression that prompted the change, so it is asserted directly rather than
+     * inferred from the two tests above. */
+    let after = repo
+        .save(&on(
+            &id,
+            note_with_text("a completely different opening line"),
+        ))
+        .expect("save");
+    assert_eq!(
+        after.summary.title, "The real title",
+        "the title is the reader's, not the body's"
+    );
 }
 
 // --------------------------------------------------------- required test 4
@@ -887,7 +926,11 @@ fn an_invalid_document_is_rejected_and_the_stored_one_survives() {
     let stored = repo
         .get(&created.summary.id)
         .expect("stored version survives");
-    assert_eq!(stored.summary.title, "survives");
+    assert_eq!(
+        stored.doc["content"][0]["content"][0]["text"].as_str(),
+        Some("survives"),
+        "the document that was stored is the one that was validated"
+    );
 }
 
 #[test]
@@ -904,7 +947,7 @@ fn a_document_over_five_megabytes_is_rejected() {
     // The buffer is the user's; the stored version is untouched.
     assert_eq!(
         repo.get(&created.summary.id).expect("stored").summary.title,
-        "Untitled"
+        ""
     );
 }
 
@@ -1030,7 +1073,7 @@ fn a_typed_title_is_kept_verbatim_and_survives_every_later_save() {
 }
 
 #[test]
-fn clearing_a_typed_title_hands_it_back_to_derivation() {
+fn clearing_a_typed_title_leaves_the_note_untitled() {
     let f = fixture("title-clear");
     let repo = notes(&f.db);
 
@@ -1040,17 +1083,20 @@ fn clearing_a_typed_title_hands_it_back_to_derivation() {
         .expect("save");
     repo.set_title(&id, "Typed").expect("set title");
 
-    /* Empty is not a note with no name: it is the note saying "derive it again",
-    which is the only way back to the old behaviour without a setting. */
+    /* Clearing the field used to hand the title back to derivation, so an empty
+    field meant "derive it again". It means no title now: the title is what was
+    typed and nothing else, so the note reads as "Untitled" until one is. */
     let cleared = repo.set_title(&id, "   ").expect("clear title");
+    assert_eq!(cleared.summary.title, "");
 
-    assert_eq!(cleared.summary.title, "First line of the body");
+    /* And the body must not reach in and supply one — the whole point of the
+     * change, asserted from both sides. */
     let resaved = repo
         .save(&on(&id, note_with_text("Second line of the body")))
         .expect("save");
     assert_eq!(
-        resaved.summary.title, "Second line of the body",
-        "and derivation owns it again"
+        resaved.summary.title, "",
+        "a save leaves the title alone whatever the body says"
     );
 }
 

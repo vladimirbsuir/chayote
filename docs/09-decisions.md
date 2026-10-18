@@ -30,9 +30,81 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 020 | The Android back button is handled in Kotlin, and window insets in CSS | Accepted |
 | 021 | Tags stay listed at a zero count; the sidebar creates them | Accepted |
 | 022 | AGENTS.md is the agent onboarding document; work lands via pull request | Accepted |
-| 023 | The note title is a field of its own; the editor's leading line is not it | Accepted |
+| 023 | The note title is a field of its own; the editor's leading line is not it | Amended by ADR-026 |
 | 024 | Releases are GitHub Releases, and the app updates itself on desktop only | Superseded in part by ADR-025 |
 | 025 | Android keeps the Tauri updater's check and download, and supplies its own install | Accepted |
+
+---
+
+## ADR-026 - The title is only what was typed in the title field
+
+**Status:** Accepted · **Date:** 2026-10-18 · **Amends:** ADR-023
+
+**Context.** ADR-023 separated the title from the document and left the old rule
+running underneath: `notes_save` re-derived the title from the body whenever
+`title_source` was `auto`, and `notes_set_title` with an empty field put the note
+back into that mode on purpose. Both were deliberate. The user found the result
+wrong — typing in the first line of a note renamed it — and said it must not
+happen at all.
+
+The behaviour was not a bug in the ordinary sense. It was written down, argued
+for, and pinned by tests. What it missed is that ADR-023 was decided on a
+question about *storage* — one command rather than a field on `notes_save`, so the
+autosave would not swallow it — and the derivation branch was kept as the
+migration path's home rather than because anyone still wanted the title to track
+the body. Once a typed title stopped being derivable, the only notes the rule
+still applied to were the ones where nobody had typed one, which is precisely
+where it reads as a bug.
+
+**Decision.** The title is what the reader typed in the title field and nothing
+else.
+
+- `notes_save` does not read, derive or write `title`. The column is left out of
+  its `UPDATE` entirely rather than written from a value it does not use.
+- `notes_set_title` with an empty field stores an empty title and
+  `title_source = 'auto'`. It no longer reads the document, which also removes
+  the one place in that command that touched the body.
+- Sync takes the peer's title as it stands. It used to re-derive from the
+  incoming document when the local row was `auto`, which meant a remote title was
+  replaced by whatever that peer's body happened to start with.
+- `derive::title` and `Derived::title` are deleted. Nothing turns a document
+  into a title any more, and leaving the function would leave the old rule
+  readable in the code.
+- A new note is created with an empty title rather than the literal `"Untitled"`
+  that `derive::title` produced for an empty document. With derivation gone that
+  string would otherwise be stored as though the reader had typed it, synced to
+  other devices as a title, and sit beside a cleared title that stores `""`.
+
+**`title_source` keeps its three values.** It is no longer a switch between two
+ways of producing a title — `manual` means "typed" and `auto` means "there is
+none". The column's `CHECK` constraint, the sync payload and every peer on an
+older build are unchanged, so this is not a schema or protocol change. The
+`first_heading` value the constraint has always allowed is now unused by this
+app; it was already unused before this decision.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Stop deriving once the note has a title, keep deriving until then | The derivation would still be visible — a fresh note typed only in the body would take its title from the first line, which is the thing the user asked to stop. |
+| Derive once on first save, then freeze | Same objection, smaller. It also leaves two paths that produce a title from a document, and the second one is the bug. |
+| Keep deriving and add a setting to turn it off | The rule was never wanted by anyone who had a title field. A setting for a behaviour nobody asked to keep is a setting nobody will find. |
+| Only stop the save path, leave `set_title("")` re-deriving | Clearing the field would still rename the note from the body, which is the same defect with a narrower trigger. |
+
+**Consequences.**
+
+- **A note written only in the body reads as "Untitled"** until a title is typed.
+  That is the visible cost, and it is the honest one: the alternative is a title
+  the reader never chose. `NoteCard` and `EditorPane` both render an empty title
+  as "Untitled" already, so nothing new renders it.
+- **`03-data-model.md` §4.1 is amended.** It describes the old rule.
+- **`notes_save` is narrower.** It touches the document, the derived columns, the
+  folder, the pin and the tag set, and no longer reads two columns it did not
+  need.
+- **The `auto` branch in `lift_leading_heading_into_title` stays.** That migration
+  is one-time and already run; it is what lifted a leading H1 out of existing
+  bodies, and it was correct then and remains correct for the notes it has
+  already touched.
 
 ---
 
@@ -814,7 +886,7 @@ Fixing the cascade exposed the question it had been hiding. The accent is used a
 
 The schema turned out to be ready for this and had been waiting. `notes.title_source` has carried a `CHECK (title_source IN ('auto','manual','first_heading'))` since `0001_initial.sql`, `03-data-model.md` §4.1 has specified the `manual` branch since it was written, and sync has pushed `title` and `title_source` in both directions all along. The only thing missing was a way to reach it.
 
-**Decision.** The title is a field of its own, written by `notes_set_title`. A non-empty title is stored as `title_source = 'manual'` and kept verbatim by every later save; an empty one returns the note to `auto`, which hands the title back to derivation — so clearing the field is a way of saying "derive it again", not a way of leaving the note nameless. It is one command rather than a field on `notes_save`, for the reason the pin has one: the autosave judges a write by the serialised document, so a title carried in the save input would be judged unchanged and never written.
+**Decision.** The title is a field of its own, written by `notes_set_title`. A non-empty title is stored as `title_source = 'manual'` and kept verbatim by every later save; ~~an empty one returns the note to `auto`, which hands the title back to derivation — so clearing the field is a way of saying "derive it again", not a way of leaving the note nameless.~~ ADR-026 makes an empty title an empty title: nothing derives it from the document any more, so clearing the field leaves the note untitled rather than renaming it from the body. It is one command rather than a field on `notes_save`, for the reason the pin has one: the autosave judges a write by the serialised document, so a title carried in the save input would be judged unchanged and never written.
 
 The field sits above the text with the last-changed date under it, formatted for the reader's own locale. **It sits inside the editor's scroll area, not above it** — `05-ui-ux.md` §2.6 and `prototype/index.html`'s `.editor-scroll > .note-head + .editor` both have it that way, and the first implementation put it beside the scroll container instead, which pinned it: a sibling of a scroller does not move when the scroller moves, so scrolling a long note left the title at the top for ever. The user found that on a phone the same day this ADR landed. The title is gone from the status bar and from the mobile bar, because it is in one place now and that place is editable.
 

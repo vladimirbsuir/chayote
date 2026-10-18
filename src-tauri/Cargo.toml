@@ -1,6 +1,6 @@
 [package]
 name = "chayote"
-version = "0.2.0"
+version = "0.2.1"
 description = "Chayote — a fast, quiet place to write"
 authors = ["Chayote contributors"]
 license = "MIT"

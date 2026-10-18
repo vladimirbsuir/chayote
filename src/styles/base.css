@@ -134,6 +134,24 @@ input[type='search'] {
   outline: none;
 }
 
+/* The note title gets the same treatment, and for a different reason than the
+   search field does: that one hides a ring the container already draws, and this
+   one has no border to begin with. A 2px box floating 2px outside a field that
+   is otherwise invisible reads as an error state rather than as focus — the
+   editor's own caret already says where the text will go, so the ring is
+   redundant noise on the one control that is not chrome but content.
+
+   A literal rather than a class, for the same reason as the rule above: an
+   unlayered declaration beats every utility in `@layer utilities`, so
+   `outline-none` on the element cannot remove this.
+
+   The cost is that a keyboard user gets no focus indicator on this field. That
+   is the same trade the search field already makes and is deliberate there; it
+   is worth revisiting if this app grows keyboard-only flows. */
+textarea#note-title-input {
+  outline: none;
+}
+
 input[type='search']::-webkit-search-cancel-button,
 input[type='search']::-webkit-search-decoration {
   appearance: none;

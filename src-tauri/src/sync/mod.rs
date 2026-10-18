@@ -290,21 +290,13 @@ impl SyncService {
                 serde_json::from_str(&remote_doc)
                     .map_err(|err| AppError::internal(format!("remote document is not valid JSON: {err}")))?;
             crate::doc::validate::validate(&doc)?;
-            let title_source: String = tx
-                .query_row(
-                    "SELECT title_source FROM notes WHERE id = ?1",
-                    [&note_id],
-                    |row| row.get(0),
-                )
-                .map_err(|_| AppError::NotFound)?;
-            let derived = crate::services::derive::derive(&doc, &title_source);
-            // `manual` titles derive to "": fall back to the parked remote
-            // title the other device stored, rather than blanking the row.
-            let title = if derived.title.is_empty() && !remote_title.is_empty() {
-                remote_title.clone()
-            } else {
-                derived.title
-            };
+            /* The remote title is taken as it stands. This re-derived it from
+             * the incoming document whenever the local row was `auto`, which
+             * meant a peer's title was silently replaced by whatever the body
+             * happened to start with — the same leak the save path had, arriving
+             * from the other side and overwriting whatever this device had. */
+            let title = remote_title.clone();
+            let derived = crate::services::derive::derive(&doc);
             let now = crate::clock::now_ms();
             tx.execute(
                 "UPDATE notes

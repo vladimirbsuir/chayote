@@ -36,7 +36,7 @@ test.describe('Updates', () => {
     await page.goto('/?seed=update');
     await openUpdates(page);
 
-    await expect(page.getByTestId('update-version')).toHaveText('Chayote 0.2.0');
+    await expect(page.getByTestId('update-version')).toHaveText('Chayote 0.2.1');
     await expect(page.getByTestId('update-check')).toBeEnabled();
     /* Nothing has been reported into the tab, so nothing is claimed — "up to
        date" here would be an assertion about a version the tab has not asked

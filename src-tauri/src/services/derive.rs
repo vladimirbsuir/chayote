@@ -15,7 +15,6 @@ const MAX_EXCERPT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Derived {
-    pub title: String,
     pub plain_text: String,
     pub excerpt: String,
     pub word_count: i64,
@@ -84,48 +83,6 @@ fn walk(node: &Value, out: &mut String) {
     }
 }
 
-/// `03-data-model.md` §4.1.
-///
-/// A `manual` title is the one value in this module that is not derived from the
-/// document, because the user typed it (ADR-023). `title` therefore returns
-/// nothing for it — it has no document to read — and the caller keeps the stored
-/// value instead. Every other title is the first heading, else the first
-/// non-empty block, truncated on a word boundary.
-pub fn title(doc: &Value, title_source: &str) -> String {
-    if title_source == "manual" {
-        return String::new();
-    }
-    let blocks = doc
-        .get("content")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-
-    let first_heading = blocks.iter().find(|block| {
-        block.get("type").and_then(Value::as_str) == Some("heading")
-            && block
-                .get("attrs")
-                .and_then(|attrs| attrs.get("level"))
-                .and_then(Value::as_i64)
-                .is_some_and(|level| (1..=3).contains(&level))
-    });
-
-    let raw = match first_heading {
-        Some(heading) => block_text(heading).trim().to_owned(),
-        None => blocks
-            .iter()
-            .map(block_text)
-            .map(|text| text.trim().to_owned())
-            .find(|text| !text.is_empty())
-            .unwrap_or_default(),
-    };
-
-    if raw.is_empty() {
-        return "Untitled".to_owned();
-    }
-    truncate_on_word(&raw, MAX_TITLE)
-}
-
 fn truncate_on_word(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_owned();
@@ -176,10 +133,9 @@ pub fn word_count(plain: &str) -> i64 {
     plain.split_whitespace().count() as i64
 }
 
-pub fn derive(doc: &Value, title_source: &str) -> Derived {
+pub fn derive(doc: &Value) -> Derived {
     let plain_text = plain_text(doc);
     Derived {
-        title: title(doc, title_source),
         excerpt: excerpt(&plain_text),
         word_count: word_count(&plain_text),
         plain_text,

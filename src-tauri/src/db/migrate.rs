@@ -202,7 +202,7 @@ pub fn lift_leading_heading_into_title(tx: &rusqlite::Transaction<'_>) -> Result
             }
         }
 
-        let derived = derive::derive(&doc, "manual");
+        let derived = derive::derive(&doc);
         let stripped = serde_json::to_string(&doc).map_err(AppError::internal)?;
 
         tx.execute(

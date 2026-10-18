@@ -339,19 +339,27 @@ rename a note as a *title* — only to type an H1.
 | `Enter` moves the caret to the start of the body | A newline inside a title is a space everywhere it is shown but one. `Shift+Enter` is left alone. |
 | Blur commits | Same contract as the document: reaching for something else is not cancelling. |
 | Writes are debounced 800 ms and flushed on blur, `Enter`, note switch, window blur and app background | The same rule and the same flush conditions as §5.1. The field has no autosave controller behind it, so these are the only chances to write — `src/hooks/useNoteTitle.ts` holds them. |
-| An empty field hands the title back to derivation | Otherwise clearing a name would leave the note nameless in the list forever, with no way back. `notes_set_title` writes `title_source = 'auto'` and re-derives (`03-data-model.md` §4.1). |
+| ~~An empty field hands the title back to derivation~~ | ADR-026: an empty field stores an empty title. It used to re-derive, so clearing a name renamed the note from its first line — see below. |
 | The last-changed date sits under it, in the reader's locale | A local-first app with no account has no better answer than the machine's locale. It is omitted rather than faked when a note has no saved state yet. |
 
-**Left empty, `title` is still derived** exactly as it always was (`03-data-model.md` §4.1):
+**~~Left empty, `title` is still derived~~** (ADR-026 struck this out.)
 
-1. If the first block is a heading, its text is the title.
-2. Otherwise the first non-empty block's text is the title.
-3. Truncated to 120 characters on a word boundary.
+1. ~~If the first block is a heading, its text is the title.~~
+2. ~~Otherwise the first non-empty block's text is the title.~~
+3. ~~Truncated to 120 characters on a word boundary.~~
 4. Empty result displays as "Untitled".
 
-So the note list shows `Untitled` for a note nobody has named, and a note written without
-touching the field behaves precisely as it did before — which is what makes the field an
-addition rather than a migration of everyone's notes.
+The reasoning above was that a note written without touching the field should behave
+precisely as it did before, so the field would be an addition rather than a migration of
+everyone's notes. That was true of the *storage* and it is still true — ADR-023's
+migration lifted every existing leading H1 into a real title and left the body behind.
+What was wrong was carrying the rule forward into notes written *after* the field
+existed: typing in the first line of a note renamed it, which is the one thing a title
+the reader chose must not do.
+
+So the title is what was typed in this field, trimmed and capped at 120 characters, and
+an empty one is an empty one. `03-data-model.md` §4.1 has the rule; the note list and
+the editor both render an empty title as "Untitled".
 
 **The title is in one place.** It was in the desktop status bar and in the mobile bar above
 the editor until ADR-023, neither of them editable, so two labels for one note could

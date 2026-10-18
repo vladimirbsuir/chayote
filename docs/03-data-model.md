@@ -333,18 +333,26 @@ Computed in Rust inside the save transaction (**rule R9**). None of these are ev
 ### 4.1 Title
 
 ```
-if title_source = 'manual'  -> keep title as-is          (ADR-023: the user typed it)
-else if title_source = 'first_heading' -> title = text of the first heading in the doc
-else -> title = text of the first non-empty block, truncated to 120 chars
-   -> if the result is empty: "Untitled"
+title -> what the reader typed in the title field, trimmed, capped at 120 chars
+      -> empty means untitled; the UI renders that as "Untitled"
 ```
 
-A typed title is trimmed and given the same 120-character cap as a derived one, then
-stored as `manual`. **`save` reads the stored `title` as well as `title_source`**, because
-the `manual` branch has no document to read and would otherwise blank the title on the
-next keystroke in the body — the one thing a field that looks saved and is not would do.
-Clearing the field writes `title_source = 'auto'` and re-derives, which is why the `manual`
-branch is reachable from the UI at all rather than only through a migration.
+The title is **not derived from the document**. ADR-023 separated the field and left
+the old derivation running underneath, so a save re-derived the title from the body
+whenever `title_source` was `auto`, and writing an empty title put the note back into
+that mode. Typing in the first line of a note therefore renamed it. ADR-026 removed
+both: `save` does not read, derive or write `title` at all, and `notes_set_title` with an
+empty field stores an empty title without touching the body.
+
+`title_source` keeps its three values and is still synced, because the column's
+`CHECK` constraint, the sync payload and older peers all assume them. It is no longer
+a switch between two ways of producing a title: `manual` means "typed" and `auto` means
+"there is none".
+
+A new note is created with an **empty** title. It used to be created with the literal
+`"Untitled"` that derivation produced for an empty document, which would now be stored
+as though the reader had typed it and synced to other devices as a title. The placeholder
+is a rendering decision, and both `NoteCard` and `EditorPane` already make it.
 
 ### 4.2 Plain text
 

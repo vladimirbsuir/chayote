@@ -133,7 +133,7 @@ impl NotesRepo for SqliteNotesRepo {
     fn create(&self, folder_id: Option<&str>) -> Result<Note, AppError> {
         let id = new_id();
         let doc_value = doc::validate::empty_doc();
-        let derived = derive::derive(&doc_value, "auto");
+        let derived = derive::derive(&doc_value);
         let serialised = serde_json::to_string(&doc_value).map_err(AppError::internal)?;
         let payload = serde_json::json!({ "id": id, "folderId": folder_id }).to_string();
         let folder = folder_id.map(str::to_owned);
@@ -147,7 +147,16 @@ impl NotesRepo for SqliteNotesRepo {
                  VALUES (?1, ?2, 'auto', ?3, ?4, ?5, ?6, ?7, 0, 0, 1, ?8, ?8)",
                 rusqlite::params![
                     id,
-                    derived.title,
+                    /* An empty title, not a placeholder. This used to store the
+                    literal "Untitled" that `derive::title` produced for an empty
+                    document, which with derivation gone became a real title:
+                    it would be synced to other devices as though the reader had
+                    typed it, and a cleared title stored "" beside it. The
+                    placeholder is a rendering decision — `NoteCard` and
+                    `EditorPane` both map an empty title to "Untitled" — and
+                    keeping it out of the database is what lets a new note and a
+                    cleared one agree. */
+                    "",
                     serialised,
                     derived.plain_text,
                     derived.excerpt,
@@ -175,27 +184,20 @@ impl NotesRepo for SqliteNotesRepo {
         let is_pinned = input.is_pinned;
 
         self.db.with_conn(move |conn| {
-            /* Both halves of the row's title state, not just the source: a manual
-            title is not derivable from the document, so `derive::title` returns
-            nothing for it and the stored value is what a save has to keep.
-            Without the stored column a save would blank the title on the next
-            keystroke after it was typed. */
-            let (stored_title, title_source): (String, String) = {
-                let mut stmt =
-                    conn.prepare("SELECT title, title_source FROM notes WHERE id = ?1")?;
-                stmt.query_row([&note_id], |row| Ok((row.get(0)?, row.get(1)?)))
-                    .map_err(|err| match err {
-                        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound,
-                        other => AppError::from(other),
-                    })?
-            };
+            /* The title is not read, derived or written here.
+             *
+             * It was: a save re-derived the title from the document whenever
+             * `title_source` was `auto`, which meant that typing in the first
+             * line of the body silently renamed the note. That was the
+             * pre-ADR-023 behaviour, kept alive by the `auto` branch — but the
+             * title is a field of its own now, written only by `notes_set_title`
+             * (ADR-023, as amended), and a save that moves it would undo the
+             * very separation the field was added for.
+             *
+             * So a save leaves `title` and `title_source` alone entirely, and
+             * the query for them is gone rather than kept and ignored. */
             let base_rev = base_rev(conn, &note_id)?;
-            let derived = derive::derive(&input.doc, &title_source);
-            let title = if title_source == "manual" {
-                stored_title
-            } else {
-                derived.title
-            };
+            let derived = derive::derive(&input.doc);
 
             let payload = serde_json::json!({
                 "id": note_id,
@@ -208,13 +210,12 @@ impl NotesRepo for SqliteNotesRepo {
             let tx = conn.transaction()?;
             tx.execute(
                 "UPDATE notes
-                    SET title = ?2, doc_json = ?3, plain_text = ?4, excerpt = ?5,
-                        word_count = ?6, folder_id = ?7, is_pinned = ?8,
-                        dirty = 1, updated_at = ?9
+                    SET doc_json = ?2, plain_text = ?3, excerpt = ?4,
+                        word_count = ?5, folder_id = ?6, is_pinned = ?7,
+                        dirty = 1, updated_at = ?8
                   WHERE id = ?1",
                 rusqlite::params![
                     note_id,
-                    title,
                     doc_json,
                     derived.plain_text,
                     derived.excerpt,
@@ -286,49 +287,39 @@ impl NotesRepo for SqliteNotesRepo {
     }
 
     /// Writes the title alone. `03-data-model.md` §4.1: a non-empty title is
-    /// stored as `manual` and kept as-is by every later save, and an empty one
-    /// returns the note to `auto`, which hands the title back to derivation — so
-    /// clearing the field is a way of saying "derive it again", not a way of
-    /// leaving the note nameless.
+    /// stored as `manual`, an empty one as `auto`, and neither is derived from
+    /// the document.
     ///
-    /// `derive::title` returns nothing for `manual` — it has no document to read —
-    /// so the stored value is what is written. Everything else is left alone: the
-    /// body is not loaded and no derived column is recomputed, which is what makes
-    /// this cheap enough to run on every keystroke of the title field.
+    /// Clearing the field used to hand the title back to derivation, so that an
+    /// emptied field meant "derive it again" rather than "no title". That was
+    /// ADR-023's decision and it is amended: the title is what the reader typed
+    /// and nothing else, so an empty field is an empty title and the note reads
+    /// as "Untitled" until one is typed. The body is not loaded here and no
+    /// derived column is recomputed, which is what keeps this cheap enough to
+    /// run on every keystroke of the title field.
     fn set_title(&self, id: &str, title: &str) -> Result<Note, AppError> {
         let note_id = id.to_owned();
         let trimmed = title.trim().to_owned();
         let now = crate::clock::now_ms();
 
         self.db.with_conn(move |conn| {
-            let (stored_title, title_source, doc_json): (String, String, String) = {
-                let mut stmt =
-                    conn.prepare("SELECT title, title_source, doc_json FROM notes WHERE id = ?1")?;
-                stmt.query_row([&note_id], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-                })
-                .map_err(|err| match err {
-                    rusqlite::Error::QueryReturnedNoRows => AppError::NotFound,
-                    other => AppError::from(other),
-                })?
+            let exists: bool = {
+                let mut stmt = conn.prepare("SELECT 1 FROM notes WHERE id = ?1")?;
+                stmt.exists([&note_id]).map_err(AppError::from)?
             };
+            if !exists {
+                return Err(AppError::NotFound);
+            }
 
-            /* An empty field is not a title of "": it is the note handing the
-            title back to derivation, so the stored document has to be read to
-            derive from. That is the one path here that touches the body, and it
-            only runs when the user has cleared the field. */
-            let (title, title_source) = if trimmed.is_empty() {
-                let doc: serde_json::Value = serde_json::from_str(&doc_json).map_err(|err| {
-                    AppError::internal(format!("stored document is not valid JSON: {err}"))
-                })?;
-                (derive::title(&doc, "auto"), "auto".to_owned())
+            /* `auto` is now simply "this note has no title", not "derive one".
+             * The column's CHECK constraint has always allowed the three values
+             * and sync pushes it, so the vocabulary is unchanged and a remote
+             * peer reading it sees exactly what it saw before. */
+            let capped = derive::truncate_title(&trimmed);
+            let (title, title_source) = if capped.is_empty() {
+                (String::new(), "auto".to_owned())
             } else {
-                let capped = derive::truncate_title(&trimmed);
-                if capped.is_empty() {
-                    (stored_title, title_source)
-                } else {
-                    (capped, "manual".to_owned())
-                }
+                (capped, "manual".to_owned())
             };
 
             let base_rev = base_rev(conn, &note_id)?;
