@@ -239,6 +239,7 @@ function Shell() {
     downloaded: updateDownloaded,
     total: updateTotal,
     error: updateInstallError,
+    errorCode: updateInstallErrorCode,
   } = useInstallUpdate();
   const lastUpdateCheckAt = useSettingsStore((state) => state.lastUpdateCheckAt);
   useDailyUpdateCheck();
@@ -923,6 +924,7 @@ function Shell() {
             downloaded: updateDownloaded,
             total: updateTotal,
             installError: updateInstallError,
+            installErrorCode: updateInstallErrorCode,
             lastCheckedAt: lastUpdateCheckAt,
             onCheck: checkForUpdate,
             onInstall: installUpdate,

@@ -86,7 +86,6 @@ Ordered by value per unit of effort. Each needs a scope document before implemen
 
 | Feature | Effort | Prerequisite |
 |---------|--------|--------------|
-| Self-update on Android | 3 d | An `ACTION_INSTALL_PACKAGE` intent written by hand, plus `REQUEST_INSTALL_PACKAGES` and a release keystore in CI. `tauri-plugin-updater` cannot install there at all (`06-platform.md` §3.8.1), so this is new work rather than a configuration. Play Store distribution would answer it more durably and is out of scope for v1. |
 | Self-update on macOS | 1 d + an Apple Developer account | Code signing, which §3.7 rules out for v1. The manifest and the updater are already in place; only the signature is missing. |
 | Slash command menu | 2 d | Command registry |
 | Wiki links and backlinks | 5 d | Note reference index |

@@ -28,19 +28,22 @@ rustls = "0.23.45"
 webpki-roots = "1.0.9"
 tokio-postgres-rustls = "0.14.0"
 
+# The updater, on every target Android and desktop build for.
+#
+# `tauri-plugin-updater` declares `android = { level = "none" }` and its
+# `install_inner` is `Err(Error::UnsupportedOs)` under `cfg(mobile)`, so its
+# *install* is unusable there. Its check and download are not: `download()`
+# verifies the signature and returns the bytes. ADR-025 keeps those two and
+# replaces only the install with a Kotlin plugin, so the dependency is
+# unconditional — and `REQUEST_INSTALL_PACKAGES` is declared because something
+# can finally use it.
+tauri-plugin-updater = "2"
+
 # Windows only: reaching WebView2's settings to hand browser accelerators
 # (Ctrl+F find, …) to the page (`06-platform.md` §1, shortcuts).
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39"
 windows-core = "0.62"
-
-# The updater is a desktop-only dependency (ADR-024). Its own manifest declares
-# `android = { level = "none" }` and `install_inner` returns `Error::UnsupportedOs`
-# under `cfg(mobile)`, so compiling it on Android would buy an APK download with
-# no way to install it — and would put a plugin in the app that can only fail.
-# Excluding the target also keeps `REQUEST_INSTALL_PACKAGES` off the manifest.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2"
 
 [profile.release]
 codegen-units = 1

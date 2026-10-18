@@ -15,7 +15,9 @@ import type { AppInfo, UpdateSummary } from '../types/update';
 
 const WINDOWS: AppInfo = { version: '0.1.0', os: 'Windows', updatesSupported: true };
 const MACOS: AppInfo = { version: '0.1.0', os: 'macOS', updatesSupported: false };
-const ANDROID: AppInfo = { version: '0.1.0', os: 'Android', updatesSupported: false };
+/** ADR-025: Android updates itself, so it is the supported fixture. It was the
+    unsupported one until the Kotlin installer existed. */
+const ANDROID: AppInfo = { version: '0.1.0', os: 'Android', updatesSupported: true };
 
 const FOUND: UpdateSummary = {
   version: '0.2.0',
@@ -35,6 +37,7 @@ function pane(overrides: Partial<UpdatePaneProps> = {}): UpdatePaneProps {
     downloaded: 0,
     total: null,
     installError: null,
+    installErrorCode: null,
     lastCheckedAt: null,
     onCheck: () => Promise.resolve(null),
     onInstall: () => Promise.resolve(),
@@ -121,8 +124,67 @@ describe('UpdatePane', () => {
     /* The reason replaces the result line rather than sitting beside it. */
     expect(screen.queryByTestId('update-current')).toBeNull();
     rerender(<UpdatePane {...pane({ info: ANDROID, onCheck })} />);
-    expect(text('update-unsupported')).toContain('Android');
-    expect(text('update-unsupported')).toContain('cannot install updates');
+    /* ADR-025: Android installs itself, so there is nothing to explain and
+       nothing to disable. This assertion is the whole point of that change. */
+    expect(isDisabled('update-check')).toBe(false);
+    expect(screen.queryByTestId('update-unsupported')).toBeNull();
+  });
+
+  it('words Android’s outstanding grant as something to do, not as a failure', () => {
+    /* ADR-025. The install is refused for want of a permission that lives in
+       system settings, the bytes are still verified, and pressing Install again
+       installs them — so "try again" alone would leave the user pressing a button
+       that cannot work. */
+    render(
+      <UpdatePane
+        {...pane({
+          info: ANDROID,
+          update: FOUND,
+          installError: 'Android has not been allowed to install updates for Chayote yet.',
+          installErrorCode: 'UPDATE_PERMISSION_REQUIRED',
+        })}
+      />,
+    );
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('will not let Chayote install updates until you allow it');
+    expect(alert.textContent).not.toContain('the sync server');
+    /* The Install button stays live, because the next press is the fix. */
+    expect(isDisabled('update-install')).toBe(false);
+    /* And it is not painted like a failure. Red would report broken where the
+       truth is a screen the user has already been sent to — the assertion is on
+       the class, because the sentence alone cannot tell the two apart. */
+    expect(alert.className).toContain('var(--warning)');
+    expect(alert.className).not.toContain('var(--danger)');
+  });
+
+  it('paints every other install error as a failure', () => {
+    /* The complement of the test above, so the warning style cannot spread to
+       errors that really are failures by someone editing one branch. */
+    render(
+      <UpdatePane
+        {...pane({
+          update: FOUND,
+          installError: 'The updater manifest could not be fetched.',
+          installErrorCode: 'NETWORK',
+        })}
+      />,
+    );
+    expect(screen.getByRole('alert').className).toContain('var(--danger)');
+  });
+
+  it('passes any other install error through unchanged', () => {
+    render(
+      <UpdatePane
+        {...pane({
+          update: FOUND,
+          installError: 'The installer committed without the app being replaced.',
+          installErrorCode: 'INTERNAL',
+        })}
+      />,
+    );
+    expect(screen.getByRole('alert').textContent).toContain(
+      'The installer committed without the app being replaced.',
+    );
   });
 
   it('falls back to a general reason on a platform it has no words for', () => {

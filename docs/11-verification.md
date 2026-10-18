@@ -298,6 +298,77 @@ Added with the updater, because the gap here is wide and the failure is silent: 
 
 **One thing that release caught which nothing in this repository would have.** The release notes rendered `Chayote_${needs.version.outputs.version}_x64-setup.exe` literally, because Actions interpolates `${{ }}` and `${...}` is plain text. No gate asserts the workflow's own rendered output, and a published release is the only place it can show up.
 
+### 4.1a What the Android updater was proved to be, and what it was not (ADR-025)
+
+ADR-024 proved the desktop updater from a real release. The Android one cannot
+be proved that way from this machine, and the split matters: a signed APK is
+inspectable, an app replacing itself is not.
+
+**Proved here, 2026-10-17.**
+
+| Claim | How | Result |
+|-------|-----|--------|
+| The Rust side compiles for Android | `cargo check --target aarch64-linux-android` and `--target armv7-linux-androideabi` | Both `Finished` |
+| The Kotlin plugin compiles | `gradlew :app:compileUniversalReleaseKotlin` | `BUILD SUCCESSFUL` |
+| A signed release APK is produced | `npx tauri android build --apk --target aarch64 --target armv7` | exit 0, 20,707,626 bytes |
+| The plugin survives R8, so the release APK can actually dispatch it | `apkanalyzer dex packages --defined-only` on the built APK | `install(app.tauri.plugin.Invoke)` present and kept by name |
+| It is signed with the **release** key, not the debug one || It is signed with the **release** key, not the debug one | `apksigner verify --print-certs` against `keytool -list -v` on the keystore | SHA-256 `F5:32:4F:…:4D:F9` on both — **match** |
+| Both ARM ABIs, and no others | `aapt2 dump badging` | `arm64-v8a`, `armeabi-v7a` |
+| `versionCode` matches the rule in §3.8 | `aapt2 dump badging` | `1000` for `0.1.0` |
+| Both install permissions are declared | `aapt2 dump badging` | `REQUEST_INSTALL_PACKAGES`, `UPDATE_PACKAGES_WITHOUT_USER_ACTION` |
+| The manifest merge keeps desktop intact and refuses a bad version | `scripts/android-updater-manifest.mjs` against the real `v0.1.0` manifest, plus four synthetic signatures | desktop keys unchanged, `0.0.9` rejected, missing/nameless trusted comments rejected |
+
+**Three real defects this found, all of which would have shipped:**
+- **The release APK could not install an update at all.** R8 strips every method
+  of a plugin class that is not annotated `@TauriPlugin`, because tauri's
+  consumer rules keep
+  `-keep @app.tauri.annotation.TauriPlugin public class * { @…Command public
+  <methods>; }` and an unannotated class matches nothing in it.
+  `apkanalyzer dex packages --defined-only` on the built APK showed
+  `com.chayote.app.UpdaterPlugin` with **0 methods** — an empty shell. The debug
+  build has `isMinifyEnabled = false`, so this hides perfectly: the plugin works
+  on a USB phone and arrives empty when shipped. The annotation is now present,
+  and the same command shows `void install(app.tauri.plugin.Invoke)` kept by
+  name, which is what Tauri reflects on.
+- `java.util.Properties` read `storeFile=C:\Users\…` as an *escape* string and
+  produced `C:Users…` with a vertical tab where the backslash was, so the
+  release build died with "Keystore file not found" for a path that never
+  existed. The file is now parsed by hand, because a path is not an escape
+  sequence. This would have broken every Windows developer's release build.
+- The manifest script's version check compared the base64 signature *blob*
+  against the version, which passes for any signature at all. It now reads
+  `version:` out of the signature's trusted comment, which is what
+  `requireSignedVersion` actually compares.
+
+**The lesson worth keeping:** two of the three were invisible to every gate that
+did not inspect the *packaged* artefact. `compileUniversalReleaseKotlin` passed
+on a plugin R8 was about to empty, and a green `tauri android build` produced an
+APK that could not do the one thing it was written for. Only reading the dex back
+found them. `10-conventions.md`'s rule that a claim needs real command output is
+the only reason both were caught at all.
+**Not proved, and not provable from here.**
+
+- **That the app replaces itself on a device.** Nothing in this repository can
+  watch an `Install` succeed. The code path is written, compiles and is
+  packaged; whether Android honours `USER_ACTION_NOT_REQUIRED` here, and whether
+  `STATUS_PENDING_USER_ACTION` arrives and is handled, is a device question.
+  The receiver now launches the `Intent.EXTRA_INTENT` that status carries,
+  because dropping it would stage the session for ever with no error
+  anywhere. Whether Android reaches that branch at all — rather than
+  committing silently — is the first thing to check with `adb logcat`.
+- **That the update is accepted over an installed copy.** The certificate match
+  above is the precondition; the acceptance itself needs a second signed build
+  with a higher `versionCode`.
+- **That CI produces the same APK.** The `android` job has never run. Its first
+  execution is the real test of `release.yml`, of the three secrets, and of the
+  manifest merge under bash rather than PowerShell.
+
+**The debug-to-release key change costs one uninstall.** An APK signed with the
+debug key cannot be updated by one signed with the release key, and Android's
+only remedy is uninstalling — which deletes `chayote.db`. Any device that has
+run a debug build needs its notes backed up before the first release APK, and
+then it can update in place for ever after (§3.8.1).
+
 ## 5. Gates per milestone
 
 Run all of these before declaring any milestone done. They are also the CI gate, per `10-conventions.md` §11.

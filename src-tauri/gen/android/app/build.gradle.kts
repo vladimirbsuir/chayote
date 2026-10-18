@@ -25,6 +25,54 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    // ADR-025: release builds are signed with the project keystore rather than a
+    // debug key. Android refuses an update whose signing certificate differs from
+    // the installed one, so a debug-signed APK could never be updated in place —
+    // and the standard debug keystore is public knowledge, which would make any
+    // APK claiming to be this app installable. `keystore.properties` is generated
+    // per machine and in CI from secrets, and is gitignored, so this block
+    // resolves to null properties when it is absent and the release build falls
+    // back to unsigned rather than failing with a confusing key error.
+    val keystoreProperties = mutableMapOf<String, String>()
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    if (keystorePropertiesFile.exists()) {
+        // Read by hand rather than with `java.util.Properties`, which treats the
+        // file as a properties *escape* format: on a Windows machine
+        // `storeFile=C:\Users\…\chayote-release.jks` comes back as
+        // `C:Users…` with a vertical tab where the backslash was, and the build
+        // then fails with "Keystore file not found" for a path that never
+        // existed. A keystore path is a path, not an escape sequence, so the
+        // value is taken exactly as written and only the surrounding space goes.
+        keystorePropertiesFile.readLines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
+            val split = trimmed.indexOf('=')
+            if (split > 0) {
+                keystoreProperties[trimmed.substring(0, split).trim()] =
+                    trimmed.substring(split + 1).trim()
+            }
+        }
+    }
+
+    val keystorePath = keystoreProperties["storeFile"]
+    val keystoreFile =
+        when {
+            keystorePath == null -> null
+            File(keystorePath).isAbsolute -> File(keystorePath)
+            else -> file(keystorePath)
+        }
+
+    signingConfigs {
+        if (keystoreFile != null) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["password"]
+                storeFile = keystoreFile
+                storePassword = keystoreProperties["password"]
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -39,6 +87,9 @@ android {
             }
         }
         getByName("release") {
+            if (keystoreFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                enable = true
             }

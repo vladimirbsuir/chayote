@@ -23,23 +23,25 @@ const SETTINGS_FILE: &str = "settings.json";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let built = with_pending_update(with_updater(tauri::Builder::default()))
-        .plugin(tauri_plugin_store::Builder::new().build())
-        .invoke_handler(commands::handler())
-        .setup(|app| {
-            // Tauri's app data directory is not created for us, and on a first
-            // launch it does not exist at all. Opening the database must not be
-            // the thing that creates it, or the error is opaque.
-            let dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&dir).map_err(|err| {
-                error::AppError::internal(format!("could not create {}: {err}", dir.display()))
-            })?;
-            let db = Arc::new(db::Database::open(&dir)?);
-            app.manage(Services::new(db));
-            disable_browser_accelerators(app);
-            Ok(())
-        })
-        .build(tauri::generate_context!());
+    let built = with_pending_update(with_android_installer(with_updater(
+        tauri::Builder::default(),
+    )))
+    .plugin(tauri_plugin_store::Builder::new().build())
+    .invoke_handler(commands::handler())
+    .setup(|app| {
+        // Tauri's app data directory is not created for us, and on a first
+        // launch it does not exist at all. Opening the database must not be
+        // the thing that creates it, or the error is opaque.
+        let dir = app.path().app_data_dir()?;
+        std::fs::create_dir_all(&dir).map_err(|err| {
+            error::AppError::internal(format!("could not create {}: {err}", dir.display()))
+        })?;
+        let db = Arc::new(db::Database::open(&dir)?);
+        app.manage(Services::new(db));
+        disable_browser_accelerators(app);
+        Ok(())
+    })
+    .build(tauri::generate_context!());
 
     match built {
         Ok(app) => app.run(|_handle, _event| {}),
@@ -50,16 +52,18 @@ pub fn run() {
     }
 }
 
-/// ADR-024: the updater plugin is desktop-only, matching its `Cargo.toml` gate.
+/// ADR-024: the updater plugin. Desktop and Android alike as of ADR-025 —
+/// Android keeps the plugin's check, download and signature verification and
+/// supplies its own install, so the dependency is no longer target-gated.
+///
 /// `plugins.updater` stays in `tauri.conf.json` unconditionally because it is
-/// also where the public key lives, and the key is compiled into every target —
-/// a build that could never verify an update does not need one.
-#[cfg(desktop)]
+/// also where the public key lives, and the key is compiled into every target.
+#[cfg(any(desktop, target_os = "android"))]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.plugin(tauri_plugin_updater::Builder::new().build())
 }
 
-#[cfg(mobile)]
+#[cfg(not(any(desktop, target_os = "android")))]
 fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
 }
@@ -67,13 +71,49 @@ fn with_updater(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
 /// The checked-but-not-yet-installed update, carried between `updates_check` and
 /// `updates_install`. Registered here rather than in the command module so the
 /// builder chain reads in the order the app is wired, and the state has one home.
-#[cfg(desktop)]
+#[cfg(any(desktop, target_os = "android"))]
 fn with_pending_update(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.manage(commands::updates::PendingUpdate::default())
 }
 
-#[cfg(mobile)]
+#[cfg(not(any(desktop, target_os = "android")))]
 fn with_pending_update(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
+}
+
+/// ADR-025: the Kotlin half of the Android install.
+///
+/// The plugin's `install_inner` is `UnsupportedOs` under `cfg(mobile)` — it
+/// cannot put the package anywhere the platform will accept — so this registers
+/// ours, whose `PackageInstaller` session does. Same shape as ADR-020's Kotlin
+/// bridge and for the same reason: the platform has no Rust-reachable API for
+/// what is being asked of it.
+///
+/// `register_android_plugin` lives on `PluginApi`, not on the builder, so the
+/// registration happens inside our own plugin's `setup` — which is the only
+/// place Tauri hands one out. The resulting handle is managed so the install can
+/// call back into Kotlin without registering twice.
+#[cfg(target_os = "android")]
+fn with_android_installer(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.plugin(
+        tauri::plugin::Builder::<tauri::Wry>::new("chayote-updater")
+            .setup(|app, api| {
+                let handle = api
+                    .register_android_plugin("com.chayote.app", "UpdaterPlugin")
+                    .map_err(|err| {
+                        error::AppError::internal(format!(
+                            "could not register UpdaterPlugin: {err}"
+                        ))
+                    })?;
+                app.manage(commands::updates::Installer(handle));
+                Ok(())
+            })
+            .build(),
+    )
+}
+
+#[cfg(not(target_os = "android"))]
+fn with_android_installer(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
 }
 

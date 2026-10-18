@@ -37,6 +37,14 @@ blob-report/
 *.key
 *.key.pub
 
+# Android release keystore (ADR-025). Android refuses an update whose signing
+# certificate differs from the installed one, so this one is load-bearing in a
+# way a leaked key otherwise is not: losing it leaves every installed build
+# unable to update, and uninstalling — the only remedy — deletes chayote.db.
+# The real key is a GitHub Actions secret; this is the local working copy.
+*.jks
+*.keystore
+
 # editor / OS
 .vscode/*
 !.vscode/extensions.json

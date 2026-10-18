@@ -446,16 +446,17 @@ Only the selected panel is mounted, so a hidden panel holds no state and a hidde
 | Field | Control | Default |
 |-------|---------|---------|
 | Version | Read-only text, `Chayote 0.1.0` | — |
-| Check for updates | Button (`rotate-cw`), disabled while a request is in flight | — |
+| Check for updates | Button (`rotate-cw`), disabled while a request is in flight, and on macOS entirely | — |
 | Result | One sentence: up to date, or a version is available | Nothing |
 | Install and restart | Button (`download`), only when a newer version exists | — |
 | Progress | A bar with a percentage, only while bytes are moving | — |
-| Last checked | The reader's own locale, so it survives a relaunch | Never |
+| Grant needed | Android only: what to allow, and that the button stays live | Never |
 
 Four rules this tab holds to, each of which is a screen someone could get wrong:
 
 - **Nothing is claimed that was not measured.** "Chayote is up to date." appears only after a check that came back empty, never as the resting state; a tab that says so before it has asked is asserting something about a version it does not know. This is why the result line is driven by *this tab's* check completing and not by the persisted timestamp — the silent daily tick writes that timestamp without reporting anything into the tab, and a tab that inherited its conclusion would be reporting a result it never saw.
-- **A platform that cannot update gets a disabled button and a sentence, not a working button that fails.** macOS and Android are named and told what to do instead (`06-platform.md` §3.8), the same shape as the existing "Sync is unavailable here." fallback.
+- **A platform that cannot update gets a disabled button and a sentence, not a working button that fails.** macOS is named and told what to do instead (`06-platform.md` §3.8), the same shape as the existing "Sync is unavailable here." fallback.
+- **Android's outstanding install grant is worded as something to do, and never styled as a failure** (ADR-025). `REQUEST_INSTALL_PACKAGES` has no runtime prompt — it is granted in system settings — so "try again" alone would leave the user pressing a button that cannot work. The verified bytes are still on disk and the next press installs them, so the Install button stays live and the error reads as guidance. It is the one error code the pane gives a sentence of its own.
 - **One action at a time.** Checking and installing are both round trips against the same manifest, and the second replaces the running process.
 - **Release notes are plain text.** `latest.json` carries them as untrusted text from a remote file and the app has no Markdown renderer, so they are never rendered as markup — the paste-sanitizer problem (`04-editor.md` §5) in a place nobody thought to check.
 

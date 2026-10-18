@@ -11,6 +11,21 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- ADR-025: self-update. An app that is not the system installer must ask
+         before it may install a package, and the grant is per app in system
+         settings rather than a runtime prompt — which is why the Updates tab
+         explains rather than asks. Without this the release workflow stopped
+         documenting it as "no": it said no because `tauri-plugin-updater` could
+         not install on Android, and now something can. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- The companion to the above, and the reason an update needs no
+         confirmation: Android skips the install dialog when an app updates
+         *itself*, the installed target is new enough for the running release,
+         and the installer declares this permission. Where the target is too old,
+         Android asks the user instead — slower, not broken. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 

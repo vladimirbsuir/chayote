@@ -42,6 +42,9 @@ export type UpdatePaneProps = {
       progress bar can be indeterminate rather than absent. */
   total: number | null;
   installError: string | null;
+  /** The error contract's `code` for `installError`, which is what tells "the
+      update failed" apart from "Android wants a grant first" (ADR-025). */
+  installErrorCode: string | null;
   lastCheckedAt: number | null;
   onCheck: () => Promise<unknown>;
   onInstall: () => Promise<void>;
@@ -58,6 +61,7 @@ export function UpdatePane({
   downloaded,
   total,
   installError,
+  installErrorCode,
   lastCheckedAt,
   onCheck,
   onInstall,
@@ -136,8 +140,20 @@ export function UpdatePane({
             </p>
           ) : null}
           {installError !== null ? (
-            <p className="text-[12px] text-[var(--danger)]" role="alert" data-testid="update-install-error">
-              {installError}
+            <p
+              className={`text-[12px] ${
+                // ADR-025: the outstanding Android install grant is guidance, not a
+                // failure. Painting it with --danger would tell the user something is
+                // broken when the fix is a screen they have already been sent to, and
+                // the bytes below are verified and waiting.
+                installErrorCode === 'UPDATE_PERMISSION_REQUIRED'
+                  ? 'text-[var(--warning)]'
+                  : 'text-[var(--danger)]'
+              }`}
+              role="alert"
+              data-testid="update-install-error"
+            >
+              {installFailure(installErrorCode, installError, info?.os ?? '')}
             </p>
           ) : null}
           <div>
@@ -236,18 +252,41 @@ function checkFailure(code: string | null, message: string): string {
     : message;
 }
 
+/** What a failed install says.
+    `UPDATE_PERMISSION_REQUIRED` is the one code that gets a sentence of its own,
+    and it is also the one that must not be styled as a failure: nothing has gone
+    wrong, the platform is waiting for a grant, and the Install button is still
+    the right thing to press. Everything else is the contract's own message. */
+function installFailure(code: string | null, message: string, os: string): string {
+  if (code === 'UPDATE_PERMISSION_REQUIRED') {
+    return (
+      permissionRequiredReason(os) ??
+      'This platform has not been allowed to install the update yet.'
+    );
+  }
+  return message;
+}
+
 /** Why this platform cannot update, in its own words rather than a shrug. Every
     branch is a documented fact (`06-platform.md` §3.8); the fallback exists for a
     platform this build has never heard of, where the honest sentence is the
-    general one. */
+    general one. Android is not here any more — it updates itself as of ADR-025. */
 function unsupportedReason(os: string): string {
   if (os === 'macOS') {
     return 'macOS builds are not code-signed, so Chayote cannot replace itself. Download a new version from the releases page.';
   }
-  if (os === 'Android') {
-    return 'Android builds cannot install updates from inside the app. Install each new version from the releases page — your notes carry over.';
-  }
   return 'Automatic updates are not available on this platform.';
+}
+
+/** What Android shows once the install has been refused for want of a grant.
+    `UPDATE_PERMISSION_REQUIRED` is not a failure: the bytes are verified and
+    still on disk, so the next press installs them. Saying "try again" alone
+    would leave the user pressing a button that cannot work, because the grant
+    lives in system settings and there is no prompt for it. */
+function permissionRequiredReason(os: string): string | null {
+  return os === 'Android'
+    ? 'Android will not let Chayote install updates until you allow it. Tap Install and restart again after saying yes on the next screen.'
+    : null;
 }
 
 /** Binary units, because that is what a download is measured in. One decimal

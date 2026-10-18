@@ -264,6 +264,19 @@ describe('mock adapter against the real command surface', () => {
     await expect(backend.invoke('updates_install', { onEvent: undefined })).resolves.toBeUndefined();
   });
 
+  /* ADR-025: Android's grant is refused with a code of its own, because the tab
+     words it as something to do rather than as a failure. A mock that reused
+     `NETWORK` here would make that branch unreachable in a browser. */
+  it('reports Android’s outstanding grant with its own code', async () => {
+    const backend = createMockBackend(buildMockDatabase(), { updateFeed: 'needs-permission' });
+    const info = await backend.invoke('app_info', {});
+    expect(info.updatesSupported).toBe(true);
+    expect(info.os).toBe('Android');
+    await expect(backend.invoke('updates_install', { onEvent: undefined })).rejects.toMatchObject({
+      code: 'UPDATE_PERMISSION_REQUIRED',
+    });
+  });
+
   it('fails every read command with a coded error for an unknown id', async () => {
     const backend = createMockBackend(buildMockDatabase());
     const commands = [

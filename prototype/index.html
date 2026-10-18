@@ -584,6 +584,9 @@ body {
 .dialog .ubtn:disabled { opacity: 0.5; cursor: default; }
 .dialog .unote { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
 .dialog .unote-strong { font-size: 13px; color: var(--text); margin-top: 10px; }
+    /* ADR-025. Guidance, not failure: the Android install grant is a screen the
+       user has already been sent to, and the verified bytes are still waiting. */
+    .dialog .unote-warn { font-size: 12px; color: var(--warning); margin-top: 10px; }
 .dialog .usub { font-size: 12px; color: var(--text-subtle); margin-top: 8px; }
 .dialog .ubar {
   height: 6px; margin-top: 12px; border-radius: 999px;
@@ -1249,11 +1252,15 @@ body {
     </div>
 
     <div class="note" style="margin-top:26px">
-      <strong>Updates tab, three states.</strong> Nothing is claimed that was not measured:
+      <strong>Updates tab, four states.</strong> Nothing is claimed that was not measured:
       "up to date" appears only after a check that came back empty, never as the
-      resting state. On a platform that cannot install an update — unsigned macOS,
-      or Android — the button is disabled and a sentence says why, which is better
-      than a control whose only possible outcome is a failure.
+      resting state. On a platform that cannot install an update — unsigned macOS —
+      the button is disabled and a sentence says why, which is better than a
+      control whose only possible outcome is a failure. The fourth state is
+      Android's outstanding install grant, and it is the one error that is
+      <em>not</em> painted with <code>--danger</code>: it is worded as something to
+      do, in <code>--warning</code>, and the Install button stays live because the
+      verified bytes are still on disk and the next press installs them.
     </div>
     <div class="dialog-wrap">
       <div class="dialog">
@@ -1345,6 +1352,43 @@ body {
               <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Check for updates
             </button>
             <div class="usub">macOS builds are not code-signed, so Chayote cannot replace itself. Download a new version from the releases page.</div>
+          </div>
+        </div>
+        <div class="dlg-btns">
+          <button class="danger">
+            <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Reset all settings
+          </button>
+          <div style="flex:1"></div>
+          <button class="primary">Done</button>
+        </div>
+      </div>
+
+      <div class="dialog">
+        <div class="dhead">
+          <span class="ico"><svg class="icon i-20" aria-hidden="true"><use href="#i-settings"/></svg></span>
+          <div class="dtitle">Settings</div>
+        </div>
+        <div class="dtabs" role="tablist">
+          <button role="tab">General</button>
+          <button role="tab">Sync</button>
+          <button role="tab" aria-selected="true">Updates</button>
+        </div>
+        <div class="settings">
+          <div class="field">
+            <label>Version</label>
+            <div class="uval">Chayote 0.1.0</div>
+          </div>
+          <div class="field">
+            <button class="ubtn">
+              <svg class="icon i-16" aria-hidden="true"><use href="#i-rotate-cw"/></svg>Check for updates
+            </button>
+            <div class="unote-strong">Version 0.2.0 is available.</div>
+            <div class="unote">Faster search on large notes, and the Updates tab.</div>
+            <button class="ubtn primary">
+              <svg class="icon i-16" aria-hidden="true"><use href="#i-download"/></svg>Install and restart
+            </button>
+            <div class="unote-warn">Android will not let Chayote install updates until you allow it. Tap Install and restart again after saying yes on the next screen.</div>
+            <div class="usub">Last checked 17 October 2026 at 19:04</div>
           </div>
         </div>
         <div class="dlg-btns">
