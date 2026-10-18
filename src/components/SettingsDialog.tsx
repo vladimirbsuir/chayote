@@ -129,6 +129,7 @@ export type UpdatesTabState = {
   downloaded: number;
   total: number | null;
   installError: string | null;
+  installErrorCode: string | null;
   lastCheckedAt: number | null;
   onCheck: () => Promise<UpdateSummary | null>;
   onInstall: () => Promise<void>;
@@ -631,6 +632,7 @@ export function SettingsDialog({
                 downloaded={updates.downloaded}
                 total={updates.total}
                 installError={updates.installError}
+                installErrorCode={updates.installErrorCode}
                 lastCheckedAt={updates.lastCheckedAt}
                 onCheck={updates.onCheck}
                 onInstall={updates.onInstall}

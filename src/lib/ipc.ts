@@ -60,6 +60,7 @@ function mockOptionsForSeed(seed: string | null): MockOptions {
   if (seed === 'update') return { updateFeed: 'available' };
   if (seed === 'no-updates') return { updateFeed: 'unsupported' };
   if (seed === 'offline') return { updateFeed: 'offline' };
+  if (seed === 'needs-permission') return { updateFeed: 'needs-permission' };
   return DEFAULT_MOCK_OPTIONS;
 }
 

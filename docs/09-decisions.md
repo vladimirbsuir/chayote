@@ -31,13 +31,114 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 021 | Tags stay listed at a zero count; the sidebar creates them | Accepted |
 | 022 | AGENTS.md is the agent onboarding document; work lands via pull request | Accepted |
 | 023 | The note title is a field of its own; the editor's leading line is not it | Accepted |
-| 024 | Releases are GitHub Releases, and the app updates itself on desktop only | Accepted |
+| 024 | Releases are GitHub Releases, and the app updates itself on desktop only | Superseded in part by ADR-025 |
+| 025 | Android keeps the Tauri updater's check and download, and supplies its own install | Accepted |
+
+---
+
+## ADR-025 - Android keeps the Tauri updater's check and download, and supplies its own install
+
+**Status:** Accepted · **Date:** 2026-10-17 · **Amends:** ADR-024
+
+**Context.** ADR-024 shipped the updater for Windows and Linux and left Android
+out, on the evidence that `tauri-plugin-updater` declares
+`android = { level = "none" }` and that `install_inner` is
+`Err(Error::UnsupportedOs)` under `cfg(mobile)`. Both facts are true and both were
+read as covering the whole plugin. They cover one function.
+
+The same crate's `check()` fetches the manifest over the same HTTPS path every
+platform uses, and `download()` verifies the minisign signature — BLAKE2b-512,
+then Ed25519, then the signed version — before it returns a byte. Neither has a
+`cfg(mobile)` arm. So the plugin can, on Android, tell the user an update exists,
+fetch it over TLS, verify it against the public key compiled into the app, and
+then hand back `UnsupportedOs`. An APK arrives verified and has nowhere to go.
+
+ADR-024's answer to that was a disabled button and a sentence. It was the right
+answer at the time and it stopped being one the moment the reason for the
+limitation turned out to be a single function rather than the platform.
+
+**Decision.** Android keeps the plugin's `check` and `download` unchanged and
+replaces only `install_inner`. `commands/updates.rs` writes the verified bytes
+into the cache directory and calls a Kotlin plugin, `UpdaterPlugin.kt`, registered
+through `PluginApi.register_android_plugin`. It opens a `PackageInstaller`
+session, streams the file in with `openWrite`, and commits it.
+
+**Written as a Kotlin plugin, not as JNI.** `PackageInstaller` needs an Activity,
+a `BroadcastReceiver` and an `IntentSender`, and none of the three is reachable
+from Rust on Android in any way other than JNI. That is the same conclusion
+ADR-020 reached for the back button, and it is drawn from the same evidence:
+Tauri's Android API stops where the platform's does. One Kotlin file, registered
+the way Tauri expects, is smaller and reviewable; the alternative is the same
+logic assembled through a foreign function interface.
+
+**`openWrite` rather than an `ACTION_INSTALL_PACKAGE` intent.** Streaming the
+bytes into the session means the package never leaves the app: no `FileProvider`
+grant, no other app able to read it, and no window in which a file on disk could
+be swapped. The `FileProvider` the Tauri template already declares stays for the
+template's own reasons and is not used by this path.
+
+**`REQUEST_INSTALL_PACKAGES` and `UPDATE_PACKAGES_WITHOUT_USER_ACTION` are
+declared.** The first because Android will not let a non-system installer install
+anything without it, and it is granted per app in system settings with no runtime
+prompt. The second because it is what lets an app updating *itself* commit a
+session with no confirmation. Where the second is not honoured — an installed
+target too old for the running release — Android asks the user instead, which is
+slower rather than broken, so the flow degrades rather than failing.
+
+**The release APK is signed with a project keystore held as a CI secret.** Not
+optional: Android refuses an update whose signing certificate differs from the
+installed one, so a debug-signed APK could never update in place. And not the
+default debug keystore, which is public knowledge — that would make any APK
+claiming to be this app installable.
+
+**The Android release is a separate job in `release.yml`.** `tauri android build`
+packages through Gradle, produces no updater artifact and no `.sig`, so
+`tauri-action` has nothing to merge. The job runs after the desktop matrix, signs
+the APK with `tauri signer sign`, and merges `android-aarch64` and `android-armv7`
+into the manifest the matrix published. Both keys point at one APK, because the
+APK carries both ABIs; they are separate keys because a device asks for the one
+matching its own architecture.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Write the whole updater for Android: own manifest fetch, own signature check, own download | Everything except the install already exists, is already tested, and re-implementing minisign is exactly the sort of quiet duplication that later drifts out of sync with the desktop path. ADR-024 already made this call for Windows and Linux. |
+| `ACTION_INSTALL_PACKAGE` with a `FileProvider` URI | About twenty lines and one Intent, and it needs no silent-install permission — but it hands the user a system dialog for something Chayote has already verified, and it exposes the APK to any app holding the URI grant. The extra Kotlin is the price of not doing that. |
+| Do it from Rust over JNI | Keeps every line in one language, and makes an Activity, a BroadcastReceiver and an IntentSender into JNI. ADR-020 is the precedent for refusing that. |
+| Enable the plugin on Android and leave `install` failing | What ADR-024 would have shipped had the copy been softer: a button that offers an update and then cannot apply it. |
+| Keep the disabled button and revisit later | Defensible only while the limitation was believed to be the platform's. It was one `cfg(mobile)` branch. |
+
+**Consequences.**
+
+- **`tauri-plugin-updater` is no longer a desktop-only dependency.** It is
+  unconditional, because Android now compiles it for its check, download and
+  verification. `plugins.updater` in `tauri.conf.json` was already unconditional.
+- **`AppError` gains `UPDATE_PERMISSION_REQUIRED`.** Adding a code is safe
+  (`10-conventions.md` §6). The tab words and styles that one differently from
+  every other error, because it is not a failure: the bytes stay verified and the
+  next press installs them.
+- **`REQUEST_INSTALL_PACKAGES` is now declared**, which §4.2 previously recorded
+  as "no". The reason it could honestly say no was that nothing could use it.
+- **The Android release key is a second unrecoverable secret**, alongside the
+  updater's minisign key, and it carries data: losing it means every installed
+  build can only be uninstalled, and uninstalling deletes `chayote.db`.
+- **An update on Android may still ask the user to confirm**, when the installed
+  target is older than the running release requires. That is the documented
+  behaviour of `USER_ACTION_NOT_REQUIRED`, not a defect in this code.
+  The receiver reads the confirmation screen out of `EXTRA_INTENT` and
+  launches it, because dropping it would leave the session staged for
+  ever with no error anywhere — the reader would have watched a progress
+  bar finish and then seen nothing at all.
+- **Still unproved on a device.** Nothing in this repository can watch an APK
+  install itself; `11-verification.md` §4.1a has the table of what was
+  proved and the gap that only a device closes.
 
 ---
 
 ## ADR-024 - Releases are GitHub Releases, and the app updates itself on desktop only
 
-**Status:** Accepted · **Date:** 2026-10-17
+**Status:** Accepted · **Date:** 2026-10-17 · **Amended by:** ADR-025 (the Android clauses below)
 
 **Context.** The user asked for automatic updates for the desktop and Android apps, and for a Settings tab with a button to start a check. Nothing in the repository could serve that request, and the reason was not only the missing plugin.
 
@@ -47,11 +148,11 @@ Three things stood in the way.
 
 **macOS cannot update without code signing, and §3.7 of `06-platform.md` says signing is out of scope for v1.** An unsigned `.app` bundle is not trusted to replace another `.app`. This is a different mechanism from the updater's own signature and the two are easy to confuse: the minisign signature proves the artifact came from the build holding the private key, and has no bearing on whether macOS will accept the bundle inside it. Both must hold.
 
-**The updater cannot install on Android at all.** The Tauri documentation's platform table lists Android as supported, and it is not. The plugin's own manifest says `android = { level = "none" }`, and `install_inner` is `Err(Error::UnsupportedOs)` under `cfg(mobile)`. There is no `REQUEST_INSTALL_PACKAGES` handling, no `PackageInstaller` session and no install intent anywhere in the crate. `check()` and `download()` work; installing does not. Enabling it on Android would produce an app that downloads an APK it cannot install.
+**~~The updater cannot install on Android at all.~~** ADR-025 established that this was one `cfg(mobile)` branch rather than the whole plugin: `check()` and `download()` have no mobile arm, so only the install was missing and only the install is now ours.
 
 **Decision.** `release.yml` publishes a **GitHub Release** per `v*` tag, using `tauri-apps/tauri-action`, and attaches the signed artifacts plus a generated `latest.json`. `plugins.updater.endpoints` is `https://github.com/vladimirbsuir/chayote/releases/latest/download/latest.json`: static, HTTPS, and readable without a token because the repository is public, so there is no proxy and no credential to rotate. `bundle.createUpdaterArtifacts` is `true` and the public half of a minisign keypair lives in `plugins.updater.pubkey`; the private half is a GitHub Actions secret.
 
-**Windows and Linux update in place. macOS and Android do not**, and the UI says so rather than failing: a disabled button and one line of copy naming the platform, which is the same shape as the existing "Sync is unavailable here." fallback in the same dialog. The honest reason is recorded per platform in `06-platform.md` §3.8.
+**Windows, Linux and Android update in place. macOS does not** (~~macOS and Android~~), and macOS says so rather than failing: a disabled button and one line of copy naming the platform, which is the same shape as the existing "Sync is unavailable here." fallback in the same dialog. The honest reason is recorded per platform in `06-platform.md` §3.8.
 
 `requireSignedVersion` is on. The endpoint response is not signed, so without it a tampered `latest.json` could announce `0.9.0` while pointing at a validly signed `0.2.0` artifact — a rollback the signature alone does not prevent.
 
@@ -62,7 +163,7 @@ Three things stood in the way.
 | Keep uploads as workflow artifacts, point the updater elsewhere | There is nowhere else to point it. Every alternative is a host this project does not have, bought to avoid one workflow rewrite. |
 | Hand-write `latest.json` in the workflow | Doable, and it is about thirty lines — but across a three-OS matrix it has to pick one artifact per platform key and embed the right signature, and a mistake is a silently broken update path that no test in this repository would catch. `tauri-action` merges the matrix's platform keys into one document and is the tool Tauri documents for exactly this. |
 | Ad-hoc sign the macOS bundle (`signingIdentity: "-"`) so macOS can update too | It can be made to produce an artifact, but every update would trip Gatekeeper and ask the user to whitelist the app in Privacy & Security — a worse experience than downloading a `.dmg`, which is what `INSTALL.md` already tells them to do. Deferred behind real Apple signing, which needs a paid account and a device. |
-| Write the Android installer by hand — an `ACTION_INSTALL_PACKAGE` intent from a `FileProvider`, roughly the shape of ADR-020's Kotlin bridge | Deferred rather than rejected. It is real work: a release keystore in CI, `REQUEST_INSTALL_PACKAGES`, and a device to verify on, none of which this branch can prove. `08-roadmap.md` §3 carries it. Enabling the plugin meanwhile would have shipped the failure mode instead. |
+| ~~Write the Android installer by hand~~ | ADR-025 took the deferred branch, with a `PackageInstaller` session rather than the `ACTION_INSTALL_PACKAGE` intent proposed here — the reasoning held, the mechanism was improved. |
 | A dynamic update server with a release channel query | A server is a thing to run, secure, back up and keep online, in exchange for channels this project does not have. One public URL and `latest` is the whole requirement. |
 | Point the endpoint at a tag rather than at `releases/latest` | Fixes the manifest to one tag, so `latest` has to be moved by hand for every release — a manual step whose omission is invisible until users stop receiving updates. |
 
@@ -72,8 +173,8 @@ Three things stood in the way.
 - **Losing the private key, or its password, permanently breaks updates for every build already on an updater-enabled version.** There is no recovery short of a new identifier and a new key. The public key is compiled into the app, so it cannot be rotated for existing installs either.
 - **A tag that disagrees with `tauri.conf.json` fails the release.** `tauri build` and `latest.json` both take their version from the config, so a tag of `v0.9.0` against a config of `0.1.0` publishes a Release whose name lies about its contents — and `requireSignedVersion` then rejects every update it offers. The `version` job in `release.yml` asserts they match, and a manual dispatch publishes the config's version instead of a branch name.
 - **Linux resolves to the AppImage.** Both `.deb` and `.AppImage` are built and both appear in `latest.json`; the plugin's own merge ranks the AppImage signature first, and the AppImage is the one that needs no `sudo` to replace itself.
-- **The Android APK is still built locally, not in CI**, and `INTERNET` and `ACCESS_NETWORK_STATE` remain the only runtime permissions (`06-platform.md` §4.2). `REQUEST_INSTALL_PACKAGES` is explicitly *not* added: it would grant an app nothing it can use (§3.8.1).
-- `tauri-plugin-updater` is a **desktop-only** dependency, gated `cfg(not(any(target_os = "android", target_os = "ios")))`, so it is never compiled into an APK.
+- ~~**The Android APK is still built locally, not in CI.~~** ADR-025 added the APK to `release.yml` as its own job. ~~`INTERNET` and `ACCESS_NETWORK_STATE` remain the only runtime permissions.~~ ADR-025 declared `REQUEST_INSTALL_PACKAGES` and `UPDATE_PACKAGES_WITHOUT_USER_ACTION` (`06-platform.md` §4.2).
+- ~~`tauri-plugin-updater` is a **desktop-only** dependency.~~ ADR-025 makes it unconditional, because Android now compiles it for its check, download and verification..
 - `docs/06-platform.md` §3.7 and §3.8, `INSTALL.md`, `05-ui-ux.md` §6.6, `02-architecture.md` §7 and `08-roadmap.md` §3 changed with it, and `prototype/index.html` in the same commit (ADR-016).
 
 ---

@@ -289,6 +289,7 @@ describe('the third Settings tab', () => {
           downloaded: 0,
           total: null,
           installError: null,
+          installErrorCode: null,
           lastCheckedAt: null,
           onCheck: () => Promise.resolve(null),
           onInstall: () => Promise.resolve(),

@@ -139,6 +139,25 @@ test.describe('Updates', () => {
     await expect(page.getByTestId('update-current')).toHaveCount(0);
   });
 
+  test('tells an Android user to grant the install permission, and keeps the button', async ({
+    page,
+  }) => {
+    /* ADR-025. The grant lives in system settings and has no prompt, so the tab
+       has to say what to do; the Install button stays live because pressing it
+       again after the grant is the whole fix. */
+    await page.goto('/?seed=needs-permission');
+    await openUpdates(page);
+    await page.getByTestId('update-check').click();
+    await expect(page.getByTestId('update-install')).toBeEnabled();
+
+    await page.getByTestId('update-install').click();
+    await expect(page.getByTestId('update-install-error')).toContainText(
+      'will not let Chayote install updates until you allow it',
+    );
+    /* Still actionable, and not dressed as a dead end. */
+    await expect(page.getByTestId('update-install')).toBeEnabled();
+  });
+
   test('keeps the rest of the dialog working with the third tab added', async ({ page }) => {
     await page.goto('/');
     await openSettings(page);

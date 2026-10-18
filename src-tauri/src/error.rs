@@ -38,6 +38,16 @@ pub enum AppError {
     #[error("Could not reach the sync server.")]
     Network(String),
 
+    /// Android's `REQUEST_INSTALL_PACKAGES` is not granted yet (ADR-025).
+    ///
+    /// Its own code rather than a `VALIDATION` one, because the frontend reads
+    /// it to say a sentence about this and nothing else, and to keep offering
+    /// the button rather than treating the update as failed. Adding a code is
+    /// safe (`10-conventions.md` §6); this one is new in ADR-025.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    #[error("Android has not been allowed to install updates for Chayote yet.")]
+    UpdatePermissionRequired,
+
     #[error("{0}")]
     Internal(String),
 }
@@ -53,11 +63,20 @@ impl AppError {
             Self::DocTooLarge => "DOC_TOO_LARGE",
             Self::CycleDetected => "CYCLE_DETECTED",
             Self::Network(_) => "NETWORK",
+            Self::UpdatePermissionRequired => "UPDATE_PERMISSION_REQUIRED",
             Self::Internal(_) => "INTERNAL",
         }
     }
 
     pub fn internal(detail: impl std::fmt::Display) -> Self {
+        Self::Internal(detail.to_string())
+    }
+
+    /// The same constructor under the name the Android call sites read best,
+    /// where `internal` would look like a claim that something is broken rather
+    /// than a mapping of a foreign error into the contract.
+    #[cfg(target_os = "android")]
+    pub fn from_detail(detail: impl std::fmt::Display) -> Self {
         Self::Internal(detail.to_string())
     }
 

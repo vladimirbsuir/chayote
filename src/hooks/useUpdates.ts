@@ -85,6 +85,9 @@ export function useInstallUpdate(): {
   downloaded: number;
   total: number | null;
   error: string | null;
+  /** ADR-025: `UPDATE_PERMISSION_REQUIRED` is not a failure, and the tab styles
+      and words it differently from every other code. */
+  errorCode: string | null;
 } {
   const [downloaded, setDownloaded] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
@@ -107,6 +110,7 @@ export function useInstallUpdate(): {
     downloaded,
     total,
     error: failureOf(mutation.error, 'The update could not be installed.'),
+    errorCode: codeOf(mutation.error),
   };
 }
 

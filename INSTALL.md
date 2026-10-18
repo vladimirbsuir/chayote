@@ -5,17 +5,23 @@ account, and stores your notes in a single SQLite file on your device.
 
 ## Updating
 
-On **Windows** and **Linux**, Chayote updates itself. Open
+On **Windows**, **Linux** and **Android**, Chayote updates itself. Open
 `Settings → Updates` and press `Check for updates`; if a newer version exists,
 press `Install and restart`. The app checks once a day on its own and tells
 nobody, so opening the tab is all you need to do.
 
+**On Android, the first update asks for one permission.** Android will not let
+an app install anything unless you allow it, and there is no pop-up for that —
+it lives in system settings. Press `Install and restart` and Chayote will take
+you to the right screen; press `Install and restart` once more after saying
+yes. After that, updates go through without stopping.
+
 Every update is verified against a signing key compiled into the app. An
 update that does not match is refused rather than installed.
 
-On **macOS** and **Android** the app cannot update itself, and the Updates tab
-says so. Download the new build from the releases page instead; your notes are
-untouched by the switch.
+On **macOS** the app cannot update itself, and the Updates tab says so. Download
+the new build from the releases page instead; your notes are untouched by the
+switch.
 
 ## Windows
 
@@ -66,9 +72,10 @@ you download the APK with, then open the APK to install. The signing key is
 a debug key kept outside this repository; a store release with a stable
 release key is out of scope for v1.
 
-Android updates are never pushed by Chayote. Install each new APK by hand
-over the old one, which keeps your notes and your tags, or remove the app and
-install again — the notes database survives either way.
+An update installs over the top of the existing app, so your notes and tags
+carry across. If you install by hand instead, put the new APK over the old one
+rather than removing it first: Android deletes an app's data when it is
+uninstalled, and the notes database goes with it.
 
 ## Your data
 

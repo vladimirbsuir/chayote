@@ -136,3 +136,105 @@ jobs:
           path: src-tauri/target/release/chayote.exe
           retention-days: 30
           if-no-files-found: error
+
+  # ADR-025. Runs after the desktop matrix, and the ordering is not incidental:
+  # `tauri android build` packages through Gradle, so it produces no updater
+  # artifact and `tauri-action` has nothing to merge. This job signs the APK
+  # itself and merges one manifest key into the document the matrix already
+  # published — which only exists once that matrix has finished.
+  android:
+    name: APK (Android)
+    needs: [version, desktop]
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r27c
+      - uses: android-actions/setup-android@v3
+      - run: npm ci
+
+      # Android refuses an update whose signing certificate differs from the
+      # installed one, so a debug-signed APK could never update in place. The
+      # default debug keystore is public knowledge, which would make any APK
+      # claiming to be this app installable, so the release key is ours and is
+      # a secret. Losing it costs every installed user their notes: Android
+      # gives no way to update, only to uninstall, and uninstalling deletes
+      # chayote.db. `06-platform.md` §4.6 records it.
+      - name: Set up the release signing key
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          cd src-tauri/gen/android
+          printf '%s' "$ANDROID_KEY_BASE64" | base64 -d > "$RUNNER_TEMP/chayote-release.jks"
+          {
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "password=$ANDROID_KEY_PASSWORD"
+            echo "storeFile=$RUNNER_TEMP/chayote-release.jks"
+          } > keystore.properties
+          keytool -list -keystore "$RUNNER_TEMP/chayote-release.jks" \
+            -storepass "$ANDROID_KEY_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+
+      # Both ARM ABIs in one APK, which is what makes a single signature serve the
+      # two manifest keys. `x86_64` is not shipped (`06-platform.md` §4.1), so an
+      # emulator's check finds no key and says so rather than offering nothing.
+      - name: Build the release APK
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+          TAURI_ANDROID_PROJECT_PATH: ${{ github.workspace }}/src-tauri/gen/android
+        run: npx tauri android build --apk --target aarch64 --target armv7
+
+      - name: Sign the APK as an updater artifact
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release.apk' | head -1)
+          test -n "$apk"
+          npx tauri signer sign "$apk" --app-version "$VERSION"
+          mkdir -p dist-android
+          cp "$apk" "dist-android/app-universal-release.apk"
+          cp "$apk.sig" "dist-android/app-universal-release.apk.sig"
+          ls -l dist-android
+
+      - name: Merge the Android keys into latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -eu
+          gh release download "$TAG" --pattern latest.json --dir manifest --clobber
+          node scripts/android-updater-manifest.mjs \
+            manifest/latest.json \
+            dist-android/app-universal-release.apk.sig \
+            app-universal-release.apk \
+            "$VERSION" "$TAG" > manifest/latest.json.new
+          mv manifest/latest.json.new manifest/latest.json
+          # Read back rather than trusting the write: a manifest that names an
+          # asset the release does not carry produces an updater that offers an
+          # update and then fails to download it.
+          gh release upload "$TAG" \
+            dist-android/app-universal-release.apk \
+            dist-android/app-universal-release.apk.sig \
+            manifest/latest.json \
+            --clobber
+          curl -fsSL -o /dev/null \
+            "https://github.com/vladimirbsuir/chayote/releases/download/$TAG/app-universal-release.apk"
+          curl -fsSL "https://github.com/vladimirbsuir/chayote/releases/latest/download/latest.json" \
+            | node -e "const m=JSON.parse(require('fs').readFileSync(0,'utf8'));if(!m.platforms['android-aarch64'])throw new Error('no android key');if(!m.platforms['android-armv7'])throw new Error('no armv7 key');console.log('published android keys:', Object.keys(m.platforms).length)"

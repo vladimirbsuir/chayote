@@ -12,7 +12,7 @@ import type { MockDatabase, MockFolder, MockNote } from './derive';
 import { capTitle, deriveTitle, plainTextOf, toNote, toSummary, toTree } from './derive';
 import { matchesTokens, rankFor, snippetFor, toSearchTokens } from './search';
 import { buildDatabase, uuidFrom } from './generate';
-import { cycleDetected, notFound, unreachable, validation } from './errors';
+import { MockBackendError, cycleDetected, notFound, unreachable, validation } from './errors';
 import { EMPTY_NOTE, FIXTURE_NOTES, FIXTURE_NOW, FIXTURE_TRASH, liftLeadingHeading } from './fixtures';
 
 function nowMs(): number {
@@ -35,11 +35,19 @@ const MOCK_UPDATE = {
 /** Which updater story the fallback tells.
     - `none` — supported, and nothing newer. The everyday case.
     - `available` — supported, with 0.2.0 waiting. The install path.
-    - `unsupported` — cannot update at all, as on macOS and Android
-      (`06-platform.md` §3.8). The disabled button and its reason.
+    - `unsupported` — cannot update at all, as on macOS (`06-platform.md` §3.8).
+      The disabled button and its reason.
     - `offline` — supported, but the endpoint cannot be reached. A failure is a
-      screen like any other and has to be reachable in a browser. */
-export type MockUpdateFeed = 'none' | 'available' | 'unsupported' | 'offline';
+      screen like any other and has to be reachable in a browser.
+    - `needs-permission` — Android's `UPDATE_PERMISSION_REQUIRED` (ADR-025).
+      Not a failure, and the tab words and styles it differently, so it needs to
+      be a screen of its own rather than something a test has to provoke. */
+export type MockUpdateFeed =
+  | 'none'
+  | 'available'
+  | 'unsupported'
+  | 'offline'
+  | 'needs-permission';
 
 export type MockOptions = {
   updateFeed: MockUpdateFeed;
@@ -414,7 +422,16 @@ export function createMockBackend(
        is reachable from the default. */
     app_info: () => ({
       version: MOCK_VERSION,
-      os: options.updateFeed === 'unsupported' ? 'macOS' : 'Linux',
+      /* macOS is the only platform that cannot update (ADR-024, ADR-025), so it
+         is the only one the unsupported feed needs to name. The grant feed
+         reports Android, because the wording of that refusal is Android's and
+         the pane branches on the platform name to choose it. */
+      os:
+        options.updateFeed === 'unsupported'
+          ? 'macOS'
+          : options.updateFeed === 'needs-permission'
+            ? 'Android'
+            : 'Linux',
       updatesSupported: options.updateFeed !== 'unsupported',
     }),
 
@@ -426,7 +443,11 @@ export function createMockBackend(
       if (options.updateFeed === 'offline') {
         throw unreachable();
       }
-      return options.updateFeed === 'available' ? MOCK_UPDATE : null;
+      /* `needs-permission` still finds an update. What it changes is what the
+         *install* does with it, so a check that found nothing here would leave
+         the grant branch with no Install button to be refused from. */
+      const found = options.updateFeed === 'available' || options.updateFeed === 'needs-permission';
+      return found ? MOCK_UPDATE : null;
     },
 
     /* Resolves rather than restarting anything: a browser has no process to
@@ -435,6 +456,12 @@ export function createMockBackend(
     updates_install: () => {
       if (options.updateFeed === 'offline') {
         throw unreachable();
+      }
+      if (options.updateFeed === 'needs-permission') {
+        throw new MockBackendError(
+          'UPDATE_PERMISSION_REQUIRED',
+          'Android has not been allowed to install updates for Chayote yet.',
+        );
       }
       return undefined;
     },

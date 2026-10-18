@@ -69,13 +69,14 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         crate::commands::sync::sync_reupload,
         crate::commands::sync::sync_list_conflicts,
         crate::commands::sync::sync_resolve_conflict,
-        crate::commands::updates::app_info,
-        /* ADR-024: the updater plugin is not compiled on Android, so neither are
-        these two. `app_info` stays everywhere — it is how the Android build
-        learns it cannot update. */
-        #[cfg(desktop)]
+        app_info,
+        /* The updater plugin is compiled for Android too (ADR-025), so these two
+        exist there and only iOS lacks them. `app_info` is everywhere, which
+        is how a platform that cannot update learns so before the UI offers
+        a button that could only fail. */
+        #[cfg(any(desktop, target_os = "android"))]
         crate::commands::updates::updates_check,
-        #[cfg(desktop)]
+        #[cfg(any(desktop, target_os = "android"))]
         crate::commands::updates::updates_install,
     ]
 }
@@ -92,9 +93,74 @@ pub fn window_ready(app: tauri::AppHandle) -> Result<(), AppError> {
     window.show().map_err(AppError::internal)
 }
 
+/// The version and platform facts the Updates tab needs before it can decide
+/// whether to offer a check at all.
+///
+/// Here rather than in `commands/updates.rs` because it is the one updater
+/// command that must exist on a platform with no updater: it is how that
+/// platform learns it cannot update, and the tab's disabled button and its
+/// reason both come from this reply.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    /// The version in `tauri.conf.json`, which is what `latest.json` compares
+    /// against, so this is the number the tab shows and the number an update
+    /// has to beat. Android's `versionCode` is derived from it as
+    /// `major * 1e6 + minor * 1e3 + patch` (§4.1).
+    pub version: String,
+    /// A label for the sentence explaining why updating is unavailable.
+    pub os: String,
+    /// False on macOS only. Android updates itself as of ADR-025; iOS never
+    /// reaches this command.
+    pub updates_supported: bool,
+}
+
+#[tauri::command]
+pub fn app_info(app: tauri::AppHandle) -> Result<AppInfo, AppError> {
+    Ok(AppInfo {
+        version: app.package_info().version.to_string(),
+        os: os_label(),
+        updates_supported: updates_supported(),
+    })
+}
+
+pub(crate) fn os_label() -> String {
+    let label = if cfg!(target_os = "windows") {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "macOS"
+    } else if cfg!(target_os = "linux") {
+        "Linux"
+    } else if cfg!(target_os = "android") {
+        "Android"
+    } else if cfg!(target_os = "ios") {
+        "iOS"
+    } else {
+        "Unknown"
+    };
+    label.to_owned()
+}
+
 pub mod folders;
 pub mod notes;
 pub mod search;
 pub mod sync;
 pub mod tags;
+
+/// ADR-024, ADR-025. `cfg(mobile)` rather than `cfg(desktop)` because Android
+/// can install after all: the plugin's own `install_inner` cannot, and
+/// `commands/updates.rs` replaces it with a Kotlin plugin. iOS is the only
+/// platform left out, and it has no updater of any kind.
+#[cfg(any(desktop, target_os = "android"))]
 pub mod updates;
+
+/// Separated from `app_info` so the assertion about it is one line rather than a
+/// second copy of the same `cfg!` — which would pass if both were edited together
+/// and say nothing about the platform.
+pub(crate) fn updates_supported() -> bool {
+    cfg!(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "android"
+    ))
+}

@@ -101,11 +101,11 @@ Code signing is out of scope for v1. Document the platform-specific unsigned-lau
 | Windows | **Yes** — NSIS, `installMode: "passive"` | The installer replaces the installed app in place and the user sees one progress window. |
 | Linux | **Yes** — AppImage | The plugin replaces the AppImage file. `.deb` is published and also listed in `latest.json`, but the default `linux-x86_64` key resolves to the AppImage, which is self-contained and needs no `sudo`. |
 | macOS | **No** | A code-signed `.app` is required to replace another `.app`. §3.7 ships unsigned and unnotarised, so the install cannot be trusted by the platform and is not attempted. |
-| Android | **No** | `tauri-plugin-updater` declares `android = { level = "none" }`, and `install_inner` is `Err(Error::UnsupportedOs)` under `cfg(mobile)`. See below. |
+| Android | **Yes** — `PackageInstaller` session | The plugin's own install is `UnsupportedOs` under `cfg(mobile)`, so a Kotlin plugin commits the session it cannot (§3.8.1). Silent where the platform allows it; one system grant on the first update. |
 
-### 3.8.1 Android cannot be updated by this plugin, and that was measured
+### 3.8.1 Android installs itself through a Kotlin plugin, and why the Tauri one cannot
 
-The Tauri updater's own manifest is the authority:
+The plugin's own manifest is the authority on what it supports:
 
 ```toml
 [package.metadata.platforms.support]
@@ -125,11 +125,51 @@ fn install_inner(&self, _bytes: &[u8]) -> Result<()> {
 }
 ```
 
-There is no Android code path at all — no `REQUEST_INSTALL_PACKAGES` handling, no `PackageInstaller` session, no install intent. The plugin's documentation table lists Android as supported because `check()` and `download()` work; **installing does not**, and an app that downloads an APK it cannot install is a worse outcome than one that says it cannot update.
+**Everything above that line is still true, and none of it is the whole answer.**
+`install_inner` is the only thing the plugin cannot do on Android. Its `check()`
+fetches the manifest over the same HTTPS path every platform uses, and its
+`download()` verifies the minisign signature — BLAKE2b-512 then Ed25519, then the
+signed version — before returning a byte. Both are platform-agnostic. An APK
+arrives verified and then sits in memory with nowhere to go, which is the worst of
+both outcomes: an update the user was offered, and an error they cannot act on.
 
-So `tauri-plugin-updater` is a desktop-only dependency (`Cargo.toml`, under `cfg(not(any(target_os = "android", target_os = "ios")))`) and is never compiled into an APK. That also keeps `REQUEST_INSTALL_PACKAGES` off the manifest, so §4.2's permission table stays accurate as written.
+So Android keeps the plugin's `check` and `download` and replaces only the
+install. `commands/updates.rs` writes the verified bytes to the cache directory and
+calls a Kotlin plugin registered through `PluginApi.register_android_plugin`;
+`UpdaterPlugin.kt` opens a `PackageInstaller` session, streams the file in with
+`openWrite`, and commits it. Same shape as ADR-020's Kotlin bridge and for the
+same reason: the platform has no Rust-reachable API for this. `PackageInstaller`
+needs an Activity, a `BroadcastReceiver` and an `IntentSender`, which is not
+something to assemble through JNI.
 
-Writing an Android installer by hand is possible — an `ACTION_INSTALL_PACKAGE` intent from a `FileProvider` URI, roughly the shape of ADR-020's Kotlin bridge — and it is deferred rather than rejected. It would need a release keystore in CI, `REQUEST_INSTALL_PACKAGES`, and a device to verify on. `08-roadmap.md` §3 carries it.
+`openWrite` rather than a path handed to the installer is deliberate: the bytes
+never leave the app, so no `FileProvider` grant is needed and no other app can
+read the package. The `FileProvider` the Tauri template declares in
+`AndroidManifest.xml` stays for the template's own reasons and is not used here.
+
+**Two manifest keys, one file.** The APK carries both ARM ABIs, so one signature
+serves both, and `android-aarch64` and `android-armv7` share a URL and a
+signature. They are separate keys because a device asks for the one matching its
+own architecture, and a 32-bit device asking for `aarch64` would be told no
+update exists. `x86_64` is not shipped (§4.1), so an emulator's check finds no
+key and says so — which is the right outcome rather than one that offers nothing.
+
+**The permissions are the whole user-visible cost.** `REQUEST_INSTALL_PACKAGES`
+is declared and granted by the user in system settings, per app, with no runtime
+prompt; `UPDATE_PACKAGES_WITHOUT_USER_ACTION` lets an app updating *itself* skip
+the confirmation. Where the second is not honoured — an installed target too old
+for the running release — Android asks the user instead, which is slower rather
+than broken. The Updates tab words the first one as something to do rather than as
+a failure, because it is: the bytes stay verified and the next press installs them.
+
+**The release key is now load-bearing in a way it was not.** Android refuses an
+update whose signing certificate differs from the installed one, so the release
+APK is signed with a project keystore held as a CI secret rather than a debug
+key. The default Android debug keystore is public knowledge, which would make any
+APK claiming to be this app installable. Losing the key costs every installed user
+their notes: Android offers no way to update, only to uninstall, and uninstalling
+deletes `chayote.db`. That is the same class of risk as losing the updater's
+minisign key in §3.8.3, with data attached.
 
 ### 3.8.2 The manifest, and why a release is a GitHub Release
 
@@ -159,7 +199,7 @@ The signature cannot be disabled; an unsigned artifact is refused.
 
 `bundle.createUpdaterArtifacts` is `true`, so **`npm run tauri build` fails without `TAURI_SIGNING_PRIVATE_KEY` in the environment**. That is the bundler refusing to produce unsigned artifacts, not a bug. `npm run tauri dev` is unaffected — `createUpdaterArtifacts` applies only to `tauri build`. `.gitignore` excludes `*.key` so the key cannot be committed by accident.
 
-The Android build (§4.1) is unaffected and still needs no key: `npx tauri android build --apk` packages through Gradle, not through Tauri's bundler, so it never reaches the code that signs. The leftover `plugins.updater` block in `tauri.conf.json` is inert on Android rather than an error — Tauri hands each *registered* plugin its slice of the `plugins` map and never reads the rest.
+The Android build needs a keystore instead of this key (§3.8.1): `REQUEST_INSTALL_PACKAGES` and `UPDATE_PACKAGES_WITHOUT_USER_ACTION` go in the manifest, the app signs itself with a project certificate or Android refuses the upgrade, and Gradle takes the credentials from a `keystore.properties` that `release.yml` generates from CI secrets and never commits. It still needs no *updater* key: `npx tauri android build --apk` packages through Gradle, not through Tauri's bundler, so it never reaches the code that signs, and the `.sig` is written separately by `tauri signer sign`. The leftover `plugins.updater` block in `tauri.conf.json` is inert on Android rather than an error — Tauri hands each *registered* plugin its slice of the `plugins` map and never reads the rest.
 
 ### 3.8.5 The tag is asserted, not trusted
 
@@ -196,7 +236,8 @@ guarantee now holds by default rather than by manifest.
 |------------|-----|---------|---------|
 | `INTERNET` | No | **Yes** | Sync only, and only when enabled |
 | `ACCESS_NETWORK_STATE` | No | **Yes** | Companion to `INTERNET` |
-| `REQUEST_INSTALL_PACKAGES` | No | **No** | Would be needed to self-update on Android. The updater cannot install there at all (§3.8.1), so the permission would grant an app nothing it can use. |
+| `REQUEST_INSTALL_PACKAGES` | No | **Yes** | ADR-025. Android will not let a non-system installer install anything without it, and the grant is per app in system settings rather than a runtime prompt — which is why the Updates tab explains instead of asking. |
+| `UPDATE_PACKAGES_WITHOUT_USER_ACTION` | No | **Yes** | ADR-025. The companion to the above, and the reason an update needs no confirmation: Android skips the dialog when an app updates *itself* and declares this. |
 | `WRITE_EXTERNAL_STORAGE` | No | No | Attachments only (v1.2) |
 | `VIBRATE` | No | No | |
 
@@ -311,7 +352,8 @@ stack, and at the root the platform decides.**
 |------------|-------------|
 | No system tray | No background sync agent in v1. Sync is foreground-only in the sync phase, or needs a foreground service, which is a separate design. |
 | No global shortcuts | Hardware-keyboard shortcuts work only while the app is focused |
-| **No self-update** | The updater cannot install on Android (§3.8.1), so a new APK is installed by hand. Play Store distribution, which would solve it, is out of scope for v1. |
+| **One system grant before the first update** | `REQUEST_INSTALL_PACKAGES` is per app in settings and has no prompt (§3.8.1). Until the user grants it, an install is refused and the tab says so; the update stays verified and installs on the next press. |
+| **The release key is unrecoverable** | Android accepts an update only from the same signing certificate, so a lost keystore leaves every installed build unable to update — and the only way forward is uninstalling, which deletes `chayote.db`. §3.8.1. |
 | No native file dialog until v1.2 | No import/export from Android in v1 |
 | System WebView version varies | Test on a current stable System WebView. The oldest supported WebView is no longer a test target (§1) |
 | SQLite `journal_mode = WAL` is supported | **Verified on device at M7** — `chayote.db`, `chayote.db-wal` and `chayote.db-shm` are all present in the app's data directory and the WAL grew as writes landed. The same run verified migrations, FTS5 search with `bm25` and `snippet()`, and that the row survived a `force-stop` |

@@ -1647,16 +1647,24 @@ fn a_trashed_note_is_still_gettable_by_id() {
         .is_empty());
 }
 
-/// ADR-024: the Updates tab builds both its button state and its explanation
-/// from `app_info`, so the flag has to agree with the platform it runs on. A
-/// Windows build claiming otherwise would offer a button whose only possible
-/// outcome is a failure — and a macOS or Android build claiming support would
+/// ADR-024, ADR-025: the Updates tab builds both its button state and its
+/// explanation from `app_info`, so the flag has to agree with the platform it
+/// runs on. A Windows build claiming otherwise would offer a button whose only
+/// possible outcome is a failure — and a macOS build claiming support would
 /// offer the same button with nothing behind it.
+///
+/// Android is in the supported set as of ADR-025, which is what the assertion
+/// says: it is here because the Kotlin installer works, not because the flag was
+/// widened to make a test pass.
 #[test]
 fn update_support_follows_the_platform() {
     assert_eq!(
-        crate::commands::updates::updates_supported(),
-        cfg!(any(target_os = "windows", target_os = "linux"))
+        crate::commands::updates_supported(),
+        cfg!(any(
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "android"
+        ))
     );
 }
 
@@ -1664,7 +1672,7 @@ fn update_support_follows_the_platform() {
 /// unavailable, so an empty value would reach the reader verbatim.
 #[test]
 fn update_support_names_a_real_platform() {
-    let label = crate::commands::updates::os_label();
+    let label = crate::commands::os_label();
     assert!(!label.is_empty(), "the label must not be empty");
     assert_ne!(
         label, "Unknown",
