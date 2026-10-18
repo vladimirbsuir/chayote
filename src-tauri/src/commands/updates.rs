@@ -149,13 +149,18 @@ fn android_target() -> &'static str {
 /// is ours to do. macOS never reaches this — `app_info` reports no support
 /// there (`06-platform.md` §3.8).
 ///
-/// A function rather than a `cfg` attribute at the call site, for one reason:
-/// `AppHandle::restart` returns `!`, so a `cfg`-gated call leaves the code after
-/// it looking unreachable on Linux and clippy rejects the build there. Returning
-/// `()` puts the divergence inside a function that declares it.
+/// A function rather than a `cfg` attribute at the call site, and returning `()`
+/// on every platform including Linux.
+///
+/// `AppHandle::restart` returns `!`, so a `cfg`-gated call at the call site
+/// leaves the `Ok(())` after it unreachable *on Linux only* — which passes clippy
+/// on a Windows machine and fails the Linux CI job. Declaring the return type
+/// `()` here moves the divergence inside the body, where `app.restart();` is a
+/// statement whose `!` coerces to `()`, and the caller's `Ok(())` is reachable
+/// again on both.
 #[cfg(all(desktop, target_os = "linux"))]
-fn restart_after_install(app: &AppHandle) -> ! {
-    app.restart()
+fn restart_after_install(app: &AppHandle) {
+    app.restart();
 }
 
 #[cfg(all(desktop, not(target_os = "linux")))]
