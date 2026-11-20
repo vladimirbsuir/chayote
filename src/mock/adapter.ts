@@ -184,10 +184,9 @@ export function createMockBackend(
     notes_set_title: ({ id, title }) => {
       const note = requireNote(id);
       const trimmed = title.trim();
-      /* Empty is not a note with no name — it is the note handing the title back
-         to derivation, which needs the document. One write either way: no
-         document on the write path, and no derived column recomputed, matching the
-         Rust `set_title`. */
+      /* ADR-026: empty is a note with no name, shown as "Untitled" and stored as
+         "". One write either way: no document on the write path, and no derived
+         column recomputed, matching the Rust `set_title`. */
       if (trimmed.length === 0) {
         note.title = '';
         note.titleSource = 'auto';

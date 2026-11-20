@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createMockBackend } from './adapter';
 import { buildMockDatabase } from './adapter';
+import { FIXTURE_TRASH } from './fixtures';
 import type { NoteFilter } from '../types/ipc';
 
 const filterAll: NoteFilter = { kind: 'all' };
@@ -10,7 +11,8 @@ describe('mock adapter', () => {
     const backend = createMockBackend(buildMockDatabase());
     const notes = await backend.invoke('notes_list', { filter: filterAll });
     expect(notes.length).toBeGreaterThan(0);
-    expect(notes.every((note) => note.title !== '')).toBe(true);
+    const trashed = new Set(FIXTURE_TRASH.map((note) => note.id));
+    expect(notes.some((note) => trashed.has(note.id))).toBe(false);
   });
 
   it('sorts pinned notes first, then by updated_at descending', async () => {
@@ -149,11 +151,8 @@ describe('mock adapter', () => {
     const target = list[0];
     if (target === undefined) throw new Error('fixture empty');
 
-    /* The first fixture came out of migration 0006 with its title lifted into the
-       field, so it is `manual` — and a save must not recompute a title the user
-       owns. Clearing the title first is the way back to derivation, which is what
-       the two halves below are: the recomputation, and the fact that it does not
-       happen while a title is typed. */
+    /* Cleared first, so the save below has every chance to invent a title from
+       its heading — and, under ADR-026, must not. */
     await backend.invoke('notes_set_title', { id: target.id, title: '' });
 
     const saved = await backend.invoke('notes_save', {
@@ -175,7 +174,8 @@ describe('mock adapter', () => {
       },
     });
 
-    expect(saved.title).toBe('Renamed heading');
+    /* ADR-026: a save never touches the title, whatever the document's first line. */
+    expect(saved.title).toBe('');
     expect(saved.wordCount).toBe(2);
 
     /* And once a title is typed, the next save leaves it alone (ADR-023). */

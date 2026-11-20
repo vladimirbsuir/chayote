@@ -52,7 +52,8 @@ describe('mock adapter against the real command surface', () => {
     const backend = createMockBackend(buildMockDatabase());
 
     const created = await backend.invoke('notes_create', { folderId: null });
-    expect(created.title).toBe('Untitled');
+    /* ADR-026: empty, as the Rust `create` stores it. */
+    expect(created.title).toBe('');
     expect(created.doc.type).toBe('doc');
 
     const input: SaveNoteInput = {
@@ -68,7 +69,8 @@ describe('mock adapter against the real command surface', () => {
       isPinned: true,
     };
     const saved = await backend.invoke('notes_save', { input });
-    expect(saved.title).toBe('Saved');
+    /* ADR-026: the heading is text, not a name — a save leaves the title empty. */
+    expect(saved.title).toBe('');
     expect(saved.isPinned).toBe(true);
 
     await backend.invoke('notes_soft_delete', { id: created.id });
@@ -81,7 +83,7 @@ describe('mock adapter against the real command surface', () => {
     });
   });
 
-  it('types a title that derivation cannot take back, until the field is cleared', async () => {
+  it('types a title that a save cannot take back, and clearing it leaves it empty', async () => {
     /* ADR-023, asserted against the browser backend because that is what the
        Playwright suite drives: a typed title survives a later document save, which
        is the half that silently broke before the Rust side read the stored
@@ -110,8 +112,9 @@ describe('mock adapter against the real command surface', () => {
     });
     expect(saved.title).toBe('Plan');
 
+    /* ADR-026: cleared is empty, not re-derived from the first line. */
     const cleared = await backend.invoke('notes_set_title', { id: created.id, title: '   ' });
-    expect(cleared.title).toBe('A first line');
+    expect(cleared.title).toBe('');
 
     await expect(
       backend.invoke('notes_set_title', { id: created.id, title: 'ok' }),
