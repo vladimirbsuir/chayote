@@ -145,7 +145,8 @@ export function createMockBackend(
         title: existing?.title ?? '',
         titleSource: existing?.titleSource ?? 'auto',
         folderId: input.folderId,
-        isPinned: input.isPinned,
+        /* Never from the save: the pin is `notes_set_pinned`'s, as in Rust. */
+        isPinned: existing?.isPinned ?? false,
         createdAt: existing?.createdAt ?? timestamp,
         updatedAt: timestamp,
         deletedAt: existing?.deletedAt ?? null,

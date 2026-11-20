@@ -71,7 +71,8 @@ describe('mock adapter against the real command surface', () => {
     const saved = await backend.invoke('notes_save', { input });
     /* ADR-026: the heading is text, not a name — a save leaves the title empty. */
     expect(saved.title).toBe('');
-    expect(saved.isPinned).toBe(true);
+    /* The pin is `notes_set_pinned`'s; a save carrying one does not move it. */
+    expect(saved.isPinned).toBe(false);
 
     await backend.invoke('notes_soft_delete', { id: created.id });
     await backend.invoke('notes_restore', { id: created.id });

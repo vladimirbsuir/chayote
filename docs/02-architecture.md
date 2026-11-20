@@ -259,8 +259,10 @@ or sending a stale one — the first puts a document on a write that changes a b
 the second overwrites whatever the editor has since typed. So the flag gets its own
 command: one `UPDATE`, one outbox row, one transaction (R5), and `doc_json` and every
 derived column untouched. `notes_save` stays the whole-document write the autosave
-path uses, and `SaveNoteInput.isPinned` stays because the editor's own pin has to
-survive the next keystroke.
+path uses. `SaveNoteInput.isPinned` is still accepted and is **ignored**: a save
+carrying the pin the editor last read undid a pin made from the note's card while
+the note was open, so the flag is written by this command alone. A save also drops
+a folder or tag id that no longer exists instead of failing on its foreign key.
 
 `updated_at` moves with the flag, exactly as it does for `notes_move`: a pinned note
 sorts above everything in every selection, so pinning one is a change to where it

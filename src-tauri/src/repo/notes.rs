@@ -181,7 +181,6 @@ impl NotesRepo for SqliteNotesRepo {
         let doc_json = serde_json::to_string(&input.doc).map_err(AppError::internal)?;
         let folder = input.folder_id.clone();
         let tag_ids = input.tag_ids.clone();
-        let is_pinned = input.is_pinned;
 
         self.db.with_conn(move |conn| {
             /* The title is not read, derived or written here.
@@ -199,11 +198,22 @@ impl NotesRepo for SqliteNotesRepo {
             let base_rev = base_rev(conn, &note_id)?;
             let derived = derive::derive(&input.doc);
 
+            /* A folder or tag deleted while the note was open — from the sidebar,
+             * or by a sync pull — is dropped rather than written. The editor
+             * sends what it last knew, and a dangling id used to fail the
+             * foreign key and roll back the whole save, so every keystroke after
+             * the delete was lost until the note was reopened. The document is
+             * what the user is typing; it must not depend on metadata that
+             * vanished under it. */
+            let folder = match folder {
+                Some(id) if folder_is_live(conn, &id)? => Some(id),
+                _ => None,
+            };
+
             let payload = serde_json::json!({
                 "id": note_id,
                 "folderId": folder,
                 "tagIds": tag_ids,
-                "isPinned": is_pinned,
             })
             .to_string();
 
@@ -211,8 +221,8 @@ impl NotesRepo for SqliteNotesRepo {
             tx.execute(
                 "UPDATE notes
                     SET doc_json = ?2, plain_text = ?3, excerpt = ?4,
-                        word_count = ?5, folder_id = ?6, is_pinned = ?7,
-                        dirty = 1, updated_at = ?8
+                        word_count = ?5, folder_id = ?6,
+                        dirty = 1, updated_at = ?7
                   WHERE id = ?1",
                 rusqlite::params![
                     note_id,
@@ -221,7 +231,6 @@ impl NotesRepo for SqliteNotesRepo {
                     derived.excerpt,
                     derived.word_count,
                     folder,
-                    i64::from(is_pinned),
                     now,
                 ],
             )?;
@@ -444,9 +453,12 @@ fn replace_tags(
     tag_ids: &[String],
 ) -> Result<(), rusqlite::Error> {
     tx.execute("DELETE FROM note_tags WHERE note_id = ?1", [note_id])?;
+    /* Only live tags: `OR IGNORE` covers a duplicate, not a foreign key, so a
+    tag deleted while the note was open failed the whole save (see `save`). */
     for tag_id in tag_ids {
         tx.execute(
-            "INSERT OR IGNORE INTO note_tags (note_id, tag_id, created_at) VALUES (?1, ?2, ?3)",
+            "INSERT OR IGNORE INTO note_tags (note_id, tag_id, created_at)
+             SELECT ?1, id, ?3 FROM tags WHERE id = ?2 AND deleted_at IS NULL",
             rusqlite::params![note_id, tag_id, crate::clock::now_ms()],
         )?;
     }
