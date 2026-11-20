@@ -33,6 +33,12 @@ type NoteEditorProps = {
  * §2.1 `immediatelyRender: false` keeps construction out of render, which is
  * what makes the same component usable under StrictMode and in jsdom.
  */
+/* Built once. `useEditor` compares its options by identity on every render and
+   calls `setOptions` — and through it `view.setProps` — when any differ, so a
+   fresh object here re-configured ProseMirror on every render of the pane: each
+   title keystroke, each save-state change, each minute tick. */
+const EDITOR_PROPS = buildEditorProps();
+
 export function NoteEditor({
   doc,
   editable,
@@ -47,7 +53,7 @@ export function NoteEditor({
     editable,
     autofocus: 'end',
     immediatelyRender: false,
-    editorProps: buildEditorProps(),
+    editorProps: EDITOR_PROPS,
     ...CLIPBOARD_CORE_OPTIONS,
     onUpdate: ({ editor: current }) => {
       onChange(current);
