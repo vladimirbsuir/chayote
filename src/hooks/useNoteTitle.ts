@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { notesApi } from '../lib/ipc';
 import { qk } from '../queries/keys';
-import type { NoteSummary } from '../types/ipc';
+import { applySaveToList } from '../lib/noteOrder';
+import { summaryOf } from '../components/summaryOf';
+import type { NoteFilter, NoteSummary } from '../types/ipc';
 import type { Uuid } from '../types/note';
 
 /* ADR-023: typing a title, the write path for it, and the flush conditions.
@@ -45,18 +47,24 @@ export function useNoteTitle(): {
          Every list is patched too, or a card elsewhere in the app would keep the
          old title until its next refetch. */
       queryClient.setQueryData(qk.note(saved.id), saved);
-      queryClient.setQueriesData({ queryKey: ['notes'] }, (existing: NoteSummary[] | undefined) =>
-        Array.isArray(existing)
-          ? existing.map((summary) =>
-              summary.id === saved.id
-                ? { ...summary, title: saved.title, updatedAt: saved.updatedAt }
-                : summary,
-            )
-          : existing,
-      );
+      /* Re-sorted, not only patched: `updated_at` moved, and it is the order. */
+      const summary = summaryOf(saved);
+      for (const [key, existing] of queryClient.getQueriesData<NoteSummary[]>({
+        queryKey: ['notes'],
+      })) {
+        if (!Array.isArray(existing)) continue;
+        const filter = key[1] as NoteFilter | undefined;
+        queryClient.setQueryData(key, applySaveToList(existing, summary, filter?.kind));
+      }
     },
   });
 
+  /* `mutate`, not the `mutation` object: the object is new on every render, so a
+     `send` depending on it changed identity on every keystroke, and the effect
+     below ran its cleanup — which sends — each time. The debounce never got to
+     fire; every keystroke was its own write, its own `updated_at` and its own
+     outbox row. `mutate` is stable for the life of the hook. */
+  const { mutate } = mutation;
   const send = useCallback((): void => {
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
@@ -65,8 +73,8 @@ export function useNoteTitle(): {
     const queued = pendingRef.current;
     pendingRef.current = null;
     if (queued === null) return;
-    mutation.mutate(queued);
-  }, [mutation]);
+    mutate(queued);
+  }, [mutate]);
 
   const write = useCallback(
     (id: Uuid, title: string): void => {

@@ -48,6 +48,9 @@ queryClient.setQueriesData(
          one row cannot express. */
       queryClient.setQueryData(qk.note(saved.id), saved);
       void queryClient.invalidateQueries({ queryKey: ['notes'] });
+      /* Search results carry the pin too, and the card's next press reads it: a
+         stale `false` there pinned the note again instead of unpinning it. */
+      void queryClient.invalidateQueries({ queryKey: ['search'] });
     },
   });
 

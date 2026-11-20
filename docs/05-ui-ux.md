@@ -297,7 +297,7 @@ Delete moves the note to trash with an **undo toast** for 6 seconds offering "Un
 
 **The undo toast names the note it deleted**, sits at the bottom of the window rather than inside the sidebar, and moves no focus. A delete can come from `Ctrl/Cmd+Backspace` while the caret is in the editor, so a toast pinned to the sidebar would be off-screen from where the user is looking — and a focus move would break the keystroke in progress. It announces politely rather than assertively, for the same reason: an assertive announcement interrupts whatever a screen reader is reading. A second delete replaces the toast and its timer rather than stacking a second one; two timers racing would restore whichever note each was pointed at.
 
-**`Ctrl/Cmd+Backspace` deletes the open note**, not plain `Backspace` — in a WebView that navigates back, and in the editor that deletes a character.
+**`Ctrl/Cmd+Backspace` deletes the open note**, not plain `Backspace` — in a WebView that navigates back, and in the editor that deletes a character. It does nothing in a single-line text field (the title, search, a rename), where the same chord deletes the previous word, and nothing for a note opened from the trash.
 
 ### 6.3 Folders
 
@@ -448,7 +448,7 @@ Only the selected panel is mounted, so a hidden panel holds no state and a hidde
 | Version | Read-only text, `Chayote 0.1.0` | — |
 | Check for updates | Button (`rotate-cw`), disabled while a request is in flight, and on macOS entirely | — |
 | Result | One sentence: up to date, or a version is available | Nothing |
-| Install and restart | Button (`download`), only when a newer version exists | — |
+| Install and restart (Android: Install update) | Button (`download`), only when a newer version exists. Android closes the app to replace it and does not reopen it, so it does not promise a restart there. | — |
 | Progress | A bar with a percentage, only while bytes are moving | — |
 | Grant needed | Android only: what to allow, and that the button stays live | Never |
 
@@ -458,7 +458,8 @@ Four rules this tab holds to, each of which is a screen someone could get wrong:
 - **A platform that cannot update gets a disabled button and a sentence, not a working button that fails.** macOS is named and told what to do instead (`06-platform.md` §3.8), the same shape as the existing "Sync is unavailable here." fallback.
 - **Android's outstanding install grant is worded as something to do, and never styled as a failure** (ADR-025). `REQUEST_INSTALL_PACKAGES` has no runtime prompt — it is granted in system settings — so "try again" alone would leave the user pressing a button that cannot work. The verified bytes are still on disk and the next press installs them, so the Install button stays live and the error reads as guidance. It is the one error code the pane gives a sentence of its own.
 - **One action at a time.** Checking and installing are both round trips against the same manifest, and the second replaces the running process.
-- **Release notes are plain text.** `latest.json` carries them as untrusted text from a remote file and the app has no Markdown renderer, so they are never rendered as markup — the paste-sanitizer problem (`04-editor.md` §5) in a place nobody thought to check.
+- **No release notes.** `latest.json` carries the GitHub Release body as `notes`, and that body is written for the web page — a download table, Markdown, install advice for people who do not have the app yet. v0.2.1 printed it verbatim under the Install button, and even cleaned up it told the reader nothing they could act on. The tab shows the version and the button; what changed is on the releases page.
+- **An install is retryable until a new check replaces it.** The checked update is read by an install, never consumed, so a press after Android's grant screen, a dropped download or a dismissed confirmation installs the same update. Once Android has accepted the package the tab says so (`update-installed`) instead of flashing an error before the system closes the app.
 
 **Sync** carries the connection string, an enable switch, an explicit Save (the only field in the dialog that does not apply on change, because it is secret text the user may still be editing), Sync now, Re-upload everything, status, and the conflict resolver; `07-sync-plan.md` §6 is the recovery story behind it.
 

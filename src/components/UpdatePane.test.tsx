@@ -21,7 +21,6 @@ const ANDROID: AppInfo = { version: '0.2.1', os: 'Android', updatesSupported: tr
 
 const FOUND: UpdateSummary = {
   version: '0.3.0',
-  notes: 'Faster search, and the Updates tab.',
   date: '2026-10-17T09:00:00Z',
 };
 
@@ -34,6 +33,7 @@ function pane(overrides: Partial<UpdatePaneProps> = {}): UpdatePaneProps {
     checkError: null,
     checkErrorCode: null,
     isInstalling: false,
+    installed: false,
     downloaded: 0,
     total: null,
     installError: null,
@@ -92,25 +92,8 @@ describe('UpdatePane', () => {
   it('offers the install only when a check found something newer', () => {
     render(<UpdatePane {...pane({ update: FOUND, lastCheckedAt: 1_780_000_000_000 })} />);
     expect(text('update-available')).toContain('Version 0.3.0 is available.');
-    expect(text('update-available')).toContain(FOUND.notes);
     expect(screen.queryByTestId('update-current')).toBeNull();
     expect(text('update-install')).toContain('Install and restart');
-  });
-
-  it('omits the notes block rather than rendering an empty one', () => {
-    render(<UpdatePane {...pane({ update: { ...FOUND, notes: '   ' } })} />);
-    const available = screen.getByTestId('update-available');
-    expect(available.textContent).toContain('Version 0.3.0 is available.');
-    /* Two paragraphs would be the headline and an empty one. */
-    expect(available.querySelectorAll('p')).toHaveLength(1);
-  });
-
-  it('renders notes as text, never as markup from the release manifest', () => {
-    const hostile = { ...FOUND, notes: '<img src=x onerror="alert(1)"><b>bold</b>' };
-    const { container } = render(<UpdatePane {...pane({ update: hostile })} />);
-    expect(container.querySelector('img')).toBeNull();
-    expect(container.querySelector('b')).toBeNull();
-    expect(text('update-available')).toContain('<img src=x onerror="alert(1)">');
   });
 
   it('disables the check and says why on a platform that cannot update', () => {
@@ -177,14 +160,47 @@ describe('UpdatePane', () => {
       <UpdatePane
         {...pane({
           update: FOUND,
-          installError: 'The installer committed without the app being replaced.',
+          installError: 'installer reported aborted',
           installErrorCode: 'INTERNAL',
         })}
       />,
     );
-    expect(screen.getByRole('alert').textContent).toContain(
-      'The installer committed without the app being replaced.',
+    expect(screen.getByRole('alert').textContent).toContain('installer reported aborted');
+  });
+
+  it('does not promise a restart on Android, which does not reopen the app', () => {
+    render(<UpdatePane {...pane({ info: ANDROID, update: FOUND })} />);
+    expect(text('update-install')).toContain('Install update');
+    expect(text('update-install')).not.toContain('restart');
+  });
+
+  it('says the install was handed over once Android accepted it', () => {
+    render(<UpdatePane {...pane({ info: ANDROID, update: FOUND, installed: true })} />);
+    expect(text('update-installed')).toContain('will close Chayote');
+    expect(screen.queryByRole('alert')).toBeNull();
+    /* Still retryable: Android may have asked, and the answer may have been no. */
+    expect(isDisabled('update-install')).toBe(false);
+  });
+
+  it('says nothing about a handed-over install while another attempt runs or failed', () => {
+    const { rerender } = render(
+      <UpdatePane
+        {...pane({ info: ANDROID, update: FOUND, installed: true, isInstalling: true })}
+      />,
     );
+    expect(screen.queryByTestId('update-installed')).toBeNull();
+    rerender(
+      <UpdatePane
+        {...pane({
+          info: ANDROID,
+          update: FOUND,
+          installed: true,
+          installError: 'installer reported aborted',
+          installErrorCode: 'INTERNAL',
+        })}
+      />,
+    );
+    expect(screen.queryByTestId('update-installed')).toBeNull();
   });
 
   it('falls back to a general reason on a platform it has no words for', () => {
@@ -221,7 +237,10 @@ describe('UpdatePane', () => {
   it('passes any other error message through unchanged', () => {
     render(
       <UpdatePane
-        {...pane({ checkError: 'There is no update waiting to be installed.', checkErrorCode: 'VALIDATION' })}
+        {...pane({
+          checkError: 'There is no update waiting to be installed.',
+          checkErrorCode: 'VALIDATION',
+        })}
       />,
     );
     expect(screen.getByRole('alert').textContent).toContain(

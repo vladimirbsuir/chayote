@@ -90,12 +90,13 @@ export function deriveTitle(doc: JsonDoc): string {
   return capTitle(raw);
 }
 
-/** `03-data-model.md` §4.1 as the browser backend implements it: a typed title
-    wins, and everything else is derived from the document. Mirrors
-    `services/derive.rs`, including the 120-character cap. */
+/** ADR-026 as the browser backend implements it: the title is what was typed,
+    and an empty one stays empty — the "Untitled" a list shows is a rendering
+    decision, never data. This still derived from the document, so a new note
+    arrived titled "Untitled" in the browser while the Rust backend stored "",
+    and the title field loaded the word as text. */
 export function titleOf(note: MockNote): string {
-  if (note.titleSource === 'manual' && note.title.length > 0) return note.title;
-  return deriveTitle(note.doc);
+  return note.title;
 }
 
 export function deriveExcerpt(plain: string): string {

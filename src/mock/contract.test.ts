@@ -52,7 +52,8 @@ describe('mock adapter against the real command surface', () => {
     const backend = createMockBackend(buildMockDatabase());
 
     const created = await backend.invoke('notes_create', { folderId: null });
-    expect(created.title).toBe('Untitled');
+    /* ADR-026: empty, as the Rust `create` stores it. */
+    expect(created.title).toBe('');
     expect(created.doc.type).toBe('doc');
 
     const input: SaveNoteInput = {
@@ -68,8 +69,10 @@ describe('mock adapter against the real command surface', () => {
       isPinned: true,
     };
     const saved = await backend.invoke('notes_save', { input });
-    expect(saved.title).toBe('Saved');
-    expect(saved.isPinned).toBe(true);
+    /* ADR-026: the heading is text, not a name — a save leaves the title empty. */
+    expect(saved.title).toBe('');
+    /* The pin is `notes_set_pinned`'s; a save carrying one does not move it. */
+    expect(saved.isPinned).toBe(false);
 
     await backend.invoke('notes_soft_delete', { id: created.id });
     await backend.invoke('notes_restore', { id: created.id });
@@ -81,7 +84,7 @@ describe('mock adapter against the real command surface', () => {
     });
   });
 
-  it('types a title that derivation cannot take back, until the field is cleared', async () => {
+  it('types a title that a save cannot take back, and clearing it leaves it empty', async () => {
     /* ADR-023, asserted against the browser backend because that is what the
        Playwright suite drives: a typed title survives a later document save, which
        is the half that silently broke before the Rust side read the stored
@@ -110,8 +113,9 @@ describe('mock adapter against the real command surface', () => {
     });
     expect(saved.title).toBe('Plan');
 
+    /* ADR-026: cleared is empty, not re-derived from the first line. */
     const cleared = await backend.invoke('notes_set_title', { id: created.id, title: '   ' });
-    expect(cleared.title).toBe('A first line');
+    expect(cleared.title).toBe('');
 
     await expect(
       backend.invoke('notes_set_title', { id: created.id, title: 'ok' }),
@@ -241,12 +245,9 @@ describe('mock adapter against the real command surface', () => {
     const seeded = createMockBackend(buildMockDatabase(), { updateFeed: 'available' });
     const found = await seeded.invoke('updates_check', {});
     expect(found).not.toBeNull();
-    expect(Object.keys(found ?? {}).sort()).toEqual(['date', 'notes', 'version']);
+    /* No `notes`: the tab does not show release notes (`05-ui-ux.md`). */
+    expect(Object.keys(found ?? {}).sort()).toEqual(['date', 'version']);
     expect(typeof found?.version).toBe('string');
-    expect(typeof found?.notes).toBe('string');
-    /* `notes` is a string and never null: the pane has no use for a key it
-       cannot render, and Rust already collapsed a missing one to "". */
-    expect(found?.notes).not.toBeNull();
   });
 
   it('claims no update support on the unsupported feed, and says which platform', async () => {

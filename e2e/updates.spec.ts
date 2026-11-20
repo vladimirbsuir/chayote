@@ -66,7 +66,6 @@ test.describe('Updates', () => {
     await page.getByTestId('update-check').click();
 
     await expect(page.getByTestId('update-available')).toContainText('Version 0.3.0 is available.');
-    await expect(page.getByTestId('update-available')).toContainText('Faster search');
     await expect(page.getByTestId('update-install')).toBeEnabled();
     /* Not both: an available update is not also an up-to-date one. */
     await expect(page.getByTestId('update-current')).toHaveCount(0);

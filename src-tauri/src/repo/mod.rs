@@ -109,6 +109,11 @@ pub struct SaveNoteInput {
     pub doc: Value,
     pub folder_id: Option<Uuid>,
     pub tag_ids: Vec<Uuid>,
+    /// Accepted and ignored. The pin is written only by `notes_set_pinned`: a
+    /// save carrying it wrote back whatever the editor last read, so a note
+    /// pinned from its card while open was unpinned by the next keystroke.
+    #[serde(default)]
+    #[allow(dead_code)]
     pub is_pinned: bool,
 }
 

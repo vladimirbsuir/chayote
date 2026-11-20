@@ -126,4 +126,34 @@ test.describe('note title field', () => {
        actually be reached. */
     await expect(page.getByTestId('note-updated-at')).toContainText(/\d/);
   });
+  test('a new note starts with an empty title field, not the word Untitled', async ({ page }) => {
+    /* The field loaded the display fallback as text, so typing a name into a new
+       note stored "UntitledGroceries". `fill` replaces the value and hid it, so
+       this types key by key, the way a person does. */
+    await open(page);
+    await page.keyboard.press('Control+n');
+    const title = page.getByTestId('note-title-input');
+    await expect(title).toHaveValue('');
+    await expect(title).toHaveAttribute('placeholder', 'Title');
+
+    await title.click();
+    await title.pressSequentially('Groceries');
+    await expect(title).toHaveValue('Groceries');
+    await title.press('Enter');
+    await expect(page.getByTestId('note-list')).toContainText('Groceries');
+    await expect(page.getByTestId('note-list')).not.toContainText('UntitledGroceries');
+  });
+
+  test('Ctrl+Backspace in the title deletes a word, not the note', async ({ page }) => {
+    await open(page);
+    const title = page.getByTestId('note-title-input');
+    await title.click();
+    await title.press('End');
+    await title.press('Control+Backspace');
+
+    /* The note is still open and nothing went to the trash. */
+    await expect(title).toBeVisible();
+    await expect(title).not.toHaveValue('Meeting notes');
+    await expect(page.getByTestId('undo-toast')).toHaveCount(0);
+  });
 });

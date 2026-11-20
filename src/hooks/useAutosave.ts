@@ -3,6 +3,7 @@ import { notesApi } from '../lib/ipc';
 import { debounce } from '../lib/debounce';
 import { markSaveFailed, markSaved, markSaving, markUnsaved } from '../stores/editor';
 import type { Note, SaveNoteInput } from '../types/ipc';
+import type { Uuid } from '../types/note';
 
 /* `04-editor.md` §5. Autosave is the most important behaviour in the app, so
    every clause of §5.1 maps to something here:
@@ -11,7 +12,7 @@ import type { Note, SaveNoteInput } from '../types/ipc';
    |--------------------------|-----------------------------------------------------|
    | 800 ms debounce          | `scheduleSave`                                       |
    | one save in flight       | `inFlight`; a change during a save queues one more  |
-   | skip an unchanged doc    | the `lastSaved` string comparison, unless `forced`  |
+   | skip an unchanged doc    | the `lastSaved` comparison, unless the entry is forced |
    | flush on five conditions | `flush`, called by EditorPane                        |
    | retry with backoff       | the `retry` timer, backed off from §5.1's 400 ms    |
 
@@ -29,9 +30,9 @@ import type { Note, SaveNoteInput } from '../types/ipc';
    `forced` is the exception that clause makes necessary. The comparison is over the
    document, so a folder or tag change — which arrives carrying an unchanged document
    — is judged unchanged and never written. `schedule` marks such a write forced, and
-   the flag lives on the queue rather than on the call, because the three paths that
-   re-enter a save (the debounce, an explicit `flush`, and the retry timer) each reach
-   it differently and only one of them still holds what the caller passed. */
+   the flag lives on the pending entry rather than on the call, because the three
+   paths that re-enter a save (the debounce, an explicit `flush`, and the retry timer)
+   each reach it differently and only the entry survives all three. */
 
 export const AUTOSAVE_DELAY_MS = 800;
 export const RETRY_BASE_MS = 400;
@@ -43,18 +44,21 @@ export type Autosave = {
   /** Queues a write whose document may be identical to the last saved one, so the
       "is it the same?" comparison is bypassed. For the changes that carry no document
       — the note's folder and tags (`04-editor.md` §9, status bar) — which would
-      otherwise be judged unchanged and silently dropped, exactly as a pin-only write
-      would be. */
+      otherwise be judged unchanged and silently dropped. */
   schedule: (target: SaveNoteInput) => void;
-  /** Writes now and waits for an in-flight save. Omit `target` to use the queued one. */
+  /** Writes now and waits for an in-flight save. Omit `target` to write what is
+      pending. */
   flush: (target?: SaveNoteInput) => Promise<void>;
   /** Adopts a freshly loaded document as the baseline, so opening is not a save. */
   setBaseline: (target: SaveNoteInput) => void;
   /** Replaces the post-save handler without disturbing the in-flight state. */
   setOnSaved: (handler: (note: Note) => void) => void;
-  /** Drops the pending timer and any retry. Called on unmount. */
+  /** Drops the pending timer and any retry, and writes what was pending once.
+      Called on unmount. */
   dispose: () => void;
 };
+
+type Pending = { target: SaveNoteInput; forced: boolean };
 
 export function createAutosave(onSaved: (note: Note) => void): Autosave {
   let onSavedRef = onSaved;
@@ -65,26 +69,50 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
      first so the drain can start its follow-up save under a fresh promise. */
   let flight: Promise<void> | null = null;
   let settleFlight: (() => void) | null = null;
-  let queued: SaveNoteInput | null = null;
-  let attempts = 0;
-  let lastSaved: string | null = null;
-  let retry: ReturnType<typeof setTimeout> | null = null;
-  /* Whether the queued write must go through even if its document is identical to
-     the last saved one. Set by `schedule`, cleared by a save that succeeded.
+  /* Writes not yet made, **one per note**, oldest first.
 
-     A flag on the queue rather than an argument to `persist`, because the queue is
-     what survives a note switch, a flush and a retry — all three of which used to
-     lose a metadata-only write that had been judged "unchanged", and all three of
-     which read the force state from the wrong place when the flag rode on the
-     argument instead. A retry in particular re-enters `persist` with nothing but the
-     queue, so a force flag passed in by the caller would already be gone. */
-  let forced = false;
+     This used to be one slot shared by every note, with one `lastSaved` string and
+     one force flag, and a note switch adopted the incoming note by overwriting the
+     slot. Type in A while a save of A is running, open B, and A's newest keystrokes
+     were replaced by B's unchanged document: B was rewritten for nothing and A's
+     last words were never saved. A failed save fared no better — opening B cleared
+     A's retry, so the "will retry" the bar had promised never happened. Keyed by
+     note, a switch cannot touch another note's pending write. */
+  const pending = new Map<Uuid, Pending>();
+  /* The last document written or loaded, per note — the §5.1 comparison. */
+  const lastSaved = new Map<Uuid, string>();
+  let attempts = 0;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+  /* After `dispose` a failure is not retried: there is no editor left to report
+     it, and a timer that outlives its component is a leak. Any later use clears
+     it again, which is what a StrictMode remount of the same controller does. */
+  let disposed = false;
 
   const clearRetry = (): void => {
     if (retry !== null) {
       clearTimeout(retry);
       retry = null;
     }
+  };
+
+  /* Adds or replaces a note's pending write. The force is sticky: a document edit
+     arriving while a metadata write is pending must not clear it, or the write is
+     judged on the document and dropped. */
+  const enqueue = (target: SaveNoteInput, force: boolean): void => {
+    const previous = pending.get(target.id);
+    pending.delete(target.id);
+    pending.set(target.id, { target, forced: force || (previous?.forced ?? false) });
+  };
+
+  const take = (id: Uuid): Pending | null => {
+    const entry = pending.get(id) ?? null;
+    pending.delete(id);
+    return entry;
+  };
+
+  const takeNext = (): Pending | null => {
+    const first = pending.keys().next();
+    return first.done === true ? null : take(first.value);
   };
 
   /* Waits out whatever save is running. A helper rather than inline code in
@@ -99,39 +127,31 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
     }
   };
 
-  /* Persists whatever an overlap left queued — unless the retry timer owns it,
-     in which case an immediate write would jump the backoff queue. Same fresh-
-     scope reason as above. */
+  /* Persists whatever an overlap left pending — unless the retry timer owns it,
+     in which case an immediate write would jump the backoff. Same fresh-scope
+     reason as above. */
   const drainLeftovers = async (): Promise<void> => {
-    if (queued !== null && retry === null) {
-      const next = queued;
-      const nextForced = forced;
-      queued = null;
-      forced = false;
-      await persist(next, nextForced);
+    if (pending.size > 0 && retry === null) {
+      await persist(takeNext());
       await settleFlights();
     }
   };
 
-  const persist = async (input: SaveNoteInput | null, force: boolean): Promise<void> => {
-    const target = input ?? queued;
-
+  const persist = async (entry: Pending | null): Promise<void> => {
     if (inFlight) {
-      queued = target;
-      /* Sticky: a document edit arriving while a metadata write is queued must not
-         clear the force, or the queued write is judged on the document and dropped. */
-      forced = forced || force;
+      if (entry !== null) enqueue(entry.target, entry.forced);
       /* The caller is a flush that must not resolve before this document is
          written. Wait for the running save; `flush` awaits the same promise and
-         then persists whatever this left queued. */
+         then persists whatever this left pending. */
       await flight;
       return;
     }
-    if (target === null) return;
+    if (entry === null) return;
+    const { target, forced } = entry;
+    const serialised = JSON.stringify(target.doc);
 
-    if (!force && JSON.stringify(target.doc) === lastSaved) {
+    if (!forced && serialised === lastSaved.get(target.id)) {
       markSaved(target.id);
-      forced = false;
       return;
     }
 
@@ -143,27 +163,26 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
     let failed = false;
     try {
       const note = await notesApi.save(target);
-      lastSaved = JSON.stringify(target.doc);
+      lastSaved.set(target.id, serialised);
       attempts = 0;
-      clearRetry();
-      forced = false;
       markSaved(target.id);
       onSavedRef(note);
     } catch {
       failed = true;
       markSaveFailed(target.id);
       attempts += 1;
-      /* Re-queued rather than left to the drain below: the drain exists to pick up a
-         *newer* change that arrived during the write, and this one is not newer. The
-         retry timer is what gets this one back, and it re-enters `persist` with
-         nothing but the queue, so the force flag has to be on the queue too. */
-      queued = target;
-      forced = forced || force;
+      /* Back on the queue — behind any newer document typed into this note since,
+         which is then the one to write, keeping this one's force. The retry timer
+         re-enters with nothing but the queue. */
+      const newer = take(target.id);
+      enqueue(newer?.target ?? target, forced || (newer?.forced ?? false));
       clearRetry();
-      retry = setTimeout(() => {
-        retry = null;
-        void persist(null, forced);
-      }, retryDelayMs(attempts));
+      if (!disposed) {
+        retry = setTimeout(() => {
+          retry = null;
+          void persist(takeNext());
+        }, retryDelayMs(attempts));
+      }
     } finally {
       inFlight = false;
       /* The save itself is done; wake anyone waiting on it before the drain starts
@@ -172,60 +191,57 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
       settleFlight?.();
       settleFlight = null;
       flight = null;
-      /* On failure the queue and the flag belong to the retry, so the drain must not
-         touch them — clearing them here is what turns a retry into a no-op. */
-      if (!failed) {
-        const next = queued;
-        const nextForced = forced;
-        queued = null;
-        forced = false;
-        if (next !== null && next !== target) await persist(next, nextForced);
-      }
+      /* On failure the queue belongs to the retry, so the drain must not touch it —
+         draining here would turn the backoff into a tight loop. */
+      if (!failed) await persist(takeNext());
     }
   };
 
-  const scheduleSave = debounce(
-    (target: SaveNoteInput) => void persist(target, forced),
-    AUTOSAVE_DELAY_MS,
-  );
+  const scheduleSave = debounce((id: Uuid) => void persist(take(id)), AUTOSAVE_DELAY_MS);
 
   return {
     noteChanged: (target) => {
+      disposed = false;
       /* ProseMirror fires `update` while it normalises the initial content, so a
          freshly opened note reaches here with a document nobody changed. Marking
          that unsaved would show "Unsaved changes" on a note the user has not
          touched, which is the one status the bar must never lie about. */
-      if (!forced && JSON.stringify(target.doc) === lastSaved) return;
+      const forced = pending.get(target.id)?.forced ?? false;
+      if (!forced && JSON.stringify(target.doc) === lastSaved.get(target.id)) return;
 
-      queued = target;
+      enqueue(target, false);
       markUnsaved(target.id);
-      scheduleSave(target);
+      scheduleSave(target.id);
     },
 
     /* `04-editor.md` §5.1 skips a write whose serialised document matches the last
        saved one, which is what turns a typing burst into a single write. It is the
        wrong test for a folder or tag change: those carry no document, so the
-       comparison says "unchanged" and the write never happens — the same failure a
-       pin-only write has, and the reason `notes_set_pinned` exists as a separate
-       command.
+       comparison says "unchanged" and the write never happens.
 
        The fix here rather than a command of their own, because `notes_save` is the
        only write that carries `folderId` and `tagIds` together with the document,
        and the tag set is a whole-set replacement (`07-sync-plan.md` §5.3) rather than
        an increment — two commands appending rows would get that wrong. */
     schedule: (target) => {
-      queued = target;
-      forced = true;
+      disposed = false;
+      enqueue(target, true);
       markUnsaved(target.id);
-      scheduleSave(target);
+      scheduleSave(target.id);
     },
 
     flush: async (target) => {
+      disposed = false;
       scheduleSave.cancel();
-      const input = target ?? queued;
-      const force = forced;
-      queued = null;
-      await persist(input, force);
+      let entry: Pending | null = null;
+      if (target !== undefined) {
+        entry = { target, forced: take(target.id)?.forced ?? false };
+      } else if (retry === null) {
+        /* With a retry pending the queue is the timer's: writing now would jump
+           the backoff. */
+        entry = takeNext();
+      }
+      await persist(entry);
       /* An overlapping save may still be running — a second flush (blur, then
          unmount), a late keystroke's debounce, the retry timer. Wait for the
          work; never spin on the flag.
@@ -242,19 +258,22 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
       await drainLeftovers();
     },
 
+    /* Adopts a freshly opened note's document as its comparison point, and touches
+       no other note's pending write or retry — see `pending`. */
     setBaseline: (target) => {
-      queued = target;
-      lastSaved = JSON.stringify(target.doc);
-      attempts = 0;
-      forced = false;
-      clearRetry();
+      disposed = false;
+      lastSaved.set(target.id, JSON.stringify(target.doc));
+      if (pending.size === 0 && retry === null) attempts = 0;
     },
 
+    /* The debounce timer is dropped, but not what it was holding: a change the user
+       made is written once more, without a retry. Dropping it lost a folder or tag
+       picked in the last 800 ms before the editor went away. */
     dispose: () => {
+      disposed = true;
       scheduleSave.cancel();
       clearRetry();
-      queued = null;
-      forced = false;
+      if (pending.size > 0) void persist(takeNext());
     },
 
     setOnSaved: (handler) => {

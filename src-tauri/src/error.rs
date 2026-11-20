@@ -48,7 +48,10 @@ pub enum AppError {
     #[error("Android has not been allowed to install updates for Chayote yet.")]
     UpdatePermissionRequired,
 
-    #[error("{0}")]
+    /// The detail is for `details` and the log. It used to be the message as
+    /// well, so a reader saw "stored id is not a UUID" or "database lock
+    /// poisoned" where `10-conventions.md` §6 promises plain words.
+    #[error("Something went wrong. Try again, and restart Chayote if it keeps happening.")]
     Internal(String),
 }
 

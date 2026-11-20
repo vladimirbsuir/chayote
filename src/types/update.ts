@@ -14,8 +14,6 @@ export type AppInfo = {
 
 export type UpdateSummary = {
   version: string;
-  /** Release notes, or an empty string when `latest.json` carried none. */
-  notes: string;
   /** RFC 3339, shown as-is. Never parsed. */
   date: string | null;
 };

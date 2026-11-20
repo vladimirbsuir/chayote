@@ -1013,6 +1013,49 @@ fn indent_levels_zero_to_seven_save_and_eight_is_rejected() {
     );
 }
 
+/// The pin belongs to `set_pinned`. A save carries whatever the editor last
+/// read, and writing it undid a pin made from the note's card while the note
+/// was open.
+#[test]
+fn a_save_never_moves_the_pin() {
+    let f = fixture("save-pin");
+    let repo = notes(&f.db);
+    let note = repo.create(None).expect("create");
+    repo.set_pinned(&note.summary.id, true).expect("pin");
+
+    let saved = repo
+        .save(&SaveNoteInput {
+            id: note.summary.id.clone(),
+            doc: note.doc.clone(),
+            folder_id: None,
+            tag_ids: vec![],
+            is_pinned: false,
+        })
+        .expect("save");
+    assert!(saved.summary.is_pinned);
+}
+
+/// A folder or tag deleted under an open note is dropped from the save, not
+/// fatal to it: the foreign key used to roll back every save after the delete.
+#[test]
+fn a_save_drops_a_folder_or_tag_that_no_longer_exists() {
+    let f = fixture("save-dangling");
+    let repo = notes(&f.db);
+    let note = repo.create(None).expect("create");
+
+    let saved = repo
+        .save(&SaveNoteInput {
+            id: note.summary.id.clone(),
+            doc: note.doc.clone(),
+            folder_id: Some("01980000-0000-7000-8000-00000000dead".to_owned()),
+            tag_ids: vec!["01980000-0000-7000-8000-00000000beef".to_owned()],
+            is_pinned: false,
+        })
+        .expect("a dangling id does not fail the save");
+    assert_eq!(saved.summary.folder_id, None);
+    assert!(saved.summary.tags.is_empty());
+}
+
 // ------------------------------------------------------- selection and order
 
 #[test]
@@ -1022,14 +1065,7 @@ fn pinned_notes_sort_first_in_every_selection() {
 
     let plain = repo.create(None).expect("create");
     let pinned = repo.create(None).expect("create");
-    repo.save(&SaveNoteInput {
-        id: pinned.summary.id.clone(),
-        doc: pinned.doc.clone(),
-        folder_id: None,
-        tag_ids: vec![],
-        is_pinned: true,
-    })
-    .expect("pin");
+    repo.set_pinned(&pinned.summary.id, true).expect("pin");
 
     let listed = repo.list(&NoteFilter::new(Selection::All)).expect("list");
     assert_eq!(listed[0].id, pinned.summary.id, "pinned first");

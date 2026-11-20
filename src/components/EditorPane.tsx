@@ -42,8 +42,6 @@ type EditorPaneProps = {
   onTrash?: () => void;
 };
 
-const UNTITLED = 'Untitled';
-
 /* The status bar renders on the no-note and recovery screens too, where there is no
    note to point a picker at. */
 const NOOP = (): void => {};
@@ -221,7 +219,11 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
       setPinned(data.isPinned);
       setFolderId(data.folderId);
       setTagIds(ids);
-      setTitle(displayTitle(data.title));
+      /* The stored title as typed — an empty one stays empty, so the field shows
+         its placeholder. It used to load "Untitled" as text, and typing into a
+         new note produced "UntitledGroceries" (ADR-026: the literal is display
+         only, never stored). */
+      setTitle(data.title);
       editorRef.current = editor;
       setToolbarEditor(editor);
       autosave.setBaseline(targetOf(editor) as SaveNoteInput);
@@ -401,6 +403,29 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
     loadedDocRef.current = serverDocJson;
     setContentEpoch((epoch) => epoch + 1);
   }, [note.data, serverDocJson, saveState]);
+
+  /* The folder, tags and pin stored for the open note moved under the editor — a
+     card's Pin or Move, a sync pull, a deleted tag or folder. `activeRef` is the
+     save target, so leaving it at the values read at mount wrote them straight
+     back on the next keystroke: a note pinned from its card was unpinned 800 ms
+     later, and a note whose tag was deleted failed every save on the dangling id.
+     Adopted only while clean, for the same reason as the remount above: a folder
+     or tag the user just picked here is pending, and it wins. */
+  useEffect(() => {
+    const data = note.data;
+    if (data === undefined || data.id !== noteId || saveState !== 'saved') return;
+    const active = activeRef.current;
+    const ids = data.tags.map((tag) => tag.id);
+    const sameTags =
+      ids.length === active.tagIds.length && ids.every((id) => active.tagIds.includes(id));
+    if (active.folderId === data.folderId && sameTags && active.isPinned === data.isPinned) {
+      return;
+    }
+    activeRef.current = { folderId: data.folderId, tagIds: ids, isPinned: data.isPinned };
+    setFolderId(data.folderId);
+    setTagIds(ids);
+    setPinned(data.isPinned);
+  }, [note.data, noteId, saveState]);
 
   /* First paint waits for fresh data. Mounting TipTap on a stale cache entry
      flashes the old text until the mount refetch lands — visible after every
@@ -761,10 +786,6 @@ function RecoveryScreen({ code, onRetry }: { code: string; onRetry: () => void }
       }
     />
   );
-}
-
-function displayTitle(title: string): string {
-  return title.length === 0 ? UNTITLED : title;
 }
 
 function errorCodeOf(error: unknown): string {

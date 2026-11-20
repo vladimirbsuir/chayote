@@ -168,9 +168,8 @@ function Shell() {
            phone: deleting the open note showed that pane. At the root the pop
            is a no-op, so deleting from the list view is unaffected. */
         if (mobile) setStack(popView);
-        if (useSelectionStore.getState().selection.kind === 'folder') {
-          setSelection({ kind: 'all' });
-        }
+        /* The selection stays: trashing a note from a folder leaves the folder,
+           and jumping to All lost the user's place in it. */
       }
     },
     onRestored: (id) => {
@@ -186,12 +185,18 @@ function Shell() {
     (id: Uuid): void => {
       const note = listNotes.find((candidate) => candidate.id === id);
       const title = note === undefined || note.title.length === 0 ? 'Untitled' : note.title;
-      trash.softDelete(id);
-      showUndoToast(id, title, () => {
-        void trash.restore(id);
-      });
+      /* The toast follows the write rather than racing it: a failed delete used
+         to be silent under a toast that said it worked. */
+      trash
+        .softDelete(id)
+        .then(() => {
+          showUndoToast(id, title, () => {
+            void trash.restore(id).catch(reportActionError);
+          });
+        })
+        .catch(reportActionError);
     },
-    [listNotes, showUndoToast, trash],
+    [listNotes, reportActionError, showUndoToast, trash],
   );
 
   /* `05-ui-ux.md` §6.2: permanent delete and empty trash confirm; nothing else here
@@ -236,6 +241,7 @@ function Shell() {
   const {
     install: installUpdate,
     isInstalling: isInstallingUpdate,
+    installed: isUpdateInstalled,
     downloaded: updateDownloaded,
     total: updateTotal,
     error: updateInstallError,
@@ -373,9 +379,8 @@ function Shell() {
     const note = await notesApi.create(folderId);
     setOpenNote(note.id);
     void queryClient.invalidateQueries({ queryKey: ['notes'] });
-    refetch();
     if (mobile) setStack(PUSH_EDITOR);
-  }, [defaultFolderId, mobile, queryClient, refetch]);
+  }, [defaultFolderId, mobile, queryClient]);
 
   /* Folder writes invalidate the folder query and the note list together
      (`10-conventions.md` §7): a new or deleted folder changes the tree, and a
@@ -385,8 +390,11 @@ function Shell() {
   const foldersChanged = useCallback((): void => {
     void queryClient.invalidateQueries({ queryKey: ['folders'] });
     void queryClient.invalidateQueries({ queryKey: ['notes'] });
-    refetch();
-  }, [queryClient, refetch]);
+    /* The open note too: a deleted folder unfiles it, and the editor adopts the
+       stored folder rather than saving the dead id back (`EditorPane`). The
+       invalidations refetch every active query, so no extra `refetch()`. */
+    void queryClient.invalidateQueries({ queryKey: ['note'] });
+  }, [queryClient]);
 
   /* Tag writes invalidate the tag query and the note list together, for the
      same reason folder writes do (`10-conventions.md` §7): a rename moves the
@@ -395,8 +403,8 @@ function Shell() {
   const tagsChanged = useCallback((): void => {
     void queryClient.invalidateQueries({ queryKey: ['tags'] });
     void queryClient.invalidateQueries({ queryKey: ['notes'] });
-    refetch();
-  }, [queryClient, refetch]);
+    void queryClient.invalidateQueries({ queryKey: ['note'] });
+  }, [queryClient]);
 
   const createTag = useCallback(
     async (name: string): Promise<void> => {
@@ -445,18 +453,21 @@ function Shell() {
     [foldersChanged],
   );
 
-  /* Deleting the folder that is selected leaves nothing to show, so the
-     selection moves to All rather than to a row that no longer exists
-     (`NOT_FOUND` handling in `10-conventions.md` §6). */
+  /* Deleting the selected folder — or one it sits inside, since a delete takes the
+     subtree — leaves nothing to show, so the selection moves to All rather than to
+     a row that no longer exists (`NOT_FOUND` handling in `10-conventions.md` §6).
+     Any other folder's delete leaves the selection alone: it used to reset it
+     whenever *a* folder was selected. The subtree is read before the delete,
+     while the tree still has it. */
   const deleteFolder = useCallback(
     async (id: Uuid): Promise<void> => {
+      const current = useSelectionStore.getState().selection;
+      const loses = current.kind === 'folder' && isInsideSubtree(folders ?? [], id, current.id);
       await foldersApi.remove(id);
-      if (useSelectionStore.getState().selection.kind === 'folder') {
-        setSelection({ kind: 'all' });
-      }
+      if (loses) setSelection({ kind: 'all' });
       foldersChanged();
     },
-    [foldersChanged],
+    [folders, foldersChanged],
   );
 
   /* A re-parent can move a folder out from under the active selection — dragging a
@@ -479,8 +490,10 @@ function Shell() {
      Backspace in a WebView navigates back otherwise — which on Android would pop the
      view stack out from under a note the user is deleting. */
   const deleteOpenNote = useCallback((): void => {
-    const id = useSelectionStore.getState().openNoteId;
-    if (id === null) return;
+    const { openNoteId: id, selection: current } = useSelectionStore.getState();
+    /* A note open from the trash is already deleted; trashing it again would
+       reset `deleted_at` and queue a second delete (§6.2). */
+    if (id === null || current.kind === 'trash') return;
     softDeleteWithToast(id);
   }, [softDeleteWithToast]);
 
@@ -552,6 +565,11 @@ function Shell() {
       /* §7: `Delete note` is `Ctrl/Cmd+Backspace`. Not plain Backspace — in a WebView
          that navigates back, and in the editor that deletes a character. */
       if (key === 'backspace') {
+        /* Not in a text field — the title, search or a rename input — where
+           `Ctrl+Backspace` is "delete the previous word" and the user is editing
+           a line, not the note. It trashed the open note from the title field. */
+        const target = event.target as HTMLElement | null;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
         event.preventDefault();
         deleteOpenNote();
       }
@@ -698,8 +716,9 @@ function Shell() {
       openNoteId={openNoteId}
       firstLaunch={firstLaunch}
       onSelect={(next) => {
+        /* No `refetch()`: it belonged to the list being left. The new
+           selection's query fetches itself on mount. */
         setSelection(next);
-        refetch();
       }}
       onOpenNote={openFromList}
       onNewNote={() => {
@@ -921,6 +940,7 @@ function Shell() {
             checkError: updateCheckError,
             checkErrorCode: updateCheckErrorCode,
             isInstalling: isInstallingUpdate,
+            installed: isUpdateInstalled,
             downloaded: updateDownloaded,
             total: updateTotal,
             installError: updateInstallError,
