@@ -268,14 +268,84 @@ describe('createAutosave', () => {
     expect(useEditorStore.getState().saveState).toBe('saved');
   });
 
-  it('drops a pending write and its retry on dispose', async () => {
+  it('writes what was pending once on dispose, and never retries it', async () => {
+    /* A tag picked in the last 800 ms before the editor went away used to be
+       dropped with the timer. The change is written; a failure after the editor
+       is gone is not retried, because nothing is left to show it. */
     const autosave = createAutosave(vi.fn());
     autosave.setBaseline(base);
+    save.mockRejectedValueOnce(new Error('database is locked'));
 
     autosave.schedule({ ...base, tagIds: ['tag-1'] });
     autosave.dispose();
 
-    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+    await vi.advanceTimersByTimeAsync(RETRY_CAP_MS * 2);
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0].tagIds).toEqual(['tag-1']);
+  });
+
+  it('keeps a note’s newest document when another note opens during its save', async () => {
+    /* Reproduced from the audit: type in A, keep typing while A's save runs, open
+       B. B's baseline used to overwrite the one shared slot, so the drain wrote B's
+       unchanged document and A's last keystrokes were never saved. */
+    let release!: () => void;
+    save.mockImplementationOnce(
+      (input) =>
+        new Promise<Note>((resolve) => {
+          release = () => {
+            resolve(asNote(input));
+          };
+        }),
+    );
+    const autosave = createAutosave(vi.fn());
+    autosave.setBaseline(base);
+
+    autosave.noteChanged({ ...base, doc: doc('a1') });
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    autosave.noteChanged({ ...base, doc: doc('a2') });
+    void autosave.flush();
+    autosave.setBaseline({ ...base, id: OTHER, doc: doc('b0') });
+
+    release();
+    await settle();
+
+    expect(save.mock.calls.map(([input]) => [input.id, input.doc])).toEqual([
+      [NOTE, doc('a1')],
+      [NOTE, doc('a2')],
+    ]);
+  });
+
+  it('keeps retrying a failed note after another note opens', async () => {
+    const autosave = createAutosave(vi.fn());
+    autosave.setBaseline(base);
+    save.mockRejectedValueOnce(new Error('database is locked'));
+
+    autosave.noteChanged({ ...base, doc: doc('a1') });
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    /* The switch used to clear the retry along with the slot. */
+    autosave.setBaseline({ ...base, id: OTHER, doc: doc('b0') });
+    await vi.advanceTimersByTimeAsync(RETRY_BASE_MS);
+    await settle();
+
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1]?.[0]).toMatchObject({ id: NOTE, doc: doc('a1') });
+  });
+
+  it('compares each note against its own last saved document', async () => {
+    const autosave = createAutosave(vi.fn());
+    autosave.setBaseline(base);
+    autosave.setBaseline({ ...base, id: OTHER, doc: doc('b0') });
+
+    /* A's document is unchanged from A's own baseline, so it is not a write even
+       though the most recent baseline was B's. */
+    autosave.noteChanged({ ...base });
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    await settle();
 
     expect(save).not.toHaveBeenCalled();
   });
