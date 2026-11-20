@@ -54,6 +54,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0006_note_title_field.sql"),
         data: Some(lift_leading_heading_into_title),
     },
+    Migration {
+        name: "0007_tags_live_unique.sql",
+        sql: include_str!("../../migrations/0007_tags_live_unique.sql"),
+        data: None,
+    },
 ];
 
 /// Applies every migration not yet recorded in `schema_migrations`.

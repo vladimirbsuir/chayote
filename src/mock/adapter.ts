@@ -310,7 +310,12 @@ export function createMockBackend(
       if (tag === undefined) {
         throw notFound();
       }
-      tag.name = requireName(name, 'Give the tag a name.');
+      const clean = requireName(name, 'Give the tag a name.');
+      // Same refusal the Rust repo gives: another live tag's name, any case.
+      if (state.tags.some((other) => other.id !== id && foldCase(other.name) === foldCase(clean))) {
+        throw validation('A tag with that name already exists.');
+      }
+      tag.name = clean;
       return { ...tag, count: countNotes(state, tag.id) };
     },
 

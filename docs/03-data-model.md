@@ -128,13 +128,14 @@ Column-by-column rationale:
 
 **Deliberately absent:** `position` (no manual note order in v1), `is_favorite` (folded into `is_pinned`), `html`, `markdown`, `tags` (as text), `attachments`. Tags live in a join table; content has exactly one serialised form.
 
-**Migration count.** There are six migrations. `title_source` ships
+**Migration count.** There are seven migrations. `title_source` ships
 inside `0001_initial.sql` with the rest of the table; the earlier draft of this
 document listed a separate `0004_note_title_source.sql`, which would have been a
 no-op `ALTER TABLE ADD COLUMN` against the schema above. The real fourth is
 `0004_sync.sql` — the sync `conflicts` and `sync_state` tables — the fifth
 is `0005_sync_backoff.sql`, the outbox retry column, and the sixth is
-`0006_note_title_field.sql`.
+`0006_note_title_field.sql`, and the seventh is `0007_tags_live_unique.sql`, which drops
+the table-level `UNIQUE` on `tags.name` (§3.4).
 
 **`0006` has no DDL and carries a data pass instead** (ADR-023). The columns it needs
 have existed since `0001`, which is why it exists at all: notes written before the title
@@ -152,7 +153,7 @@ is a recursive walk that SQL cannot express (§4.2).
 ```sql
 CREATE TABLE tags (
   id         TEXT    PRIMARY KEY NOT NULL,
-  name       TEXT    NOT NULL COLLATE NOCASE UNIQUE,
+  name       TEXT    NOT NULL COLLATE NOCASE,
   rev        INTEGER NOT NULL DEFAULT 0,
   dirty      INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0,1)),
   created_at INTEGER NOT NULL,
@@ -166,7 +167,9 @@ CREATE INDEX idx_tags_dirty ON tags(dirty) WHERE dirty = 1;
 
 Tag names are case-insensitive unique among live tags: `Work`, `work`, and `WORK` are the same tag and are normalised to the first-created spelling. The `COLLATE NOCASE` on the column plus the partial unique index gives this without application-level case folding that Postgres would disagree with.
 
-The partial index, not the table-level `UNIQUE`, is what allows a soft-deleted `work` tag to coexist with a live `work` tag.
+The partial index is what allows a soft-deleted `work` tag to coexist with a live `work` tag. `0001_initial.sql` also declared the column `UNIQUE`, which covered tombstones too and contradicted that; `0007_tags_live_unique.sql` rebuilds the table without it. The rebuild copies `note_tags` aside first and restores it after, because `DROP TABLE` with foreign keys on deletes every link through the cascade.
+
+Uniqueness is per device. Two devices can each create `work` and `Work` under different ids, and sync resolves that clash by folding the local tag into the one already on the server (`07-sync-plan.md` §5.2, ADR-027). Renaming a tag onto another live tag's name on the same device is refused as `VALIDATION`.
 
 ### 3.5 `note_tags`
 
@@ -438,6 +441,8 @@ src-tauri/migrations/
   0003_outbox.sql         -- outbox, trash_snapshots
   0004_sync.sql           -- conflicts, sync_state
   0005_sync_backoff.sql  -- outbox.next_retry_at + index
+  0006_note_title_field.sql -- data pass: leading H1 into the title field
+  0007_tags_live_unique.sql -- tags rebuilt without the table-level UNIQUE on name
 ```
 
 Rules:
@@ -446,7 +451,7 @@ Rules:
 2. Every migration is idempotent where SQLite allows it: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE TRIGGER IF NOT EXISTS`. `ALTER TABLE ADD COLUMN` is not idempotent — guard it with a `PRAGMA table_info` check in Rust before running it.
 3. A migration that changes an indexed column must run `INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')` at the end.
 4. A migration must never rewrite the `notes` table with `DROP`/`CREATE`. The FTS triggers reference `notes` by name and `rowid`; recreating the table invalidates the external-content mapping and requires a full rebuild.
-5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: five migrations, the fourth (`0004_sync.sql`) carrying the sync `conflicts` and `sync_state` tables and the fifth (`0005_sync_backoff.sql`) the outbox retry column.
+5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: seven migrations, the fourth (`0004_sync.sql`) carrying the sync `conflicts` and `sync_state` tables, the fifth (`0005_sync_backoff.sql`) the outbox retry column, the sixth (`0006_note_title_field.sql`) the title data pass and the seventh (`0007_tags_live_unique.sql`) the tags rebuild.
 
 ## 7. Migration path to Postgres
 

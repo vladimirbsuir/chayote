@@ -18,10 +18,14 @@
 //! Conflict policy (never silently lose data, principle 4):
 //!
 //! - folders / tags — LWW per row on `updated_at`; delete beats a
-//!   concurrent rename (the row is tombstoned, §5.2/§5.4).
-//! - notes — disjoint field changes merge; a both-sides-changed `doc_json`
-//!   is never auto-resolved: the local document stays live and the remote
-//!   one is parked in `conflicts` behind a non-modal badge (§5.1).
+//!   concurrent rename (the row is tombstoned, §5.2/§5.4). A move that would
+//!   close a cycle loses to the first push, and pulled folders land parent
+//!   first (`tree.rs`). A tag name clashing by case folds into the server's
+//!   tag (`tag_merge.rs`).
+//! - notes — fields this device touched (read from its outbox payloads) stay
+//!   local, the rest come from the server (`merge.rs`); a both-sides-changed
+//!   `doc_json` is never auto-resolved: the local document stays live and the
+//!   remote one is parked in `conflicts` behind a non-modal badge (§5.1).
 //! - `note_tags` — set union on concurrent change (§5.3).
 //!
 //! Locking: one cycle at a time, guarded by an in-process lock (§8). A
@@ -39,6 +43,10 @@ use tokio_postgres::Client;
 
 use crate::db::Database;
 use crate::error::AppError;
+
+mod merge;
+mod tag_merge;
+mod tree;
 
 const BATCH_ROWS: usize = 50;
 const PULL_LIMIT: i64 = 200;
@@ -524,7 +532,27 @@ impl SyncService {
         }
         let local = local.expect("checked above");
 
-        match query_remote_tag(client, &row.entity_id).await? {
+        let remote = query_remote_tag(client, &row.entity_id).await?;
+        /* Another live tag on the server already has this name in some case:
+        it wins and this one folds into it (`tag_merge.rs`). Pushed as is, the
+        insert or rename hit the server's unique index and the row retried for
+        ever. A server tombstone for this id is not a clash — the delete wins
+        below, as before. */
+        if remote.as_ref().is_none_or(|r| r.deleted_at.is_none()) {
+            if let Some(winner) = query_live_tag_named(client, &local.name, id).await? {
+                let known = remote.is_some();
+                self.db.with_conn(|conn| {
+                    let tx = conn.transaction()?;
+                    mark_sent_tx(&tx, row.outbox_id)?;
+                    tag_merge::merge_tag_into(&tx, &row.entity_id, &winner, known)?;
+                    tx.commit()?;
+                    Ok::<_, AppError>(())
+                })?;
+                return Ok(PushOutcome::Rebased);
+            }
+        }
+
+        match remote {
             None => {
                 let rev = query_rev(
                     client,
@@ -668,6 +696,20 @@ impl SyncService {
                 })?;
                 Ok(PushOutcome::Rebased)
             }
+            /* The first push wins a cycle (§5.2): this move would file the
+            folder under its own descendant as the server holds the tree now,
+            because another device moved that descendant first. The move is
+            dropped and the row rebases onto the server's; LWW on `parent_id`
+            alone would hand the server a cycle, and every device a tree
+            whose walks never end. */
+            Some(remote)
+                if local.parent_id.is_some()
+                    && local.parent_id != remote.parent_id
+                    && server_would_cycle(client, id, parent).await? =>
+            {
+                self.rebase_folder(&remote, row.outbox_id)?;
+                Ok(PushOutcome::Rebased)
+            }
             Some(remote)
                 if remote.rev > row.base_rev
                     && (remote.name != local.name
@@ -693,26 +735,7 @@ impl SyncService {
                     self.accept_push("folders", &row.entity_id, rev, row.outbox_id)?;
                     Ok(PushOutcome::Pushed)
                 } else {
-                    self.db.with_conn(|conn| {
-                        let tx = conn.transaction()?;
-                        tx.execute(
-                            "UPDATE folders
-                                SET name = ?2, parent_id = ?3, position = ?4,
-                                    rev = ?5, dirty = 0, updated_at = ?6, deleted_at = NULL
-                              WHERE id = ?1",
-                            rusqlite::params![
-                                row.entity_id,
-                                remote.name,
-                                remote.parent_id,
-                                remote.position,
-                                remote.rev,
-                                remote.updated_at
-                            ],
-                        )?;
-                        mark_sent_tx(&tx, row.outbox_id)?;
-                        tx.commit()?;
-                        Ok::<_, AppError>(())
-                    })?;
+                    self.rebase_folder(&remote, row.outbox_id)?;
                     Ok(PushOutcome::Rebased)
                 }
             }
@@ -736,6 +759,19 @@ impl SyncService {
                 Ok(PushOutcome::Pushed)
             }
         }
+    }
+
+    /// The pushed folder lost to the server row: take the server's state,
+    /// through the same parent checks a pull uses (a parent this device does
+    /// not hold, or one that would close a cycle here, files it at the root).
+    fn rebase_folder(&self, remote: &RemoteFolder, outbox_id: i64) -> Result<(), AppError> {
+        self.db.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            mark_sent_tx(&tx, outbox_id)?;
+            tree::upsert_remote_folder(&tx, remote, false)?;
+            tx.commit()?;
+            Ok(())
+        })
     }
 
     // -- notes ----------------------------------------------------------
@@ -845,8 +881,10 @@ impl SyncService {
         }
     }
 
-    /// Both sides changed since `base_rev`. Disjoint fields merge; a
-    /// changed `doc_json` parks the remote copy and keeps local live (§5.1).
+    /// Both sides changed since `base_rev`. Fields merge independently: the
+    /// ones this device's unsent writes touched stay local, every other one
+    /// is taken from the server (`merge.rs`). Only a document both sides
+    /// changed parks the remote copy and keeps local live (§5.1).
     async fn push_note_conflicted(
         &self,
         client: &Client,
@@ -855,71 +893,48 @@ impl SyncService {
         remote: &RemoteNote,
     ) -> Result<PushOutcome, AppError> {
         let remote_tags = query_remote_note_tags(client, &row.entity_id).await?;
+        let touched = self
+            .db
+            .with_conn(|conn| merge::local_touches(conn, &row.entity_id, None))?;
+        let merged = merge::merge_note(local, remote, &remote_tags, touched);
 
-        if !docs_equal(&local.doc_json, &remote.doc_json) {
-            park_conflict(
-                &self.db,
-                &row.entity_id,
-                local.rev,
-                remote.rev,
-                &remote.doc_json,
-                &remote.title,
-            )?;
-            // Tag sets still union — the text conflict must not eat a tag
-            // the other device added (§5.3).
-            let union = union_sets(&local.tag_ids, &remote_tags);
-            self.db.with_conn(|conn| {
-                replace_local_tags(conn, &row.entity_id, &union)?;
-                Ok::<_, AppError>(())
-            })?;
-            let rev = update_remote_note(client, &row.entity_id, local).await?;
-            self.push_note_tags(client, &row.entity_id, &union, &remote_tags)
-                .await?;
-            self.accept_push("notes", &row.entity_id, rev, row.outbox_id)?;
-            return Ok(PushOutcome::ConflictParked);
-        }
-
-        // Disjoint metadata change: merge field-wise, LWW per field.
-        let folder_id =
-            if remote.folder_id != local.folder_id && local.updated_at < remote.updated_at {
-                remote.folder_id.clone()
-            } else {
-                local.folder_id.clone()
-            };
-        let is_pinned =
-            if remote.is_pinned != local.is_pinned && local.updated_at < remote.updated_at {
-                remote.is_pinned
-            } else {
-                local.is_pinned
-            };
-        let union = union_sets(&local.tag_ids, &remote_tags);
-        let merged = LocalNote {
-            folder_id,
-            is_pinned,
-            tag_ids: union.clone(),
-            ..local.clone()
-        };
-        let rev = update_remote_note(client, &row.entity_id, &merged).await?;
-        self.push_note_tags(client, &row.entity_id, &union, &remote_tags)
+        let rev = update_remote_note(client, &row.entity_id, &merged.note).await?;
+        self.push_note_tags(client, &row.entity_id, &merged.note.tag_ids, &remote_tags)
             .await?;
+
+        /* One transaction for the park, the merged fields and the
+        acknowledgement: a crash between them used to leave a parked conflict
+        with the tag union half-written. */
         self.db.with_conn(|conn| {
+            let newer = merge::local_touches(conn, &row.entity_id, Some(row.outbox_id))?;
             let tx = conn.transaction()?;
-            tx.execute(
-                "UPDATE notes SET folder_id = ?2, is_pinned = ?3, rev = ?4, dirty = 0, updated_at = ?5 WHERE id = ?1",
-                rusqlite::params![
-                    row.entity_id,
-                    merged.folder_id,
-                    i64::from(merged.is_pinned),
-                    rev,
-                    local.updated_at
-                ],
+            if merged.park {
+                park_conflict_in(
+                    &tx,
+                    &row.entity_id,
+                    local.rev,
+                    remote.rev,
+                    &remote.doc_json,
+                    &remote.title,
+                )?;
+            }
+            merge::write_merged(&tx, &row.entity_id, &merged, newer)?;
+            accept_push_tx(
+                &tx,
+                "notes",
+                &row.entity_id,
+                rev,
+                row.outbox_id,
+                merge::may_rebase(&merged, newer),
             )?;
-            replace_local_tags(&tx, &row.entity_id, &union)?;
-            mark_sent_tx(&tx, row.outbox_id)?;
             tx.commit()?;
             Ok::<_, AppError>(())
         })?;
-        Ok(PushOutcome::Pushed)
+        Ok(if merged.park {
+            PushOutcome::ConflictParked
+        } else {
+            PushOutcome::Pushed
+        })
     }
 
     async fn push_note_tags(
@@ -981,43 +996,9 @@ impl SyncService {
     }
 
     fn accept_push(&self, table: &str, id: &str, rev: i64, outbox_id: i64) -> Result<(), AppError> {
-        let now = crate::clock::now_ms();
         self.db.with_conn(|conn| {
             let tx = conn.transaction()?;
-            /* A row queued *after* the one just pushed is an edit made while the
-            push was on the wire: the entity stays dirty for it, and it is
-            rebased onto the rev just assigned, because it was made on top of
-            the state that rev now names. It used to be marked sent along
-            with the older rows (`id <> ?`) and the entity marked clean, so the
-            last keystrokes before a sync never reached the server. */
-            let newer: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL AND entity_id = ?1 AND id > ?2",
-                rusqlite::params![id, outbox_id],
-                |row| row.get(0),
-            )?;
-            tx.execute(
-                &format!("UPDATE {table} SET rev = ?2, dirty = ?3 WHERE id = ?1"),
-                rusqlite::params![id, rev, i64::from(newer > 0)],
-            )?;
-            tx.execute(
-                "UPDATE outbox SET base_rev = ?3
-                  WHERE sent_at IS NULL AND entity_id = ?1 AND id > ?2 AND base_rev < ?3",
-                rusqlite::params![id, outbox_id, rev],
-            )?;
-            if table == "notes" {
-                tx.execute(
-                    "UPDATE notes SET synced_at = ?2 WHERE id = ?1",
-                    rusqlite::params![id, now],
-                )?;
-            }
-            mark_sent_tx(&tx, outbox_id)?;
-            // An older queued row for the same entity is superseded by the
-            // state just pushed: acknowledge it so it never re-pushes stale
-            // content over the server.
-            tx.execute(
-                "UPDATE outbox SET sent_at = ?3 WHERE sent_at IS NULL AND entity_id = ?1 AND id < ?2",
-                rusqlite::params![id, outbox_id, now],
-            )?;
+            accept_push_tx(&tx, table, id, rev, outbox_id, true)?;
             tx.commit()?;
             Ok(())
         })
@@ -1038,36 +1019,39 @@ impl SyncService {
         Ok((pulled, deferred))
     }
 
+    /// Folders are pulled whole before any is applied, then applied
+    /// parent-first (`tree.rs`). Applied page by page in `rev` order, a child
+    /// whose parent had been renamed or moved later arrived first, failed the
+    /// foreign key and failed the cycle — every cycle, on a fresh device.
+    /// There is no page cap here: a folder tree is hundreds of rows (03 §8),
+    /// and a cap would split a parent from its child across cycles again.
     async fn pull_folders(&self, client: &Client) -> Result<i64, AppError> {
-        let mut pulled = 0;
-        for _ in 0..PULL_PAGES_PER_CYCLE {
-            let watermark = watermark(&self.db, KEY_FOLDERS_REV)?;
-            let rows: Vec<RemoteFolder> = client_query(
+        let watermark = watermark(&self.db, KEY_FOLDERS_REV)?;
+        let mut cursor = watermark;
+        let mut rows: Vec<RemoteFolder> = Vec::new();
+        loop {
+            let page: Vec<RemoteFolder> = client_query(
                 client,
                 "SELECT id::text AS id, name, parent_id::text AS parent_id, position, rev,
                         created_at, updated_at, deleted_at
                  FROM folders WHERE rev > $1 ORDER BY rev LIMIT $2",
-                &[&watermark as _, &PULL_LIMIT as _],
+                &[&cursor as _, &PULL_LIMIT as _],
             )
             .await?;
-            if rows.is_empty() {
-                break;
-            }
-            let mut max_rev = watermark;
-            for remote in &rows {
-                max_rev = max_rev.max(remote.rev);
-                if self
-                    .db
-                    .with_conn(|conn| apply_remote_folder(conn, remote))?
-                {
-                    pulled += 1;
-                }
-            }
-            set_watermark(&self.db, KEY_FOLDERS_REV, max_rev)?;
-            if rows.len() < PULL_LIMIT as usize {
+            let full = page.len() == PULL_LIMIT as usize;
+            cursor = page.iter().map(|row| row.rev).fold(cursor, i64::max);
+            rows.extend(page);
+            if !full {
                 break;
             }
         }
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let pulled = self
+            .db
+            .with_conn(|conn| tree::apply_remote_folders(conn, &rows))?;
+        set_watermark(&self.db, KEY_FOLDERS_REV, cursor)?;
         Ok(pulled)
     }
 
@@ -1105,6 +1089,11 @@ impl SyncService {
     /// watermark is held below it, so the row is re-fetched next cycle rather
     /// than skipped forever; re-applying the rows around it is idempotent
     /// (`remote.rev <= local.rev` is a no-op). Returns `(applied, deferred)`.
+    ///
+    /// Paging and the persisted watermark are separate (`PullCursor`): pages
+    /// advance past a deferred row, only the watermark is held. They used to
+    /// be one value, so a deferral held the next page's query at the same
+    /// place and the same 200 rows were fetched up to ten times a cycle.
     async fn pull_notes(
         &self,
         client: &Client,
@@ -1112,31 +1101,29 @@ impl SyncService {
     ) -> Result<(i64, i64), AppError> {
         let mut pulled = 0;
         let mut deferred = 0;
+        let mut cursor = PullCursor::new(watermark(&self.db, KEY_NOTES_REV)?);
         for _ in 0..PULL_PAGES_PER_CYCLE {
-            let watermark = watermark(&self.db, KEY_NOTES_REV)?;
             let rows: Vec<RemoteNote> = client_query(
                 client,
                 "SELECT id::text AS id, title, title_source, doc_json::text AS doc_json,
                         plain_text, excerpt, word_count, folder_id::text AS folder_id,
                         is_pinned, rev, created_at, updated_at, deleted_at
                  FROM notes WHERE rev > $1 ORDER BY rev LIMIT $2",
-                &[&watermark as _, &PULL_LIMIT as _],
+                &[&cursor.next_page_after() as _, &PULL_LIMIT as _],
             )
             .await?;
             if rows.is_empty() {
                 break;
             }
-            let mut max_seen = watermark;
-            let mut max_applied = watermark;
-            let mut min_skipped: Option<i64> = None;
+            // One query for the page's tag sets, not one per note.
+            let mut tag_sets = query_remote_tag_sets(client, &rows).await?;
             for remote in &rows {
-                max_seen = max_seen.max(remote.rev);
                 if note_pull_skipped(open_note_id, remote, &self.db)? {
-                    min_skipped = Some(min_skipped.map_or(remote.rev, |prev| prev.min(remote.rev)));
+                    cursor.defer(remote.rev);
                     deferred += 1;
                     continue;
                 }
-                let remote_tags = query_remote_note_tags(client, &remote.id).await?;
+                let remote_tags = tag_sets.remove(&remote.id).unwrap_or_default();
                 if self
                     .db
                     .with_conn(|conn| apply_remote_note(conn, remote, &remote_tags))?
@@ -1144,21 +1131,55 @@ impl SyncService {
                 {
                     pulled += 1;
                 }
-                max_applied = max_applied.max(remote.rev);
+                cursor.seen(remote.rev);
             }
-            // A skipped row must be re-fetched: hold the watermark below the
-            // lowest skip. Rows applied past it are re-fetched too, harmlessly —
-            // applying an already-seen rev is a no-op.
-            let next = match min_skipped {
-                Some(skipped) => max_applied.min(skipped - 1).max(watermark),
-                None => max_seen,
-            };
-            set_watermark(&self.db, KEY_NOTES_REV, next)?;
+            set_watermark(&self.db, KEY_NOTES_REV, cursor.watermark())?;
             if rows.len() < PULL_LIMIT as usize {
                 break;
             }
         }
         Ok((pulled, deferred))
+    }
+}
+
+/// Where the next notes page starts and what watermark to persist. A
+/// deferred row moves the page past it but holds the persisted watermark
+/// just below it, so the next *cycle* re-fetches it — the next *page* must
+/// not, or it re-reads the same rows.
+#[derive(Debug, Clone, Copy)]
+struct PullCursor {
+    start: i64,
+    max_seen: i64,
+    min_deferred: Option<i64>,
+}
+
+impl PullCursor {
+    fn new(watermark: i64) -> Self {
+        Self {
+            start: watermark,
+            max_seen: watermark,
+            min_deferred: None,
+        }
+    }
+
+    fn seen(&mut self, rev: i64) {
+        self.max_seen = self.max_seen.max(rev);
+    }
+
+    fn defer(&mut self, rev: i64) {
+        self.seen(rev);
+        self.min_deferred = Some(self.min_deferred.map_or(rev, |prev| prev.min(rev)));
+    }
+
+    fn next_page_after(&self) -> i64 {
+        self.max_seen
+    }
+
+    fn watermark(&self) -> i64 {
+        match self.min_deferred {
+            Some(deferred) => (deferred - 1).max(self.start),
+            None => self.max_seen,
+        }
     }
 }
 
@@ -1173,6 +1194,23 @@ fn network(detail: impl std::fmt::Display) -> AppError {
 /// without them is undebuggable (this exact gap once hid a CHECK violation
 /// behind a bare "db error" for an hour), so server errors always travel
 /// with their chain.
+///
+/// Only a failure to talk to the server is `NETWORK`: that code means "defer,
+/// retry with backoff" (`10-conventions.md` §6), and the status line reads it
+/// as "could not reach the sync server". A server that answered and said no
+/// is something else, and calling it a network fault had the app waiting for
+/// a connection that was never the problem:
+///
+/// - credentials, a missing database, or a schema that was never applied
+///   (SQLSTATE classes 28 and 3D, and 42P01/42703 — `postgres/schema.sql`
+///   not run) are `VALIDATION`: the connection string needs the user, and
+///   no amount of retrying fixes it;
+/// - any other server rejection (a constraint, bad data) is `INTERNAL`: a
+///   bug in what was sent, kept in `details` and on the row.
+///
+/// Rows still keep their place and back off whatever the code (§8: a
+/// permanently failing row is never discarded); the code is what the user is
+/// told and what the frontend does about it.
 fn pg_error(err: tokio_postgres::Error) -> AppError {
     let mut detail = err.to_string();
     let mut cause = std::error::Error::source(&err);
@@ -1181,7 +1219,26 @@ fn pg_error(err: tokio_postgres::Error) -> AppError {
         detail.push_str(&next.to_string());
         cause = next.source();
     }
-    network(detail)
+    let Some(db) = err.as_db_error() else {
+        return network(detail);
+    };
+    classify_sqlstate(db.code().code(), detail)
+}
+
+fn classify_sqlstate(sqlstate: &str, detail: String) -> AppError {
+    let class = sqlstate.get(..2).unwrap_or("");
+    if class == "28" || class == "3D" || sqlstate == "42P01" || sqlstate == "42703" {
+        AppError::Validation(format!(
+            "The sync server refused the connection string or has no Chayote schema — check it under Settings → Sync ({detail})."
+        ))
+    } else if class == "08" || class == "53" || class == "57" {
+        // Connection exceptions, insufficient resources, operator
+        // intervention (shutdown, cancel): the server is there but not
+        // usable right now — a retry is the right answer.
+        network(detail)
+    } else {
+        AppError::internal(format!("The sync server rejected a write: {detail}"))
+    }
 }
 
 async fn connect(conn_str: &str) -> Result<Client, AppError> {
@@ -1204,7 +1261,7 @@ async fn connect(conn_str: &str) -> Result<Client, AppError> {
             let (client, connection) =
                 tokio_postgres::connect(owned.as_str(), tokio_postgres::NoTls)
                     .await
-                    .map_err(network)?;
+                    .map_err(pg_error)?;
             tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -1584,6 +1641,59 @@ fn ensure_outbox(
     Ok(())
 }
 
+/// Echoes the server rev onto the row and acknowledges the pushed outbox row
+/// and everything older for the entity.
+///
+/// A row queued *after* the one just pushed is an edit made while the push
+/// was on the wire: the entity stays dirty for it, and — when `rebase` — it
+/// is rebased onto the rev just assigned, because it was made on top of the
+/// state that rev now names. It used to be marked sent along with the older
+/// rows and the entity marked clean, so the last keystrokes before a sync
+/// never reached the server. `rebase` is false when the push adopted a field
+/// from the server that the newer row also touched: left on its old base,
+/// that row returns as a conflict and merges, instead of overwriting the
+/// other device's value as a plain update.
+fn accept_push_tx(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    id: &str,
+    rev: i64,
+    outbox_id: i64,
+    rebase: bool,
+) -> Result<(), AppError> {
+    let now = crate::clock::now_ms();
+    let newer: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL AND entity_id = ?1 AND id > ?2",
+        rusqlite::params![id, outbox_id],
+        |row| row.get(0),
+    )?;
+    tx.execute(
+        &format!("UPDATE {table} SET rev = ?2, dirty = ?3 WHERE id = ?1"),
+        rusqlite::params![id, rev, i64::from(newer > 0)],
+    )?;
+    if rebase {
+        tx.execute(
+            "UPDATE outbox SET base_rev = ?3
+              WHERE sent_at IS NULL AND entity_id = ?1 AND id > ?2 AND base_rev < ?3",
+            rusqlite::params![id, outbox_id, rev],
+        )?;
+    }
+    if table == "notes" {
+        tx.execute(
+            "UPDATE notes SET synced_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, now],
+        )?;
+    }
+    mark_sent_tx(tx, outbox_id)?;
+    // An older queued row for the same entity is superseded by the state
+    // just pushed: acknowledge it so it never re-pushes stale content.
+    tx.execute(
+        "UPDATE outbox SET sent_at = ?3 WHERE sent_at IS NULL AND entity_id = ?1 AND id < ?2",
+        rusqlite::params![id, outbox_id, now],
+    )?;
+    Ok(())
+}
+
 fn mark_sent_tx(tx: &rusqlite::Transaction<'_>, outbox_id: i64) -> Result<(), rusqlite::Error> {
     tx.execute(
         "UPDATE outbox SET sent_at = ?2 WHERE id = ?1",
@@ -1739,6 +1849,25 @@ async fn query_remote_tag(client: &Client, id: &str) -> Result<Option<RemoteTag>
     Ok(rows.into_iter().next())
 }
 
+/// The live server tag, other than `id`, whose name matches `name` ignoring
+/// case — what the server's `idx_tags_name_live` on `lower(name)` arbitrates.
+async fn query_live_tag_named(
+    client: &Client,
+    name: &str,
+    id: uuid::Uuid,
+) -> Result<Option<RemoteTag>, AppError> {
+    let rows: Vec<RemoteTag> = client_query(
+        client,
+        "SELECT id::text AS id, name, rev, created_at, updated_at, deleted_at
+         FROM tags
+         WHERE lower(name) = lower($1) AND deleted_at IS NULL AND id <> $2::uuid
+         LIMIT 1",
+        &[&name as _, &id as _],
+    )
+    .await?;
+    Ok(rows.into_iter().next())
+}
+
 #[derive(Debug, Clone)]
 struct LocalFolder {
     name: String,
@@ -1808,6 +1937,36 @@ async fn query_remote_folder(client: &Client, id: &str) -> Result<Option<RemoteF
     )
     .await?;
     Ok(rows.into_iter().next())
+}
+
+/// Whether filing `id` under `parent` would close a cycle on the server: is
+/// `id` among `parent`'s ancestors there? `UNION`, not `UNION ALL`, so a cycle
+/// already on the server (written before this check existed) ends the walk
+/// instead of recursing for ever.
+async fn server_would_cycle(
+    client: &Client,
+    id: uuid::Uuid,
+    parent: Option<uuid::Uuid>,
+) -> Result<bool, AppError> {
+    let Some(parent) = parent else {
+        return Ok(false);
+    };
+    let row = tokio::time::timeout(
+        QUERY_TIMEOUT,
+        client.query_one(
+            "WITH RECURSIVE up(id, parent_id) AS (
+                 SELECT id, parent_id FROM folders WHERE id = $2::uuid
+               UNION
+                 SELECT f.id, f.parent_id FROM folders f JOIN up ON f.id = up.parent_id
+             )
+             SELECT EXISTS (SELECT 1 FROM up WHERE id = $1::uuid)",
+            &[&id as _, &parent as _],
+        ),
+    )
+    .await
+    .map_err(|_| network(query_timeout()))?
+    .map_err(pg_error)?;
+    row.try_get(0).map_err(network)
 }
 
 #[derive(Debug, Clone)]
@@ -1931,6 +2090,36 @@ async fn query_remote_note_tags(client: &Client, note_id: &str) -> Result<Vec<St
         .collect()
 }
 
+/// Tag sets for a page of pulled notes, keyed by note id, in one round trip.
+/// A note with no tags has no entry.
+async fn query_remote_tag_sets(
+    client: &Client,
+    notes: &[RemoteNote],
+) -> Result<std::collections::HashMap<String, Vec<String>>, AppError> {
+    let ids: Vec<uuid::Uuid> = notes
+        .iter()
+        .map(|note| uid(&note.id))
+        .collect::<Result<_, _>>()?;
+    let rows = tokio::time::timeout(
+        QUERY_TIMEOUT,
+        client.query(
+            "SELECT note_id::text, tag_id::text FROM note_tags
+              WHERE note_id = ANY($1::uuid[]) ORDER BY note_id, tag_id",
+            &[&ids as _],
+        ),
+    )
+    .await
+    .map_err(|_| network(query_timeout()))?
+    .map_err(pg_error)?;
+    let mut sets: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for row in &rows {
+        let note: String = row.try_get(0).map_err(network)?;
+        let tag: String = row.try_get(1).map_err(network)?;
+        sets.entry(note).or_default().push(tag);
+    }
+    Ok(sets)
+}
+
 async fn insert_remote_note(client: &Client, id: &str, local: &LocalNote) -> Result<i64, AppError> {
     let id = uid(id)?;
     let folder = uid_opt(local.folder_id.as_deref())?;
@@ -2044,73 +2233,6 @@ fn note_pull_skipped(
     }
 }
 
-fn apply_remote_folder(
-    conn: &mut rusqlite::Connection,
-    remote: &RemoteFolder,
-) -> Result<bool, AppError> {
-    // True when the local store visibly changed. A dirty local row is never
-    // touched here: the push phase already arbitrated it, and marking it
-    // clean would drop the queued write.
-    let tx = conn.transaction()?;
-    let local: Option<(i64, i64)> = tx
-        .query_row(
-            "SELECT rev, dirty FROM folders WHERE id = ?1",
-            [&remote.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .ok();
-    match local {
-        None => {
-            if remote.deleted_at.is_some() {
-                return Ok(false);
-            }
-            tx.execute(
-                "INSERT INTO folders (id, name, parent_id, position, rev, dirty, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)",
-                rusqlite::params![
-                    remote.id,
-                    remote.name,
-                    remote.parent_id,
-                    remote.position,
-                    remote.rev,
-                    remote.created_at,
-                    remote.updated_at
-                ],
-            )?;
-            tx.commit()?;
-            Ok(true)
-        }
-        Some((local_rev, dirty)) => {
-            if remote.rev <= local_rev || dirty != 0 {
-                return Ok(false);
-            }
-            if remote.deleted_at.is_some() {
-                tx.execute("DELETE FROM folders WHERE id = ?1", [&remote.id])?;
-                tx.execute(
-                    "UPDATE notes SET folder_id = NULL WHERE folder_id = ?1",
-                    [&remote.id],
-                )?;
-            } else {
-                tx.execute(
-                    "UPDATE folders SET name = ?2, parent_id = ?3, position = ?4, rev = ?5,
-                                        dirty = 0, updated_at = ?6, deleted_at = NULL
-                     WHERE id = ?1",
-                    rusqlite::params![
-                        remote.id,
-                        remote.name,
-                        remote.parent_id,
-                        remote.position,
-                        remote.rev,
-                        remote.updated_at
-                    ],
-                )?;
-            }
-            tx.commit()?;
-            Ok(true)
-        }
-    }
-}
-
 fn apply_remote_tag(conn: &mut rusqlite::Connection, remote: &RemoteTag) -> Result<bool, AppError> {
     let tx = conn.transaction()?;
     let local: Option<(i64, i64)> = tx
@@ -2120,6 +2242,20 @@ fn apply_remote_tag(conn: &mut rusqlite::Connection, remote: &RemoteTag) -> Resu
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .ok();
+    /* A live local tag with the same name in another case, under another id:
+    the server's tag wins and absorbs it (`tag_merge.rs`). Inserting or
+    renaming over it failed the unique index and aborted every pull. */
+    let skip = match local {
+        None => remote.deleted_at.is_some(),
+        Some((local_rev, dirty)) => remote.rev <= local_rev || dirty != 0,
+    };
+    if !skip && remote.deleted_at.is_none() {
+        if let Some(loser) = tag_merge::local_clash(&tx, &remote.id, &remote.name)? {
+            tag_merge::merge_tag_into(&tx, &loser, remote, false)?;
+            tx.commit()?;
+            return Ok(true);
+        }
+    }
     match local {
         None => {
             if remote.deleted_at.is_some() {
@@ -2224,23 +2360,39 @@ fn apply_remote_note(
                 |row| row.get(0),
             )?;
             if dirty != 0 {
-                // Both sides changed: park the remote document, keep local
-                // live. The next push converges the server onto local; the
-                // user restores remote explicitly if that was wrong (§5.1).
-                if !docs_equal(&local.doc_json, &remote.doc_json) && remote.deleted_at.is_none() {
+                // A remote tombstone against a local edit is the push's to
+                // arbitrate (delete wins, §5.2); nothing to show meanwhile.
+                if remote.deleted_at.is_some() {
+                    return Ok(ApplyOutcome::Unchanged);
+                }
+                /* Both sides changed. The same field-wise merge the push runs:
+                fields this device did not touch take the server's values now,
+                and only a document both sides changed parks (§5.1). `rev` and
+                `dirty` stay as they are, so the push still sees a conflict
+                and converges the server onto the merge. The park, the fields
+                and the tag set go in one transaction — they used to be three
+                autocommits, so a crash between them parked a conflict whose
+                tag union was never written. */
+                let touched = merge::local_touches(conn, &remote.id, None)?;
+                let merged = merge::merge_note(&local, remote, remote_tags, touched);
+                let tx = conn.transaction()?;
+                if merged.park {
                     park_conflict_in(
-                        conn,
+                        &tx,
                         &remote.id,
                         local.rev,
                         remote.rev,
                         &remote.doc_json,
                         &remote.title,
                     )?;
-                    let union = union_sets(&local.tag_ids, remote_tags);
-                    replace_local_tags(conn, &remote.id, &union)?;
-                    return Ok(ApplyOutcome::Conflicted);
                 }
-                return Ok(ApplyOutcome::Unchanged);
+                merge::write_merged(&tx, &remote.id, &merged, merge::Touched::default())?;
+                tx.commit()?;
+                return Ok(if merged.park {
+                    ApplyOutcome::Conflicted
+                } else {
+                    ApplyOutcome::Applied
+                });
             }
             let tx = conn.transaction()?;
             if remote.deleted_at.is_some() {
@@ -2279,6 +2431,7 @@ fn apply_remote_note(
     }
 }
 
+#[cfg(test)]
 fn park_conflict(
     db: &Database,
     note_id: &str,
@@ -2751,6 +2904,51 @@ mod tests {
         assert_eq!(status.pending_count, 1);
     }
 
+    /// A server that answered and refused is not a network fault: bad
+    /// credentials or a missing schema need the user, a rejected write is a
+    /// bug. Only the server being unreachable or unavailable is `NETWORK`.
+    #[test]
+    fn postgres_errors_are_classified_by_sqlstate() {
+        let code = |state: &str| classify_sqlstate(state, "detail".into()).code();
+        assert_eq!(code("28P01"), "VALIDATION", "bad password");
+        assert_eq!(code("3D000"), "VALIDATION", "no such database");
+        assert_eq!(code("42P01"), "VALIDATION", "schema.sql never applied");
+        assert_eq!(code("23505"), "INTERNAL", "unique violation");
+        assert_eq!(code("23503"), "INTERNAL", "foreign key violation");
+        assert_eq!(code("57P01"), "NETWORK", "server shutting down");
+        assert_eq!(code("08006"), "NETWORK", "connection failure");
+        assert_eq!(code("53300"), "NETWORK", "too many connections");
+    }
+
+    /// A deferral moves the next page past the deferred row but holds the
+    /// persisted watermark below it. It used to hold both, so the next page
+    /// re-read the same rows up to ten times a cycle.
+    #[test]
+    fn a_deferred_row_holds_the_watermark_but_not_the_page() {
+        let mut cursor = PullCursor::new(100);
+        cursor.seen(101);
+        cursor.defer(102);
+        cursor.seen(300);
+        assert_eq!(
+            cursor.next_page_after(),
+            300,
+            "the next page starts past it"
+        );
+        assert_eq!(cursor.watermark(), 101, "the next cycle re-fetches it");
+        cursor.seen(500);
+        cursor.defer(450);
+        assert_eq!(cursor.watermark(), 101, "the lowest deferral holds");
+
+        let mut quiet = PullCursor::new(7);
+        assert_eq!(quiet.watermark(), 7);
+        quiet.seen(42);
+        assert_eq!(quiet.watermark(), 42);
+
+        let mut first = PullCursor::new(7);
+        first.defer(8);
+        assert_eq!(first.watermark(), 7, "never below where it started");
+    }
+
     /// An edit queued while a push was on the wire survives the push's
     /// acknowledgement: it stays unsent, rebased onto the new rev, and the
     /// note stays dirty. It used to be marked sent with the older rows.
@@ -3201,8 +3399,12 @@ mod tests {
     /// Exercises what one device cannot: a clean pull onto an empty device,
     /// a both-sides-changed document (parked on the second pusher, applied
     /// on the first), a tag-set union across devices, and folder LWW.
+    /// Both two-device tests truncate the same database; they take turns.
+    static LIVE_2DEV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[tokio::test]
     async fn live_two_devices_share_tag_union_and_lww() {
+        let _turn = LIVE_2DEV.lock().await;
         let url = match std::env::var("CHAYOTE_SYNC_2DEV_URL") {
             Ok(url) => url,
             Err(_) => {
@@ -3433,6 +3635,196 @@ mod tests {
             0,
             "B drains clean (the parked conflict lives in the conflicts table, not the outbox)"
         );
+
+        std::fs::remove_dir_all(&dir_a).ok();
+        std::fs::remove_dir_all(&dir_b).ok();
+    }
+
+    /// The cross-device defects only two devices can show, against a real
+    /// server (`CHAYOTE_SYNC_2DEV_URL`, skipped without it): a child folder
+    /// pulled before its parent, a tag created as "work" and "Work", a pin
+    /// racing a text edit, and two moves that would close a folder cycle.
+    #[tokio::test]
+    async fn live_two_devices_merge_disjoint_changes_tags_and_trees() {
+        let _turn = LIVE_2DEV.lock().await;
+        let url = match std::env::var("CHAYOTE_SYNC_2DEV_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping two-device merge test: CHAYOTE_SYNC_2DEV_URL unset");
+                return;
+            }
+        };
+        let device = |tag: &str| {
+            let dir = std::env::temp_dir().join(format!(
+                "chayote-sync-merge-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::remove_dir_all(&dir).ok();
+            std::fs::create_dir_all(&dir).expect("temp dir");
+            let db = Arc::new(Database::open(&dir).expect("database opens"));
+            let sync = SyncService::new(Arc::clone(&db));
+            (dir, db, sync)
+        };
+        let (dir_a, db_a, sync_a) = device("a");
+        let (dir_b, db_b, sync_b) = device("b");
+
+        let client = connect(&url).await.expect("connects to test Postgres");
+        client
+            .batch_execute(include_str!("../../../postgres/schema.sql"))
+            .await
+            .expect("server schema applies");
+        client
+            .execute(
+                "TRUNCATE note_tags, notes, tags, folders RESTART IDENTITY",
+                &[],
+            )
+            .await
+            .expect("server starts empty");
+        sync_a.set_config(&url, true).expect("A config saves");
+        sync_b.set_config(&url, true).expect("B config saves");
+
+        let folders_a = crate::repo::folders::SqliteFoldersRepo::new(Arc::clone(&db_a));
+        let folders_b = crate::repo::folders::SqliteFoldersRepo::new(Arc::clone(&db_b));
+        let tags_a = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db_a));
+        let tags_b = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db_b));
+        let notes_a = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db_a));
+        let notes_b = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db_b));
+        let text = |words: &str| {
+            serde_json::json!({
+                "type": "doc",
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": words}]}]
+            })
+        };
+
+        // 1. A child whose parent was renamed later has the lower rev. A fresh
+        //    device pulls it first; it must still land under its parent.
+        let parent = folders_a.create("Parent", None).expect("creates");
+        let child = folders_a
+            .create("Child", Some(&parent.id))
+            .expect("creates");
+        let other = folders_a.create("Other", None).expect("creates");
+        sync_a.run_cycle(None).await.expect("A pushes the tree");
+        folders_a
+            .rename(&parent.id, "Parent renamed")
+            .expect("renames");
+        sync_a.run_cycle(None).await.expect("A pushes the rename");
+        let first_b = sync_b
+            .run_cycle(None)
+            .await
+            .expect("B pulls the tree in one cycle");
+        assert!(first_b.pulled >= 3, "B lands every folder: {first_b:?}");
+        let tree_b = folders_b.list().expect("lists");
+        let parent_b = tree_b
+            .iter()
+            .find(|node| node.id == parent.id)
+            .expect("the parent is a root");
+        assert_eq!(
+            parent_b.children.len(),
+            1,
+            "the child is under it: {tree_b:?}"
+        );
+        assert_eq!(parent_b.children[0].id, child.id);
+
+        // 2. "work" on A, "Work" on B: the server's tag wins and B folds into it.
+        let work_a = tags_a.create("work").expect("creates");
+        sync_a.run_cycle(None).await.expect("A pushes its tag");
+        let work_b = tags_b.create("Work").expect("creates");
+        let tagged = notes_b.create(None).expect("creates").summary.id;
+        notes_b
+            .save(&crate::repo::SaveNoteInput {
+                id: tagged.clone(),
+                doc: text("tagged on B"),
+                folder_id: None,
+                tag_ids: vec![work_b.id.clone()],
+                is_pinned: false,
+            })
+            .expect("tags the note");
+        sync_b
+            .run_cycle(None)
+            .await
+            .expect("B's push meets the clash");
+        sync_b.run_cycle(None).await.expect("B settles");
+        let listed = tags_b.list().expect("lists");
+        assert_eq!(listed.len(), 1, "one tag left on B: {listed:?}");
+        assert_eq!(listed[0].id, work_a.id, "the server's tag stands");
+        assert_eq!(listed[0].count, 1, "B's note carries it");
+        let status_b = sync_b.status().expect("status");
+        assert_eq!(status_b.pending_count, 0, "B drains: {status_b:?}");
+        assert!(status_b.last_error.is_none(), "{status_b:?}");
+        sync_a.run_cycle(None).await.expect("A pulls B's note");
+        let on_a = notes_a.get(&tagged).expect("A has the note");
+        assert_eq!(on_a.summary.tags.len(), 1);
+        assert_eq!(on_a.summary.tags[0].id, work_a.id);
+
+        // 3. A pins the note while B edits its text: disjoint, so no conflict,
+        //    and neither change is lost on either device.
+        sync_b.run_cycle(None).await.expect("B is current");
+        notes_a.set_pinned(&tagged, true).expect("A pins");
+        notes_b
+            .save(&crate::repo::SaveNoteInput {
+                id: tagged.clone(),
+                doc: text("edited on B"),
+                folder_id: None,
+                tag_ids: vec![work_a.id.clone()],
+                is_pinned: false,
+            })
+            .expect("B edits");
+        sync_b
+            .run_cycle(None)
+            .await
+            .expect("B pushes the text first");
+        let a_round = sync_a.run_cycle(None).await.expect("A pushes the pin");
+        assert_eq!(
+            a_round.conflicts, 0,
+            "a pin is not a text conflict: {a_round:?}"
+        );
+        let on_a = notes_a.get(&tagged).expect("reads");
+        assert!(
+            on_a.summary.excerpt.contains("edited on B"),
+            "A takes B's text: {:?}",
+            on_a.summary.excerpt
+        );
+        assert!(on_a.summary.is_pinned, "A keeps its pin");
+        let b_round = sync_b.run_cycle(None).await.expect("B pulls the pin");
+        assert_eq!(b_round.conflicts, 0);
+        let on_b = notes_b.get(&tagged).expect("reads");
+        assert!(on_b.summary.is_pinned && on_b.summary.excerpt.contains("edited on B"));
+
+        // 4. A files Other under Parent while B files Parent under Other. A
+        //    pushes first and wins; B's move would close a cycle and rebases.
+        folders_a
+            .move_to(&other.id, Some(&parent.id), 0)
+            .expect("A moves Other under Parent");
+        folders_b
+            .move_to(&parent.id, Some(&other.id), 0)
+            .expect("B moves Parent under Other");
+        sync_a.run_cycle(None).await.expect("A pushes its move");
+        sync_b.run_cycle(None).await.expect("B's move loses");
+        sync_a.run_cycle(None).await.expect("A settles");
+        let parent_uuid = uuid::Uuid::parse_str(&parent.id).expect("uuid");
+        let server_parent: Option<String> = client
+            .query_one(
+                "SELECT parent_id::text FROM folders WHERE id = $1::uuid",
+                &[&parent_uuid],
+            )
+            .await
+            .expect("reads")
+            .get(0);
+        assert_eq!(server_parent, None, "the server holds no cycle");
+        for (who, repo) in [("A", &folders_a), ("B", &folders_b)] {
+            let tree = repo.list().expect("lists");
+            let root = tree
+                .iter()
+                .find(|node| node.id == parent.id)
+                .unwrap_or_else(|| panic!("{who}: Parent is a root: {tree:?}"));
+            assert!(
+                root.children.iter().any(|node| node.id == other.id),
+                "{who}: Other is under Parent: {tree:?}"
+            );
+            // A walk of the subtree terminates.
+            assert!(repo.move_to(&child.id, Some(&parent.id), 0).is_ok());
+        }
 
         std::fs::remove_dir_all(&dir_a).ok();
         std::fs::remove_dir_all(&dir_b).ok();

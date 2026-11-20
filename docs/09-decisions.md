@@ -1,6 +1,6 @@
 # 09 — Architecture Decision Log
 
-**Status:** Active. Last updated 2026-10-07.
+**Status:** Active. Last updated 2026-11-21.
 
 Format: context → decision → alternatives rejected with reasons → consequences. An ADR is superseded by a new entry, never edited in place, except to correct a factual error.
 
@@ -33,8 +33,64 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 023 | The note title is a field of its own; the editor's leading line is not it | Amended by ADR-026 |
 | 024 | Releases are GitHub Releases, and the app updates itself on desktop only | Superseded in part by ADR-025 |
 | 025 | Android keeps the Tauri updater's check and download, and supplies its own install | Accepted |
+| 026 | The title is only what was typed in the title field | Accepted |
+| 027 | Sync merges the fields each device touched; the server's copy wins a tag-name or folder-cycle clash | Accepted |
 
 ---
+
+## ADR-027 - Sync merges the fields each device touched; the server's copy wins a tag-name or folder-cycle clash
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Amends:** `07-sync-plan.md` §5.1–§5.2
+
+**Context.** An audit of the sync engine found three places where §5 was
+either not implemented or not specified, each of which a second device could
+reach in ordinary use:
+
+- §5.1 says disjoint fields merge, but the push could not tell which fields a
+  device had changed: `dirty` and `updated_at` are per row. A pin or a move
+  racing a text edit elsewhere parked a conflict and pushed the stale local
+  document over the server.
+- Tag names are unique ignoring case on each device and on the server, but
+  nothing arbitrated two devices that created `work` and `Work`. The second
+  device's push hit the server's unique index for ever, and its pull failed on
+  the local index every cycle — no notes pulled at all.
+- §5.2 made a folder move LWW on `parent_id`, which lets two moves hand the
+  server both halves of a cycle. A local cycle hung every subtree walk.
+
+**Decision.**
+
+1. *Fields this device touched are read from its unsent outbox rows*, whose
+   payloads already name what each write wrote. Those fields stay local; every
+   other field, the document included, is taken from the server. A row with no
+   readable payload claims every field. Only a document both sides changed parks.
+2. *The tag already on the server wins a case clash.* The local tag folds into
+   it: links move, the affected notes are queued with a tags-only change, the
+   local tag is dropped and tombstoned if the server held it.
+3. *The first push wins a cycle.* The push checks the server's ancestors of the
+   new parent and rebases instead of writing a cycle; the pull files a folder
+   that would close one at the root and queues it back to heal the server.
+
+Both clash policies were chosen by the user on 2026-11-21.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Per-field LWW on the row's `updated_at` | A row is newer because *something* changed. A remote text edit made every metadata field look newer there, so a local pin lost to a value nobody set. |
+| Store a base snapshot per note to diff against | Exact, but a new table and a write on every save; the outbox already records intent. |
+| Oldest `created_at` wins a tag clash (closest to "first-created spelling") | Depends on device clocks, and needs the server's row renamed or deleted from under every other device that already uses it. The server's row is the one every device can see. |
+| Both folders go to the root on a cycle | Simpler, but drops both users' moves where keeping the first loses neither silently. |
+
+**Consequences.**
+
+- `07-sync-plan.md` §5.1, §5.2 and §8, and `03-data-model.md` §3.4 changed with it.
+- Migration `0007_tags_live_unique.sql` drops the table-level `UNIQUE` on
+  `tags.name` that contradicted §3.4; live names stay unique through the partial index.
+- A field both devices changed goes to the device that pushes it last. Without a
+  base snapshot the engine cannot tell that the other device changed it too.
+- Postgres errors are no longer all `NETWORK`: only an unreachable or unavailable
+  server is. Bad credentials or a missing schema are `VALIDATION`; any other
+  rejection is `INTERNAL`.
 
 ## ADR-026 - The title is only what was typed in the title field
 
