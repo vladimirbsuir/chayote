@@ -36,15 +36,18 @@ type Options = {
 };
 
 export function useTrashActions({ onOpenNoteGone, onRestored }: Options): {
-  softDelete: (id: Uuid) => void;
+  softDelete: (id: Uuid) => Promise<void>;
   restore: (id: Uuid) => Promise<void>;
   destroy: (id: Uuid) => Promise<void>;
   emptyTrash: () => Promise<number>;
 } {
   const queryClient = useQueryClient();
 
+  /* Search results too: a note trashed from them stayed in them, under a toast
+     saying it was gone. */
   const refresh = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['notes'] });
+    void queryClient.invalidateQueries({ queryKey: ['search'] });
   };
 
   const softDelete = useMutation({
@@ -80,8 +83,8 @@ export function useTrashActions({ onOpenNoteGone, onRestored }: Options): {
   });
 
   return {
-    softDelete: (id) => {
-      softDelete.mutate(id);
+    softDelete: async (id) => {
+      await softDelete.mutateAsync(id);
     },
     restore: async (id) => {
       await restore.mutateAsync(id);
