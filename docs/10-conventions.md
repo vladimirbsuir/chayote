@@ -131,7 +131,10 @@ chayote/
     │   ├── 0001_initial.sql
     │   ├── 0002_fts.sql
     │   ├── 0003_outbox.sql
-    │   └── 0004_sync.sql
+    │   ├── 0004_sync.sql
+    │   ├── 0005_sync_backoff.sql
+    │   ├── 0006_note_title_field.sql
+    │   └── 0007_tags_live_unique.sql
     └── src/
         ├── main.rs
         ├── lib.rs
@@ -158,8 +161,11 @@ chayote/
         │   ├── tags.rs
         │   └── search.rs
         ├── tests.rs                   # integration tests over a temp database
-        └── sync/                      # reserved for 07-sync-plan.md; created when the
-                                        # sync phase starts, absent in v1
+        └── sync/                      # 07-sync-plan.md
+            ├── mod.rs                 # push/pull cycle, connection, row shapes
+            ├── merge.rs               # field-wise note merge from outbox payloads
+            ├── tag_merge.rs           # case clash: the server's tag absorbs the local one
+            └── tree.rs                # parent-first, cycle-safe folder apply
 ```
 
 `services/` holds derivation and search rather than per-entity modules: the

@@ -1,0 +1,496 @@
+//! Field-wise note merge (`07-sync-plan.md` §5.1).
+//!
+//! A conflict is "both sides changed since `base_rev`", but that alone does
+//! not say *which fields* this device changed. The outbox does: every local
+//! write appends a row whose payload names what it wrote (`notes_save` the
+//! document, filing and tags; `notes_set_pinned` the pin; `notes_move` the
+//! filing; `notes_set_title` the title). Reading the unsent rows tells the
+//! merge which fields are this device's to defend, and every other field is
+//! simply taken from the server.
+//!
+//! Without this, a pin or a move on one device racing a text edit on another
+//! parked a conflict and pushed the stale local document over the server —
+//! the local copy of a document this device never touched. Disjoint fields
+//! are supposed to merge (§5.1), and now they do.
+
+use super::{docs_equal, union_sets, LocalNote, RemoteNote};
+use crate::error::AppError;
+
+/// Which fields of a note this device's unsent writes touched. A row whose
+/// payload cannot be read (none at all: a restore, a re-upload, a resolved
+/// conflict, the title migration) touches everything — claiming a field is
+/// the safe direction, because the worst it can do is park a conflict.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Touched {
+    pub doc: bool,
+    pub folder: bool,
+    pub pinned: bool,
+    pub title: bool,
+    pub tags: bool,
+}
+
+impl Touched {
+    const ALL: Self = Self {
+        doc: true,
+        folder: true,
+        pinned: true,
+        title: true,
+        tags: true,
+    };
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            doc: self.doc || other.doc,
+            folder: self.folder || other.folder,
+            pinned: self.pinned || other.pinned,
+            title: self.title || other.title,
+            tags: self.tags || other.tags,
+        }
+    }
+
+    fn intersects(self, other: Self) -> bool {
+        (self.doc && other.doc)
+            || (self.folder && other.folder)
+            || (self.pinned && other.pinned)
+            || (self.title && other.title)
+            || (self.tags && other.tags)
+    }
+
+    /// What one outbox row's payload says it wrote.
+    fn of_payload(op: &str, payload: Option<&str>) -> Self {
+        if op != "upsert" {
+            return Self::ALL;
+        }
+        let Some(value) =
+            payload.and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        else {
+            return Self::ALL;
+        };
+        let Some(object) = value.as_object() else {
+            return Self::ALL;
+        };
+        let mut touched = Self::default();
+        let mut known = false;
+        if object.contains_key("tagIds") {
+            // `notes_save`: the document, its filing and its tag set.
+            touched.doc = true;
+            touched.folder = true;
+            touched.tags = true;
+            known = true;
+        }
+        if object.contains_key(TAGS_ONLY_KEY) {
+            touched.tags = true;
+            known = true;
+        }
+        if object.contains_key("folderId") {
+            touched.folder = true;
+            known = true;
+        }
+        if object.contains_key("isPinned") {
+            touched.pinned = true;
+            known = true;
+        }
+        if object.contains_key("title") {
+            touched.title = true;
+            known = true;
+        }
+        if known {
+            touched
+        } else {
+            Self::ALL
+        }
+    }
+}
+
+/// Payload key for a note row the sync engine queues itself after relinking
+/// the note's tags (a cross-device tag merge). It touches the tag set alone,
+/// so it can never park a document conflict.
+pub(super) const TAGS_ONLY_KEY: &str = "tagSetMerged";
+
+/// The union of what every unsent row for `note_id` touched, restricted to
+/// rows newer than `after` when given (the rows queued while a push was on
+/// the wire).
+pub(super) fn local_touches(
+    conn: &rusqlite::Connection,
+    note_id: &str,
+    after: Option<i64>,
+) -> Result<Touched, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT op, payload FROM outbox
+          WHERE sent_at IS NULL AND entity = 'note' AND entity_id = ?1 AND id > ?2",
+    )?;
+    let rows = stmt
+        .query_map(rusqlite::params![note_id, after.unwrap_or(0)], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows.iter().fold(Touched::default(), |acc, (op, payload)| {
+        acc.union(Touched::of_payload(op, payload.as_deref()))
+    }))
+}
+
+/// The arbitrated note: what both sides should hold after this round.
+#[derive(Debug, Clone)]
+pub(super) struct Merged {
+    pub note: LocalNote,
+    /// Both sides changed the document and they differ: the remote copy is
+    /// parked and the local one stays live (§5.1, never auto-resolved).
+    pub park: bool,
+    /// Fields whose merged value came from the server. A local write queued
+    /// while the push was on the wire must not be overwritten by them.
+    pub adopted: Touched,
+}
+
+/// Field-wise merge. A field this device did not touch takes the server's
+/// value; a field it did touch keeps the local value. That is not
+/// last-write-wins on `updated_at`, and deliberately: `updated_at` is per
+/// row, so a remote row that is newer only because its *text* changed would
+/// win every metadata field it never touched — exactly the clobbering this
+/// merge exists to stop. With no base snapshot there is no telling whether
+/// the other device also changed a field this one touched, so the device
+/// that changed it and pushes it now keeps it. The document is never decided
+/// that way: touched here and different there, it parks. The tag set unions only when this device changed
+/// it (§5.3); otherwise the server's set stands, so a removal made
+/// elsewhere is not resurrected by a device that never looked at the tags.
+pub(super) fn merge_note(
+    local: &LocalNote,
+    remote: &RemoteNote,
+    remote_tags: &[String],
+    touched: Touched,
+) -> Merged {
+    let mut adopted = Touched::default();
+    let mut note = local.clone();
+
+    let park = touched.doc && !docs_equal(&local.doc_json, &remote.doc_json);
+    if !touched.doc {
+        note.doc_json = remote.doc_json.clone();
+        note.plain_text = remote.plain_text.clone();
+        note.excerpt = remote.excerpt.clone();
+        note.word_count = remote.word_count;
+        adopted.doc = true;
+    }
+    if !touched.folder {
+        note.folder_id = remote.folder_id.clone();
+        adopted.folder = true;
+    }
+    if !touched.pinned {
+        note.is_pinned = remote.is_pinned;
+        adopted.pinned = true;
+    }
+    /* The title travels with nothing but itself (ADR-023): a parked document
+    still carries its `remote_title` in the conflicts row, so the live title
+    is merged like any other metadata field. It used to be the local one
+    unconditionally, so a rename on the other device was overwritten by a
+    device that had only pinned the note. */
+    if !touched.title {
+        note.title = remote.title.clone();
+        note.title_source = remote.title_source.clone();
+        adopted.title = true;
+    }
+    if touched.tags {
+        note.tag_ids = union_sets(&local.tag_ids, remote_tags);
+    } else {
+        note.tag_ids = remote_tags.to_vec();
+        adopted.tags = true;
+    }
+    note.updated_at = local.updated_at.max(remote.updated_at);
+
+    Merged {
+        note,
+        park,
+        adopted,
+    }
+}
+
+/// Writes the merged fields into the local row, inside `tx`. A field a newer
+/// queued row touched (`newer`) is left as the user has it now: the server
+/// already took the merged value, and that newer row will push the user's.
+pub(super) fn write_merged(
+    tx: &rusqlite::Transaction<'_>,
+    note_id: &str,
+    merged: &Merged,
+    newer: Touched,
+) -> Result<(), AppError> {
+    let note = &merged.note;
+    if !newer.doc {
+        tx.execute(
+            "UPDATE notes SET doc_json = ?2, plain_text = ?3, excerpt = ?4, word_count = ?5
+              WHERE id = ?1",
+            rusqlite::params![
+                note_id,
+                note.doc_json,
+                note.plain_text,
+                note.excerpt,
+                note.word_count
+            ],
+        )?;
+    }
+    if !newer.folder {
+        let folder_id = super::live_folder_id(tx, &note.folder_id)?;
+        tx.execute(
+            "UPDATE notes SET folder_id = ?2 WHERE id = ?1",
+            rusqlite::params![note_id, folder_id],
+        )?;
+    }
+    if !newer.pinned {
+        tx.execute(
+            "UPDATE notes SET is_pinned = ?2 WHERE id = ?1",
+            rusqlite::params![note_id, i64::from(note.is_pinned)],
+        )?;
+    }
+    if !newer.title {
+        tx.execute(
+            "UPDATE notes SET title = ?2, title_source = ?3 WHERE id = ?1",
+            rusqlite::params![note_id, note.title, note.title_source],
+        )?;
+    }
+    if !newer.tags {
+        super::replace_local_tags(tx, note_id, &note.tag_ids)?;
+    }
+    tx.execute(
+        "UPDATE notes SET updated_at = MAX(updated_at, ?2) WHERE id = ?1",
+        rusqlite::params![note_id, note.updated_at],
+    )?;
+    Ok(())
+}
+
+/// Whether rows queued while the push was on the wire may be rebased onto
+/// the rev just assigned. Not when one of them touched a field the server
+/// just took from the other device: rebased, that row would push the stale
+/// local value over it as a plain update. Left on the old base it arrives as
+/// a conflict next round and goes through this merge again.
+pub(super) fn may_rebase(merged: &Merged, newer: Touched) -> bool {
+    !merged.adopted.intersects(newer)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::db::Database;
+    use crate::repo::NotesRepo as _;
+
+    fn doc(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]
+        })
+    }
+
+    fn remote_of(local: &LocalNote, id: &str, text: &str) -> RemoteNote {
+        RemoteNote {
+            id: id.to_owned(),
+            title: "Remote title".into(),
+            title_source: "manual".into(),
+            doc_json: doc(text).to_string(),
+            plain_text: format!("{text}\n"),
+            excerpt: text.to_owned(),
+            word_count: 2,
+            folder_id: local.folder_id.clone(),
+            is_pinned: local.is_pinned,
+            rev: local.rev + 5,
+            created_at: local.created_at,
+            updated_at: local.updated_at + 10,
+            deleted_at: None,
+        }
+    }
+
+    fn setup() -> (Arc<Database>, crate::repo::notes::SqliteNotesRepo, String) {
+        let db = Arc::new(Database::open_in_memory().expect("memory db"));
+        let notes = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db));
+        let id = notes.create(None).expect("note creates").summary.id;
+        notes
+            .save(&crate::repo::SaveNoteInput {
+                id: id.clone(),
+                doc: doc("local text"),
+                folder_id: None,
+                tag_ids: vec![],
+                is_pinned: false,
+            })
+            .expect("saves");
+        // Pushed and clean: what the next local write starts from.
+        db.with_conn(|conn| {
+            conn.execute("UPDATE outbox SET sent_at = 1", ())?;
+            conn.execute("UPDATE notes SET rev = 3, dirty = 0 WHERE id = ?1", [&id])?;
+            Ok::<_, AppError>(())
+        })
+        .expect("marks synced");
+        (db, notes, id)
+    }
+
+    /// A pin racing a text edit elsewhere is disjoint: no conflict, the
+    /// remote document and title are taken, the local pin is kept.
+    #[test]
+    fn a_metadata_change_takes_the_remote_document_instead_of_parking() {
+        let (db, notes, id) = setup();
+        notes.set_pinned(&id, true).expect("pins");
+
+        let (touched, local) = db
+            .with_conn(|conn| {
+                Ok::<_, AppError>((
+                    local_touches(conn, &id, None)?,
+                    super::super::load_local_note(conn, &id)?.expect("note exists"),
+                ))
+            })
+            .expect("reads");
+        assert_eq!(
+            touched,
+            Touched {
+                pinned: true,
+                ..Touched::default()
+            }
+        );
+
+        let remote = RemoteNote {
+            is_pinned: false,
+            ..remote_of(&local, &id, "remote text")
+        };
+        let merged = merge_note(&local, &remote, &[], touched);
+        assert!(!merged.park, "disjoint fields never park");
+        assert!(merged.note.doc_json.contains("remote text"));
+        assert_eq!(merged.note.title, "Remote title");
+        assert!(merged.note.is_pinned, "the local pin is this device's");
+    }
+
+    /// A save does touch the document: both changed and different parks,
+    /// and the local document stays live.
+    #[test]
+    fn a_save_racing_a_remote_edit_still_parks() {
+        let (db, notes, id) = setup();
+        notes
+            .save(&crate::repo::SaveNoteInput {
+                id: id.clone(),
+                doc: doc("local edit"),
+                folder_id: None,
+                tag_ids: vec![],
+                is_pinned: false,
+            })
+            .expect("saves");
+        let (touched, local) = db
+            .with_conn(|conn| {
+                Ok::<_, AppError>((
+                    local_touches(conn, &id, None)?,
+                    super::super::load_local_note(conn, &id)?.expect("note exists"),
+                ))
+            })
+            .expect("reads");
+        assert!(touched.doc);
+        assert!(!touched.title, "a save never writes the title");
+
+        let merged = merge_note(&local, &remote_of(&local, &id, "remote edit"), &[], touched);
+        assert!(merged.park);
+        assert!(merged.note.doc_json.contains("local edit"));
+        // The title was not this device's: the remote rename is kept.
+        assert_eq!(merged.note.title, "Remote title");
+    }
+
+    /// A row without a readable payload claims every field.
+    #[test]
+    fn an_unreadable_payload_touches_everything() {
+        assert_eq!(Touched::of_payload("upsert", None), Touched::ALL);
+        assert_eq!(
+            Touched::of_payload("upsert", Some("{\"id\":\"x\"}")),
+            Touched::ALL
+        );
+        assert_eq!(
+            Touched::of_payload("delete", Some("{\"isPinned\":true}")),
+            Touched::ALL
+        );
+        assert_eq!(
+            Touched::of_payload("upsert", Some("{\"id\":\"x\",\"title\":\"T\"}")),
+            Touched {
+                title: true,
+                ..Touched::default()
+            }
+        );
+    }
+
+    /// An untouched tag set takes the server's set rather than re-adding a
+    /// tag the other device removed.
+    #[test]
+    fn untouched_tags_take_the_remote_set() {
+        let (db, notes, id) = setup();
+        notes.set_pinned(&id, true).expect("pins");
+        let local = db
+            .with_conn(|conn| super::super::load_local_note(conn, &id))
+            .expect("reads")
+            .expect("note exists");
+        let local = LocalNote {
+            tag_ids: vec!["a".into(), "b".into()],
+            ..local
+        };
+        let remote = remote_of(&local, &id, "local text");
+        let touched = Touched {
+            pinned: true,
+            ..Touched::default()
+        };
+        let merged = merge_note(&local, &remote, &["a".to_owned()], touched);
+        assert_eq!(merged.note.tag_ids, vec!["a".to_owned()]);
+
+        let touched = Touched {
+            tags: true,
+            ..touched
+        };
+        let merged = merge_note(&local, &remote, &["c".to_owned()], touched);
+        assert_eq!(merged.note.tag_ids, vec!["a", "b", "c"]);
+    }
+
+    /// A newer queued row that touched an adopted field blocks the rebase,
+    /// so it comes back as a conflict instead of overwriting the merge.
+    #[test]
+    fn a_newer_edit_to_an_adopted_field_is_not_rebased() {
+        let (db, notes, id) = setup();
+        notes.set_pinned(&id, true).expect("pins");
+        let (local, pushed) = db
+            .with_conn(|conn| {
+                let local = super::super::load_local_note(conn, &id)?.expect("note exists");
+                let pushed: i64 =
+                    conn.query_row("SELECT MAX(id) FROM outbox", (), |row| row.get(0))?;
+                Ok::<_, AppError>((local, pushed))
+            })
+            .expect("reads");
+        let merged = merge_note(
+            &local,
+            &remote_of(&local, &id, "remote text"),
+            &[],
+            Touched {
+                pinned: true,
+                ..Touched::default()
+            },
+        );
+        // Typing lands while the push is on the wire.
+        notes
+            .save(&crate::repo::SaveNoteInput {
+                id: id.clone(),
+                doc: doc("typed during push"),
+                folder_id: None,
+                tag_ids: vec![],
+                is_pinned: false,
+            })
+            .expect("saves");
+        let newer = db
+            .with_conn(|conn| local_touches(conn, &id, Some(pushed)))
+            .expect("reads");
+        assert!(newer.doc);
+        assert!(!may_rebase(&merged, newer));
+
+        db.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            write_merged(&tx, &id, &merged, newer)?;
+            tx.commit()?;
+            Ok::<_, AppError>(())
+        })
+        .expect("writes");
+        let live = notes.get(&id).expect("reads");
+        assert!(
+            live.summary.excerpt.contains("typed during push"),
+            "the newer keystrokes are not overwritten: {:?}",
+            live.summary.excerpt
+        );
+        assert_eq!(
+            live.summary.title, "Remote title",
+            "untouched fields still merge"
+        );
+    }
+}

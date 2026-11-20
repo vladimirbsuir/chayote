@@ -1,6 +1,6 @@
 # 07 — Sync Plan
 
-**Status:** Frozen; Last updated 2026-10-14.
+**Status:** Frozen; Last updated 2026-11-21 (ADR-027).
 
 ---
 
@@ -63,7 +63,7 @@ Text is not merged blindly. LWW on a whole document loses work silently, which v
 |-----------|------------|
 | Local changed, remote unchanged | Push local. Clear `dirty`. |
 | Remote changed, local clean | Accept remote. Update `rev`, `synced_at`. |
-| Both changed, but disjoint fields (`folder_id`, `is_pinned`, tags) | Merge fields independently. |
+| Both changed, but disjoint fields (`folder_id`, `is_pinned`, `title`, tags, `doc_json`) | Merge fields independently: each field this device changed stays local, every other field is taken from the server. |
 | Both changed `doc_json` | **Never auto-resolve.** |
 
 For the both-changed document case:
@@ -72,6 +72,27 @@ For the both-changed document case:
 2. Write the remote document to a `conflicts` table with `note_id`, `local_rev`, `remote_rev`, `remote_doc`, `created_at`.
 3. Show a non-modal badge in the sidebar.
 4. The user picks: keep local, use remote, or view both.
+
+**Which fields "this device changed" is read from the outbox** (ADR-027). `dirty` is
+per row and `updated_at` is per row, so neither can say *which* fields moved — and a
+device that had only pinned a note used to park a conflict against a text edit made
+elsewhere and push its own stale copy of a document it never touched. Every unsent
+outbox row's payload names what its write wrote: `notes_save` the document, filing
+and tags; `notes_set_pinned` the pin; `notes_move` the filing; `notes_set_title` the
+title. A row without a readable payload (a restore, a re-upload, a resolved conflict,
+the title migration) claims every field, which is the safe direction: the worst it
+does is park. A field this device changed is kept even when the server's row is
+newer — the row is newer because *something* changed, not necessarily that field —
+and only the document is never decided that way. The tag set unions (§5.3) only
+when this device changed it; otherwise the server's set stands, so a removal made
+elsewhere is not undone by a device that never looked at the tags. The pull applies
+the same merge to a note whose push is still waiting, and the park, the merged
+fields and the tag set are written in one transaction.
+
+An edit queued while that push was on the wire is not rebased onto the new rev if it
+touched a field the push just took from the server; left on its old base it comes
+back as a conflict and goes through the merge again, instead of overwriting the
+other device's value as a plain update.
 
 Automatic three-way merging at the paragraph level is explicitly rejected for now. A silently wrong merge is worse than a visible conflict, and the conflict rate for a personal notes app is low enough that a manual prompt is acceptable.
 
@@ -100,6 +121,41 @@ updates cleanly instead of parking again.
 - Concurrent rename to the same name: both applied; duplicate names are legal (`03-data-model.md` §3.2).
 - Concurrent delete and rename: the delete wins, the rename is discarded, the row is tombstoned.
 - Concurrent move of a folder: LWW on `parent_id`. Not ideal, acceptable.
+- **Concurrent moves that would close a cycle: the first push wins** (ADR-027).
+  X under Y on one device and Y under X on another each pass the local check;
+  LWW alone hands the server both halves of a cycle, and every device a tree
+  whose walks never end. The push asks the server whether the new parent
+  already has the folder among its ancestors (a recursive CTE over `UNION`, so
+  a cycle already on the server ends the walk); if so the move is dropped and
+  the row rebases onto the server's. The pull is the safety net: a row whose
+  parent would close a cycle locally is filed at the root and queued back, so
+  a cycle that reached the server anyway is broken there too.
+- **A pulled folder lands after its parent.** Pulls are ordered by `rev`, and a
+  parent renamed or moved after its child was created has the higher one, so on
+  a fresh device the child arrived first and failed the foreign key — every
+  cycle, before a single note was pulled. Folders are therefore fetched whole
+  (no page cap: a tree is hundreds of rows) and applied parent-first, in `rev`
+  order wherever a parent is not waiting. A parent the device does not hold at
+  all files the folder at the root, as for a note.
+- **Sibling renumbering is a write.** `position` is densified on every move
+  (`03-data-model.md` §3.2); each sibling whose position changes is marked dirty
+  and queued like any write. It used to be renumbered silently, so the moved
+  folder synced with its new position and its siblings did not. The renumbering
+  leaves `updated_at` alone, so it cannot win LWW over a rename of that sibling
+  made elsewhere.
+- **Tag names that clash by case: the server's tag wins** (ADR-027). Names are
+  unique among live tags ignoring case (`03-data-model.md` §3.4), but each
+  device enforces that against its own tags, so two devices can create "work"
+  and "Work" under different ids. The tag already on the server stands — every
+  device sees the same row, so every device merges the same way. On push the
+  device asks the server for a live tag of that name before writing; on pull it
+  checks its own tags before inserting. Either way the local tag folds into the
+  server's: its note links move over, those notes are queued with a tags-only
+  change (which cannot park a document conflict), the local tag is dropped, and
+  a tombstone is queued if the server ever held it. Before this, the second
+  device's push hit the server's unique index and retried for ever, and its
+  pull hit the local one and failed every cycle. A rename onto another live
+  tag's name on the *same* device is refused as `VALIDATION`.
 - A pull filing a note into a folder the device does not hold (deleted here,
   never arrived): the note is unfiled instead of failing the cycle — the same
   `ON DELETE SET NULL` semantics a local folder delete gets. Crashing the
@@ -169,7 +225,9 @@ on local write                  → nothing; the outbox already has the row
 | Retry | 30 s deadline per round trip; a timed-out row records `attempts`/`last_error` and its next-due time (`outbox.next_retry_at`) and never blocks the queue. Backoff is ×4 from a 30 s base (30 s, 2 min, 8 min), capped at 30 min; the drain skips not-due rows, collapsing to the latest row per entity *before* filtering so a stale state is never promoted past a waiting latest |
 | Permanently failing row | Kept in the outbox, `last_error` set, surfaced in the sync status UI. Never discarded. |
 | Open-editor guard | Every sync entry point flushes the autosave first; `sync_now` carries the open note id, and a pull that would change that note defers it instead — reported as `deferred` in the summary, re-fetched next cycle. Typing is never clobbered. |
-| Watermark | `max(rev)` of the last successful pull per table, persisted in `sync_state`; held below a deferred row so the row is re-fetched rather than skipped |
+| Watermark | `max(rev)` of the last successful pull per table, persisted in `sync_state`; held below a deferred row so the row is re-fetched next cycle rather than skipped. Paging is separate from it: the next page in the same cycle starts past the deferred row, so the deferral does not re-read the page it is on (it used to, up to ten times a cycle) |
+| Pulled tag sets | One `note_tags` query per page of pulled notes (`note_id = ANY($1)`), not one per note |
+| Error codes | Only failing to reach the server is `NETWORK` ("could not reach the sync server", retry). A server that answered and refused is not: credentials, a missing database or a schema never applied (SQLSTATE classes 28, 3D; 42P01, 42703) are `VALIDATION`, for the user to fix in Settings → Sync; any other rejection is `INTERNAL`, a bug in what was sent. Rows back off and stay queued whatever the code (above) |
 | Offline | Detected by request failure. All activity is deferred, never blocked. |
 | Concurrency | One sync cycle at a time, guarded by an in-process lock; a second caller gets `already_running` |
 

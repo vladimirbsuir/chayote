@@ -182,6 +182,15 @@ describe('mock adapter against the real command surface', () => {
     const renamed = await backend.invoke('tags_rename', { id: tag.id, name: 'critical' });
     expect(renamed.name).toBe('critical');
 
+    // Renaming onto another tag's name, in any case, is VALIDATION — as in Rust.
+    const other = await backend.invoke('tags_create', { name: 'later' });
+    await expect(
+      backend.invoke('tags_rename', { id: other.id, name: 'Critical' }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    // A new spelling of its own name is not a clash.
+    const respelled = await backend.invoke('tags_rename', { id: tag.id, name: 'Critical' });
+    expect(respelled.name).toBe('Critical');
+
     const listed = await backend.invoke('tags_list', {});
     for (const entry of listed) {
       expect(Object.keys(entry).sort()).toEqual(['count', 'id', 'name']);

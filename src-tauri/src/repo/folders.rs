@@ -238,37 +238,62 @@ fn sibling_count(conn: &rusqlite::Connection, parent_id: Option<&str>) -> Result
 
 /// Renumbers the destination siblings to `0..n` with `moving_id` inserted at
 /// `target`, in one transaction.
+///
+/// A sibling whose position actually changes is a write like any other: it is
+/// marked dirty and queued (R5). It used to be renumbered silently, so the
+/// moved folder reached other devices with its new position and its siblings
+/// kept their old ones there — two folders at one position, and an order
+/// that differed per device. `updated_at` is left alone: the renumbering is a
+/// side effect, and bumping it would let it win LWW (§5.2) over a rename of
+/// that sibling made elsewhere.
 fn densify(
     tx: &rusqlite::Transaction<'_>,
     parent_id: Option<&str>,
     moving_id: &str,
     target: usize,
-) -> Result<(), rusqlite::Error> {
+) -> Result<(), AppError> {
     let mut stmt = tx.prepare(
-        "SELECT id FROM folders
+        "SELECT id, position, rev FROM folders
           WHERE parent_id IS ?1 AND id <> ?2
        ORDER BY position, name COLLATE NOCASE",
     )?;
-    let siblings: Vec<String> = stmt
-        .query_map(rusqlite::params![parent_id, moving_id], |row| row.get(0))?
+    let siblings: Vec<(String, i64, i64)> = stmt
+        .query_map(rusqlite::params![parent_id, moving_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
         .collect::<Result<_, _>>()?;
     drop(stmt);
 
-    let mut ordered = siblings;
+    let mut ordered: Vec<Option<(String, i64, i64)>> = siblings.into_iter().map(Some).collect();
     let index = target.min(ordered.len());
-    ordered.insert(index, moving_id.to_owned());
+    ordered.insert(index, None);
 
-    for (position, id) in ordered.iter().enumerate() {
+    for (position, sibling) in ordered.iter().enumerate() {
+        let position = position as i64;
+        let Some((id, old_position, rev)) = sibling else {
+            continue; // the moving folder: `move_to` writes and queues it
+        };
+        if *old_position == position {
+            continue;
+        }
         tx.execute(
-            "UPDATE folders SET position = ?2 WHERE id = ?1",
-            rusqlite::params![id, position as i64],
+            "UPDATE folders SET position = ?2, dirty = 1 WHERE id = ?1",
+            rusqlite::params![id, position],
         )?;
+        let payload = serde_json::json!({ "id": id, "position": position }).to_string();
+        append_outbox(tx, "folder", id, "upsert", Some(&payload), *rev)?;
     }
     Ok(())
 }
 
+/// The folder and every descendant. The visited set is what makes this
+/// terminate on a parent cycle: two devices moving X under Y and Y under X
+/// can each hand the server half of one, and before the sync engine broke
+/// them on pull (`sync/tree.rs`) this loop never ended on such a tree — a
+/// hung delete or move, on an already-affected database, for ever.
 fn subtree_ids(conn: &rusqlite::Connection, root: &str) -> Result<Vec<String>, AppError> {
     let mut found = vec![root.to_owned()];
+    let mut seen: std::collections::HashSet<String> = found.iter().cloned().collect();
     let mut index = 0;
     while index < found.len() {
         let current = found[index].clone();
@@ -277,7 +302,9 @@ fn subtree_ids(conn: &rusqlite::Connection, root: &str) -> Result<Vec<String>, A
             .query_map([&current], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
         for child in children {
-            found.push(child);
+            if seen.insert(child.clone()) {
+                found.push(child);
+            }
         }
         index += 1;
     }
@@ -335,4 +362,75 @@ fn assemble(rows: Vec<Row>) -> Vec<FolderNode> {
     let mut sorted = roots;
     sorted.sort_by(|a, b| a.position.cmp(&b.position).then(a.name.cmp(&b.name)));
     sorted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn queued(db: &Database, id: &str) -> (i64, i64) {
+        db.with_conn(|conn| {
+            let dirty: i64 =
+                conn.query_row("SELECT dirty FROM folders WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })?;
+            let rows: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL AND entity_id = ?1",
+                [id],
+                |row| row.get(0),
+            )?;
+            Ok::<_, AppError>((dirty, rows))
+        })
+        .expect("reads")
+    }
+
+    /// Siblings renumbered by a move are queued, so their new positions
+    /// reach other devices along with the moved folder's.
+    #[test]
+    fn renumbered_siblings_are_queued_for_sync() {
+        let db = Arc::new(Database::open_in_memory().expect("memory db"));
+        let repo = SqliteFoldersRepo::new(Arc::clone(&db));
+        let a = repo.create("A", None).expect("creates");
+        let b = repo.create("B", None).expect("creates");
+        let c = repo.create("C", None).expect("creates");
+        db.with_conn(|conn| {
+            conn.execute("UPDATE folders SET dirty = 0, rev = 4", ())?;
+            conn.execute("UPDATE outbox SET sent_at = 1", ())?;
+            Ok::<_, AppError>(())
+        })
+        .expect("marks synced");
+
+        repo.move_to(&c.id, None, 0).expect("moves C first");
+        let tree = repo.list().expect("lists");
+        let order: Vec<&str> = tree.iter().map(|node| node.name.as_str()).collect();
+        assert_eq!(order, vec!["C", "A", "B"]);
+        assert_eq!(queued(&db, &a.id), (1, 1), "A moved to 1 and is queued");
+        assert_eq!(queued(&db, &b.id), (1, 1), "B moved to 2 and is queued");
+        assert_eq!(queued(&db, &c.id), (1, 1), "the moved folder, once");
+
+        // A move that changes no sibling's position queues nothing extra.
+        repo.move_to(&c.id, None, 0).expect("moves C in place");
+        assert_eq!(queued(&db, &a.id), (1, 1));
+    }
+
+    /// A parent cycle on disk (an older build's sync could write one) no
+    /// longer hangs a delete.
+    #[test]
+    fn subtree_walk_terminates_on_a_cycle() {
+        let db = Arc::new(Database::open_in_memory().expect("memory db"));
+        let repo = SqliteFoldersRepo::new(Arc::clone(&db));
+        let x = repo.create("X", None).expect("creates");
+        let y = repo.create("Y", Some(&x.id)).expect("creates");
+        db.with_conn(|conn| {
+            conn.execute(
+                "UPDATE folders SET parent_id = ?2 WHERE id = ?1",
+                [&x.id, &y.id],
+            )?;
+            let ids = subtree_ids(conn, &x.id)?;
+            assert_eq!(ids.len(), 2, "each folder once: {ids:?}");
+            Ok::<_, AppError>(())
+        })
+        .expect("walks");
+        repo.delete(&x.id).expect("deletes");
+    }
 }

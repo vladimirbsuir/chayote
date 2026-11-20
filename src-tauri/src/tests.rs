@@ -113,7 +113,8 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
             "0003_outbox.sql",
             "0004_sync.sql",
             "0005_sync_backoff.sql",
-            "0006_note_title_field.sql"
+            "0006_note_title_field.sql",
+            "0007_tags_live_unique.sql"
         ]
     );
     assert_eq!(applied[0].0, 1);
@@ -121,7 +122,79 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
     // Reopening must apply nothing new (R8).
     let reopened = Arc::new(Database::open(f._dir.path()).expect("reopen"));
     let again = crate::db::migrate::applied_all(&reopened).expect("readable again");
-    assert_eq!(again.len(), 6);
+    assert_eq!(again.len(), 7);
+}
+
+/// 0007 dropped the table-level `UNIQUE` on `tags.name`: a tombstoned `work`
+/// may sit beside a live `Work`, which is what `03-data-model.md` §3.4 says
+/// the partial index exists for. Live names stay unique, ignoring case.
+#[test]
+fn a_tag_tombstone_no_longer_blocks_a_live_tag_of_the_same_name() {
+    let f = fixture("migrate-tags");
+    f.db.with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO tags (id, name, created_at, updated_at, deleted_at)
+             VALUES ('t-old', 'work', 1, 1, 5)",
+            (),
+        )?;
+        conn.execute(
+            "INSERT INTO tags (id, name, created_at, updated_at) VALUES ('t-new', 'Work', 2, 2)",
+            (),
+        )?;
+        let clash = conn.execute(
+            "INSERT INTO tags (id, name, created_at, updated_at) VALUES ('t-dup', 'WORK', 3, 3)",
+            (),
+        );
+        assert!(clash.is_err(), "two live tags may not share a name");
+        Ok::<_, crate::error::AppError>(())
+    })
+    .expect("a tombstone and a live tag coexist");
+}
+
+/// The rebuild copies the tag links aside: `DROP TABLE tags` with foreign
+/// keys on cascades every `note_tags` row away, so without the copy the
+/// migration would untag the whole library. Re-running the migration's SQL
+/// on a populated database proves the links come back.
+#[test]
+fn the_tags_rebuild_keeps_every_note_tag_link() {
+    let f = fixture("migrate-tags-links");
+    let repo = notes(&f.db);
+    let tags = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&f.db));
+    let tag = tags.create("Kept").expect("tag creates");
+    let id = repo.create(None).expect("note creates").summary.id;
+    repo.save(&SaveNoteInput {
+        id: id.clone(),
+        tag_ids: vec![tag.id.clone()],
+        ..note_with_text("linked")
+    })
+    .expect("tags the note");
+
+    f.db.with_conn(|conn| {
+        let tx = conn.transaction()?;
+        tx.execute_batch(include_str!("../migrations/0007_tags_live_unique.sql"))?;
+        tx.commit()?;
+        Ok::<_, crate::error::AppError>(())
+    })
+    .expect("the rebuild runs on a populated database");
+
+    let note = repo.get(&id).expect("note reads");
+    assert_eq!(note.summary.tags.len(), 1, "the link survives the rebuild");
+    assert_eq!(tags.list().expect("lists")[0].count, 1);
+}
+
+/// Renaming a tag onto another tag's name is the user's input to fix, not a
+/// storage failure: `VALIDATION`, never `DB_ERROR`.
+#[test]
+fn renaming_a_tag_onto_another_tags_name_is_a_validation_error() {
+    let f = fixture("tag-rename-clash");
+    let tags = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&f.db));
+    tags.create("Work").expect("creates");
+    let other = tags.create("Home").expect("creates");
+    let err = tags.rename(&other.id, "work").expect_err("clashes");
+    assert_eq!(err.code(), "VALIDATION");
+    // A new spelling of its own name is not a clash.
+    let respelled = tags.rename(&other.id, "HOME").expect("respells");
+    assert_eq!(respelled.name, "HOME");
 }
 
 #[test]

@@ -116,6 +116,18 @@ impl TagsRepo for SqliteTagsRepo {
         if clean.is_empty() {
             return Err(AppError::Validation("Give the tag a name.".into()));
         }
+        /* Renaming onto another live tag's name (in any case) is refused in
+        words. It used to reach the unique index and come back as `DB_ERROR`,
+        which the frontend treats as storage failing rather than as input to
+        correct (`10-conventions.md` §6). Renaming a tag to a new spelling of
+        its own name is not a clash. */
+        if let Some((existing, _)) = self.lookup(&clean)? {
+            if existing != id {
+                return Err(AppError::Validation(
+                    "A tag with that name already exists.".into(),
+                ));
+            }
+        }
         let tag_id = id.to_owned();
         let payload = serde_json::json!({ "id": tag_id, "name": clean }).to_string();
 
