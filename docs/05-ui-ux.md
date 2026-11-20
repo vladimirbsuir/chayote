@@ -448,7 +448,7 @@ Only the selected panel is mounted, so a hidden panel holds no state and a hidde
 | Version | Read-only text, `Chayote 0.1.0` | — |
 | Check for updates | Button (`rotate-cw`), disabled while a request is in flight, and on macOS entirely | — |
 | Result | One sentence: up to date, or a version is available | Nothing |
-| Install and restart | Button (`download`), only when a newer version exists | — |
+| Install and restart (Android: Install update) | Button (`download`), only when a newer version exists. Android closes the app to replace it and does not reopen it, so it does not promise a restart there. | — |
 | Progress | A bar with a percentage, only while bytes are moving | — |
 | Grant needed | Android only: what to allow, and that the button stays live | Never |
 

@@ -452,8 +452,34 @@ After all three, the same APK builds, launches, survives, and logs no panic:
 | `panicked` / `Fatal signal` / `SIGABRT` in logcat | none |
 | Activity resumed and drawing frames | yes (`onWindowsDrawn`, frames queued) |
 
-**Still not proved:** that an app replaces *itself* on a device. That is now the
-one remaining gap, and it needs an install, not a launch.
+~~**Still not proved:** that an app replaces *itself* on a device.~~ Proved in §4.1d.
+
+### 4.1d The app replaced itself on a device, 2026-11-20
+
+The user reported the Updates tab on the phone printing "There is no update
+waiting to be installed." in red under the Install button, beside the raw GitHub
+release body. Both are fixed (`06-platform.md` §3.8.1), and the fix was proved
+against the real `v0.2.1` release rather than a mock:
+
+1. A release-signed APK of the fixed code was built **with its version set to
+   0.2.0** (`tauri.conf.json`, not committed) and installed on the Infinix after an
+   uninstall, so the device had no install grant and a real, newer release to find.
+2. Check for updates → "Version 0.2.1 is available." Install downloaded the 21 MB
+   APK (minutes — GitHub's release CDN is slow from here), and Android sent the
+   app to the "install unknown apps" screen. The tab showed the grant sentence in
+   `--warning`.
+3. The user allowed it (a security setting, so not tapped by the agent) and the
+   second press went to Android's installer **in about a second** — the verified
+   package was reused, not downloaded again, and nothing red appeared. That press
+   is the one that used to fail.
+4. Google Play Protect asked to scan the unknown app; the user let the install
+   through. `dumpsys package com.chayote.app` then read `versionName=0.2.1`,
+   `installerPackageName=com.chayote.app`: the app replaced itself in place.
+
+Two observations for the next session: Android closes the app to replace it and
+does **not** reopen it, so the Android button now reads "Install update" and the tab says to reopen the app;
+and Play Protect's prompt appears on every self-update of an app it has not
+scanned, which no code here can avoid.
 
 ## 5. Gates per milestone
 

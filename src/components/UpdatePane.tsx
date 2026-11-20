@@ -168,7 +168,7 @@ export function UpdatePane({
               className="flex items-center gap-[6px] rounded-[var(--r-input)] border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-[13px] font-medium text-white disabled:opacity-50"
             >
               <Download className="icon i-16" aria-hidden="true" />
-              {isInstalling ? 'Installing…' : 'Install and restart'}
+              {isInstalling ? 'Installing…' : installLabel(info?.os ?? '')}
             </button>
           </div>
         </div>
@@ -300,14 +300,21 @@ function unsupportedReason(os: string): string {
     lives in system settings and there is no prompt for it. */
 function permissionRequiredReason(os: string): string | null {
   return os === 'Android'
-    ? 'Android will not let Chayote install updates until you allow it. Tap Install and restart again after saying yes on the next screen.'
+    ? 'Android will not let Chayote install updates until you allow it. Tap Install update again after saying yes on the next screen.'
     : null;
+}
+
+/** The button's words. Android closes the app to replace it and does not open
+    it again — measured on the device (`11-verification.md` §4.1d) — so
+    "and restart" would promise something that platform does not do. */
+function installLabel(os: string): string {
+  return os === 'Android' ? 'Install update' : 'Install and restart';
 }
 
 /** What the tab says once the install has been handed over. */
 function installedReason(os: string): string {
   return os === 'Android'
-    ? 'Android is installing the update and will close Chayote when it is done. If Android asked first and you said no, tap Install and restart again.'
+    ? 'Android is installing the update and will close Chayote when it is done; open it again from the home screen. If Android asked first and you said no, tap Install update again.'
     : 'The update is installed. Chayote is restarting.';
 }
 

@@ -168,6 +168,12 @@ describe('UpdatePane', () => {
     expect(screen.getByRole('alert').textContent).toContain('installer reported aborted');
   });
 
+  it('does not promise a restart on Android, which does not reopen the app', () => {
+    render(<UpdatePane {...pane({ info: ANDROID, update: FOUND })} />);
+    expect(text('update-install')).toContain('Install update');
+    expect(text('update-install')).not.toContain('restart');
+  });
+
   it('says the install was handed over once Android accepted it', () => {
     render(<UpdatePane {...pane({ info: ANDROID, update: FOUND, installed: true })} />);
     expect(text('update-installed')).toContain('will close Chayote');
