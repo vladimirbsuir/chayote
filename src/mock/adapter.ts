@@ -29,7 +29,6 @@ const MOCK_VERSION = '0.2.1';
 /** The one update the fallback can offer, for `?seed=update`. */
 const MOCK_UPDATE = {
   version: '0.3.0',
-  notes: 'Faster search, and the Updates tab.',
   date: '2026-10-17T09:00:00Z',
 };
 

@@ -21,7 +21,6 @@ const ANDROID: AppInfo = { version: '0.2.1', os: 'Android', updatesSupported: tr
 
 const FOUND: UpdateSummary = {
   version: '0.3.0',
-  notes: 'Faster search, and the Updates tab.',
   date: '2026-10-17T09:00:00Z',
 };
 
@@ -93,25 +92,8 @@ describe('UpdatePane', () => {
   it('offers the install only when a check found something newer', () => {
     render(<UpdatePane {...pane({ update: FOUND, lastCheckedAt: 1_780_000_000_000 })} />);
     expect(text('update-available')).toContain('Version 0.3.0 is available.');
-    expect(text('update-available')).toContain(FOUND.notes);
     expect(screen.queryByTestId('update-current')).toBeNull();
     expect(text('update-install')).toContain('Install and restart');
-  });
-
-  it('omits the notes block rather than rendering an empty one', () => {
-    render(<UpdatePane {...pane({ update: { ...FOUND, notes: '   ' } })} />);
-    const available = screen.getByTestId('update-available');
-    expect(available.textContent).toContain('Version 0.3.0 is available.');
-    /* Two paragraphs would be the headline and an empty one. */
-    expect(available.querySelectorAll('p')).toHaveLength(1);
-  });
-
-  it('renders notes as text, never as markup from the release manifest', () => {
-    const hostile = { ...FOUND, notes: '<img src=x onerror="alert(1)"><b>bold</b>' };
-    const { container } = render(<UpdatePane {...pane({ update: hostile })} />);
-    expect(container.querySelector('img')).toBeNull();
-    expect(container.querySelector('b')).toBeNull();
-    expect(text('update-available')).toContain('<img src=x onerror="alert(1)">');
   });
 
   it('disables the check and says why on a platform that cannot update', () => {
@@ -184,32 +166,6 @@ describe('UpdatePane', () => {
       />,
     );
     expect(screen.getByRole('alert').textContent).toContain('installer reported aborted');
-  });
-
-  it('reads release notes as text: unwrapped, listed, and capped', () => {
-    /* The v0.2.1 manifest carried the GitHub release body, and the tab printed
-       its table, its asterisks and its hard line breaks verbatim. */
-    render(
-      <UpdatePane
-        {...pane({
-          update: {
-            ...FOUND,
-            notes:
-              '**Android:** install the APK once by hand\nto replace any earlier build.\n\n- Faster search\n- <b>not markup</b>',
-          },
-        })}
-      />,
-    );
-    const notes = screen.getByTestId('update-notes');
-    expect(notes.textContent).toContain(
-      'Android: install the APK once by hand to replace any earlier build.',
-    );
-    expect(notes.textContent).not.toContain('**');
-    expect(notes.querySelectorAll('p')).toHaveLength(3);
-    /* Text, never markup. */
-    expect(notes.querySelector('b')).toBeNull();
-    expect(notes.textContent).toContain('<b>not markup</b>');
-    expect(notes.className).toContain('overflow-y-auto');
   });
 
   it('says the install was handed over once Android accepted it', () => {

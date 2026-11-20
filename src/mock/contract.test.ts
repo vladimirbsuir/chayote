@@ -244,12 +244,9 @@ describe('mock adapter against the real command surface', () => {
     const seeded = createMockBackend(buildMockDatabase(), { updateFeed: 'available' });
     const found = await seeded.invoke('updates_check', {});
     expect(found).not.toBeNull();
-    expect(Object.keys(found ?? {}).sort()).toEqual(['date', 'notes', 'version']);
+    /* No `notes`: the tab does not show release notes (`05-ui-ux.md`). */
+    expect(Object.keys(found ?? {}).sort()).toEqual(['date', 'version']);
     expect(typeof found?.version).toBe('string');
-    expect(typeof found?.notes).toBe('string');
-    /* `notes` is a string and never null: the pane has no use for a key it
-       cannot render, and Rust already collapsed a missing one to "". */
-    expect(found?.notes).not.toBeNull();
   });
 
   it('claims no update support on the unsupported feed, and says which platform', async () => {

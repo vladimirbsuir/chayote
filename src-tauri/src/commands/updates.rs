@@ -38,9 +38,6 @@ struct Pending {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSummary {
     pub version: String,
-    /// Release notes, or an empty string. `latest.json` may omit `notes`
-    /// entirely, and the tab has no use for a key it cannot render.
-    pub notes: String,
     /// RFC 3339, formatted for the reader rather than parsed anywhere.
     pub date: Option<String>,
 }
@@ -70,7 +67,6 @@ pub async fn updates_check(
     let update = updater(&app)?.check().await.map_err(network)?;
     let summary = update.as_ref().map(|found| UpdateSummary {
         version: found.version.clone(),
-        notes: found.body.clone().unwrap_or_default(),
         date: found.date.map(|date| date.to_string()),
     });
     let mut state = lock(&pending)?;

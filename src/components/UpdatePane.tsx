@@ -1,6 +1,4 @@
-import { useMemo } from 'react';
 import { Download, RotateCw } from 'lucide-react';
-import { releaseNoteBlocks } from '../lib/releaseNotes';
 import type { AppInfo, UpdateSummary } from '../types/update';
 
 /* The Updates tab of the settings dialog: the running version, a check the user
@@ -77,7 +75,6 @@ export function UpdatePane({
   const busy = isChecking || isInstalling;
   const percent =
     total !== null && total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null;
-  const notes = useMemo(() => releaseNoteBlocks(update?.notes ?? ''), [update?.notes]);
 
   return (
     <div className="flex flex-col gap-[18px]" data-testid="update-pane">
@@ -143,30 +140,6 @@ export function UpdatePane({
       {update !== null && !isChecking ? (
         <div className="flex flex-col gap-[10px]" data-testid="update-available">
           <p className="text-[13px] text-[var(--text)]">Version {update.version} is available.</p>
-          {/* Release notes as plain text. `latest.json` carries them as
-              untrusted text from a remote file, and the app has no Markdown
-              renderer — rendering these as HTML would be the paste-sanitizer
-              problem (`04-editor.md` §5) in a place nobody thought to check.
-              `releaseNoteBlocks` only splits and unwraps; every block is a text
-              node. Capped and scrollable, so a long body cannot push the Install
-              button off a phone screen. */}
-          {notes.length > 0 ? (
-            <div
-              className="flex max-h-[160px] flex-col gap-1 overflow-y-auto text-[12px] text-[var(--text-muted)]"
-              data-testid="update-notes"
-            >
-              {notes.map((block, index) =>
-                block.kind === 'item' ? (
-                  <p key={index} className="flex gap-1.5 pl-1">
-                    <span aria-hidden="true">•</span>
-                    <span>{block.text}</span>
-                  </p>
-                ) : (
-                  <p key={index}>{block.text}</p>
-                ),
-              )}
-            </div>
-          ) : null}
           {installError !== null ? (
             <p
               className={`text-[12px] ${
