@@ -158,7 +158,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
+      # The whole history and its tags: `scripts/release-notes.mjs` lists the
+      # commits since the previous tag for the updater's notes.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -257,11 +261,14 @@ jobs:
         run: |
           set -eu
           gh release download "$TAG" --pattern latest.json --dir manifest --clobber
+          # The tab's notes, not the web page's: see the script's header.
+          node scripts/release-notes.mjs > manifest/notes.txt
+          cat manifest/notes.txt
           node scripts/android-updater-manifest.mjs \
             manifest/latest.json \
             dist-android/app-universal-release.apk.sig \
             app-universal-release.apk \
-            "$VERSION" "$TAG" > manifest/latest.json.new
+            "$VERSION" "$TAG" manifest/notes.txt > manifest/latest.json.new
           mv manifest/latest.json.new manifest/latest.json
           # Read back rather than trusting the write: a manifest that names an
           # asset the release does not carry produces an updater that offers an

@@ -12,8 +12,27 @@ use crate::error::AppError;
 /// reconstructed from a version string — and holding it is what makes the
 /// install verify against the *checked* artifact rather than against whatever
 /// the endpoint says a moment later.
+///
+/// **An install reads it, never consumes it.** It used to be `take()`n on the
+/// first press, so every outcome short of the process being replaced — Android
+/// asking for its install grant, a dropped connection, a cancelled confirmation
+/// — left the next press with nothing to install, and the tab printed "There is
+/// no update waiting to be installed" under a button offering exactly that.
+/// Only a new check replaces it.
 #[derive(Default)]
-pub struct PendingUpdate(pub std::sync::Mutex<Option<Update>>);
+pub struct PendingUpdate(std::sync::Mutex<Pending>);
+
+#[derive(Default)]
+struct Pending {
+    update: Option<Update>,
+    /// Android: the package `update` was downloaded to, already verified. The
+    /// grant round trip (ADR-025) is the usual second press, and it should
+    /// install these bytes rather than fetch 20 MB again. Held in memory only,
+    /// so a restarted process downloads afresh rather than trusting a file it
+    /// did not verify itself.
+    #[cfg(target_os = "android")]
+    apk: Option<std::path::PathBuf>,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,7 +73,13 @@ pub async fn updates_check(
         notes: found.body.clone().unwrap_or_default(),
         date: found.date.map(|date| date.to_string()),
     });
-    *lock(&pending)? = update;
+    let mut state = lock(&pending)?;
+    /* A verified package is kept only while it is still the version on offer. */
+    #[cfg(target_os = "android")]
+    if version_of(&state.update) != version_of(&update) {
+        state.apk = None;
+    }
+    state.update = update;
     Ok(summary)
 }
 
@@ -75,7 +100,7 @@ pub async fn updates_install(
     pending: State<'_, PendingUpdate>,
     on_event: Channel<DownloadEvent>,
 ) -> Result<(), AppError> {
-    let update = take(&pending)?;
+    let update = current(&pending)?;
     let bytes = download(&update, &on_event).await?;
     update.install(&bytes).map_err(network)?;
     restart_after_install(&app);
@@ -83,6 +108,10 @@ pub async fn updates_install(
 }
 
 /// ADR-025. Same download and same verification as desktop; the install is ours.
+///
+/// A second press — after the grant screen, or after a dismissed confirmation —
+/// reuses the package the first one verified, and reports it to the tab as one
+/// finished transfer so the progress line does not sit at "0 B".
 #[cfg(target_os = "android")]
 #[tauri::command]
 pub async fn updates_install(
@@ -90,9 +119,38 @@ pub async fn updates_install(
     pending: State<'_, PendingUpdate>,
     on_event: Channel<DownloadEvent>,
 ) -> Result<(), AppError> {
-    let update = take(&pending)?;
-    let bytes = download(&update, &on_event).await?;
-    install_on_android(&app, &update, &bytes).await
+    let update = current(&pending)?;
+    let verified = lock(&pending)?.apk.clone().filter(|path| path.is_file());
+    let path = match verified {
+        Some(path) => {
+            let size = std::fs::metadata(&path).map(|meta| meta.len()).ok();
+            let _ = on_event.send(DownloadEvent::Started {
+                content_length: size,
+            });
+            let _ = on_event.send(DownloadEvent::Progress {
+                chunk_length: size.and_then(|len| usize::try_from(len).ok()).unwrap_or(0),
+            });
+            let _ = on_event.send(DownloadEvent::Finished);
+            path
+        }
+        None => {
+            let bytes = download(&update, &on_event).await?;
+            let path = write_apk(&app, &update, &bytes)?;
+            let mut state = lock(&pending)?;
+            /* A check that ran during the download may have moved on to a
+            different version; then these bytes are not the ones on offer. */
+            if version_of(&state.update) == Some(&update.version) {
+                state.apk = Some(path.clone());
+            }
+            path
+        }
+    };
+    install_on_android(&app, &path).await
+}
+
+#[cfg(target_os = "android")]
+fn version_of(update: &Option<Update>) -> Option<&String> {
+    update.as_ref().map(|held| &held.version)
 }
 
 async fn download(update: &Update, on_event: &Channel<DownloadEvent>) -> Result<Vec<u8>, AppError> {
@@ -177,11 +235,7 @@ fn restart_after_install(_app: &AppHandle) {}
 pub struct Installer(pub tauri::plugin::PluginHandle<tauri::Wry>);
 
 #[cfg(target_os = "android")]
-async fn install_on_android(
-    app: &AppHandle,
-    update: &Update,
-    bytes: &[u8],
-) -> Result<(), AppError> {
+async fn install_on_android(app: &AppHandle, path: &std::path::Path) -> Result<(), AppError> {
     #[derive(Serialize)]
     struct InstallArgs {
         path: String,
@@ -193,7 +247,6 @@ async fn install_on_android(
         status: String,
     }
 
-    let path = write_apk(app, update, bytes)?;
     let outcome: InstallOutcome = app
         .state::<Installer>()
         .0
@@ -207,12 +260,13 @@ async fn install_on_android(
         .map_err(AppError::from_detail)?;
 
     match outcome.status.as_str() {
-        /* The session is committed and Android replaces the app from here. A
-        reply at all means this process outlived it, which is not what a
-        successful update does. */
-        "committed" => Err(AppError::internal(
-            "the installer committed without the app being replaced",
-        )),
+        /* The session is committed and Android takes it from here, silently or
+        behind its own confirmation screen. `commit` is asynchronous — it
+        returns before the package is replaced — so this reply is the normal
+        one. It used to be an error, which flashed a failure under every update
+        that was in fact on its way, and stayed there if the reader dismissed
+        Android's confirmation. */
+        "committed" => Ok(()),
         /* `REQUEST_INSTALL_PACKAGES` is not granted. Not an error the user
         caused and not a failure of the update: the tab says what to do, and
         the next press retries the same verified bytes. */
@@ -227,30 +281,65 @@ async fn install_on_android(
 /// other app can read the file.
 ///
 /// The version is in the name so a stale file from an earlier attempt cannot be
-/// mistaken for this one, and so two attempts do not collide.
+/// mistaken for this one, and so two attempts do not collide. Written beside its
+/// final name and renamed, so a process killed mid-write never leaves a
+/// truncated package under a name that looks complete.
 #[cfg(target_os = "android")]
 fn write_apk(
     app: &AppHandle,
     update: &Update,
     bytes: &[u8],
 ) -> Result<std::path::PathBuf, AppError> {
-    let dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|err| AppError::internal(format!("no cache directory: {err}")))?;
+    let dir = package_dir(app)?;
     std::fs::create_dir_all(&dir).map_err(AppError::from_detail)?;
-    let path = dir.join(format!("chayote-{}.apk", update.version));
-    std::fs::write(&path, bytes).map_err(AppError::from_detail)?;
+    let path = dir.join(format!("{PACKAGE_PREFIX}{}.apk", update.version));
+    let partial = path.with_extension("apk.part");
+    std::fs::write(&partial, bytes).map_err(AppError::from_detail)?;
+    std::fs::rename(&partial, &path).map_err(AppError::from_detail)?;
     Ok(path)
 }
 
-fn take(pending: &PendingUpdate) -> Result<Update, AppError> {
-    lock(pending)?.take().ok_or_else(|| {
-        AppError::Validation("There is no update waiting to be installed.".to_owned())
+#[cfg(target_os = "android")]
+const PACKAGE_PREFIX: &str = "chayote-";
+
+#[cfg(target_os = "android")]
+fn package_dir(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
+    app.path()
+        .app_cache_dir()
+        .map_err(|err| AppError::internal(format!("no cache directory: {err}")))
+}
+
+/// Deletes the packages an earlier process downloaded. Run at startup, when none
+/// can be in use: the verified path lives in memory only, so a file that outlived
+/// its process is either the update now installed or one that was abandoned —
+/// about 20 MB each, and nothing else ever removed them.
+#[cfg(target_os = "android")]
+pub fn clear_stale_packages(app: &AppHandle) {
+    let Ok(dir) = package_dir(app) else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(PACKAGE_PREFIX)
+            && (name.ends_with(".apk") || name.ends_with(".apk.part"))
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The update the last check found — cloned, so a failed install can be retried.
+fn current(pending: &PendingUpdate) -> Result<Update, AppError> {
+    lock(pending)?.update.clone().ok_or_else(|| {
+        AppError::Validation(
+            "The update is no longer on offer. Check for updates again.".to_owned(),
+        )
     })
 }
 
-fn lock(pending: &PendingUpdate) -> Result<std::sync::MutexGuard<'_, Option<Update>>, AppError> {
+fn lock(pending: &PendingUpdate) -> Result<std::sync::MutexGuard<'_, Pending>, AppError> {
     pending
         .0
         .lock()

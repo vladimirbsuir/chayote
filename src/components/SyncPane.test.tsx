@@ -286,6 +286,7 @@ describe('the third Settings tab', () => {
           checkError: null,
           checkErrorCode: null,
           isInstalling: false,
+          installed: false,
           downloaded: 0,
           total: null,
           installError: null,

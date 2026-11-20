@@ -13,20 +13,25 @@
  * key matching its own architecture, and a 32-bit device asking for `aarch64`
  * would be told the update does not exist.
  *
+ * It also replaces `notes`, which `tauri-action` filled with the whole GitHub
+ * Release body — a download table and Markdown written for a web page, which the
+ * Updates tab printed verbatim in v0.2.1. The optional notes file is the short
+ * list `scripts/release-notes.mjs` builds for the tab.
+ *
  * Usage:
  *   node scripts/android-updater-manifest.mjs <manifest.json> <apk.sig> \
- *        <asset-name> <version> <tag>
+ *        <asset-name> <version> <tag> [<notes.txt>]
  *
  * Reads the manifest, writes the merged manifest to stdout, and changes nothing
  * on disk. The caller decides where it goes. */
 
 import { readFileSync } from 'node:fs';
 
-const [, , manifestPath, signaturePath, assetName, version, tag] = process.argv;
+const [, , manifestPath, signaturePath, assetName, version, tag, notesPath] = process.argv;
 
 if (!manifestPath || !signaturePath || !assetName || !version || !tag) {
   process.stderr.write(
-    'usage: android-updater-manifest.mjs <manifest.json> <apk.sig> <asset-name> <version> <tag>\n',
+    'usage: android-updater-manifest.mjs <manifest.json> <apk.sig> <asset-name> <version> <tag> [<notes.txt>]\n',
   );
   process.exit(2);
 }
@@ -71,6 +76,10 @@ if (manifest.version !== version) {
     `the manifest announces ${manifest.version} but the build is ${version}\n`,
   );
   process.exit(1);
+}
+
+if (notesPath) {
+  manifest.notes = readFileSync(notesPath, 'utf8').trim();
 }
 
 manifest.platforms = manifest.platforms ?? {};

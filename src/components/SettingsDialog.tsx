@@ -13,11 +13,11 @@ import { flattenFolders, popoverPlacement } from './popoverPlacement';
 import { FolderPicker, NONE_LABEL } from './StatusPopovers';
 import { SyncPane } from './SyncPane';
 import { UpdatePane } from './UpdatePane';
+import type { UpdatePaneProps } from './UpdatePane';
 import { hexToHsl, hslToHex, normalizeHexInput } from '../lib/color';
 import { ACCENT_PRESETS, presetValue } from '../lib/settings';
 import type { AccentChoice, Theme } from '../lib/settings';
 import type { SyncConflict, SyncStatus, SyncSummary } from '../types/sync';
-import type { AppInfo, UpdateSummary } from '../types/update';
 import type { FolderNode } from '../types/folder';
 import type { Uuid } from '../types/note';
 
@@ -115,25 +115,7 @@ export type SyncTabState = {
 /** ADR-024. `lastCheckedAt` comes from the settings store rather than from the
     check itself, so the line survives the app being closed and reopened: it
     answers "when did this app last look", not "when did this session look". */
-export type UpdatesTabState = {
-  info: AppInfo | undefined;
-  isChecking: boolean;
-  update: UpdateSummary | null;
-  /** Whether *this tab's* check completed. The silent daily tick writes
-      `lastCheckedAt` without reporting anything into the tab, so the two are not
-      the same question and the pane asks this one. */
-  hasChecked: boolean;
-  checkError: string | null;
-  checkErrorCode: string | null;
-  isInstalling: boolean;
-  downloaded: number;
-  total: number | null;
-  installError: string | null;
-  installErrorCode: string | null;
-  lastCheckedAt: number | null;
-  onCheck: () => Promise<UpdateSummary | null>;
-  onInstall: () => Promise<void>;
-};
+export type UpdatesTabState = UpdatePaneProps;
 
 export function SettingsDialog({
   theme,
@@ -621,22 +603,7 @@ export function SettingsDialog({
             className="overflow-y-auto px-5 py-4"
           >
             {updates !== undefined ? (
-              <UpdatePane
-                info={updates.info}
-                isChecking={updates.isChecking}
-                update={updates.update}
-                hasChecked={updates.hasChecked}
-                checkError={updates.checkError}
-                checkErrorCode={updates.checkErrorCode}
-                isInstalling={updates.isInstalling}
-                downloaded={updates.downloaded}
-                total={updates.total}
-                installError={updates.installError}
-                installErrorCode={updates.installErrorCode}
-                lastCheckedAt={updates.lastCheckedAt}
-                onCheck={updates.onCheck}
-                onInstall={updates.onInstall}
-              />
+              <UpdatePane {...updates} />
             ) : (
               <p className="text-[12px] text-[var(--text-subtle)]">Updates are unavailable here.</p>
             )}

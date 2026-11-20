@@ -236,6 +236,7 @@ function Shell() {
   const {
     install: installUpdate,
     isInstalling: isInstallingUpdate,
+    installed: isUpdateInstalled,
     downloaded: updateDownloaded,
     total: updateTotal,
     error: updateInstallError,
@@ -921,6 +922,7 @@ function Shell() {
             checkError: updateCheckError,
             checkErrorCode: updateCheckErrorCode,
             isInstalling: isInstallingUpdate,
+            installed: isUpdateInstalled,
             downloaded: updateDownloaded,
             total: updateTotal,
             installError: updateInstallError,

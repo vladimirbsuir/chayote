@@ -1,4 +1,6 @@
+import { useMemo } from 'react';
 import { Download, RotateCw } from 'lucide-react';
+import { releaseNoteBlocks } from '../lib/releaseNotes';
 import type { AppInfo, UpdateSummary } from '../types/update';
 
 /* The Updates tab of the settings dialog: the running version, a check the user
@@ -37,6 +39,10 @@ export type UpdatePaneProps = {
       for one reason — see `checkFailure`. */
   checkErrorCode: string | null;
   isInstalling: boolean;
+  /** The last install resolved and the process is still running. On Android
+      that is the normal outcome: the package is handed to the system, which
+      closes the app once it has replaced it. */
+  installed: boolean;
   downloaded: number;
   /** `null` when the server did not send a length, which is the only reason the
       progress bar can be indeterminate rather than absent. */
@@ -58,6 +64,7 @@ export function UpdatePane({
   checkError,
   checkErrorCode,
   isInstalling,
+  installed,
   downloaded,
   total,
   installError,
@@ -68,7 +75,9 @@ export function UpdatePane({
 }: UpdatePaneProps) {
   const supported = info?.updatesSupported === true;
   const busy = isChecking || isInstalling;
-  const percent = total !== null && total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null;
+  const percent =
+    total !== null && total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null;
+  const notes = useMemo(() => releaseNoteBlocks(update?.notes ?? ''), [update?.notes]);
 
   return (
     <div className="flex flex-col gap-[18px]" data-testid="update-pane">
@@ -116,7 +125,11 @@ export function UpdatePane({
       ) : null}
 
       {checkError !== null ? (
-        <p className="text-[12px] text-[var(--danger)]" role="alert" data-testid="update-check-error">
+        <p
+          className="text-[12px] text-[var(--danger)]"
+          role="alert"
+          data-testid="update-check-error"
+        >
           {checkFailure(checkErrorCode, checkError)}
         </p>
       ) : null}
@@ -133,11 +146,26 @@ export function UpdatePane({
           {/* Release notes as plain text. `latest.json` carries them as
               untrusted text from a remote file, and the app has no Markdown
               renderer — rendering these as HTML would be the paste-sanitizer
-              problem (`04-editor.md` §5) in a place nobody thought to check. */}
-          {update.notes.trim().length > 0 ? (
-            <p className="whitespace-pre-wrap text-[12px] text-[var(--text-muted)]">
-              {update.notes}
-            </p>
+              problem (`04-editor.md` §5) in a place nobody thought to check.
+              `releaseNoteBlocks` only splits and unwraps; every block is a text
+              node. Capped and scrollable, so a long body cannot push the Install
+              button off a phone screen. */}
+          {notes.length > 0 ? (
+            <div
+              className="flex max-h-[160px] flex-col gap-1 overflow-y-auto text-[12px] text-[var(--text-muted)]"
+              data-testid="update-notes"
+            >
+              {notes.map((block, index) =>
+                block.kind === 'item' ? (
+                  <p key={index} className="flex gap-1.5 pl-1">
+                    <span aria-hidden="true">•</span>
+                    <span>{block.text}</span>
+                  </p>
+                ) : (
+                  <p key={index}>{block.text}</p>
+                ),
+              )}
+            </div>
           ) : null}
           {installError !== null ? (
             <p
@@ -180,6 +208,20 @@ export function UpdatePane({
         <DownloadProgress downloaded={downloaded} percent={percent} total={total} />
       ) : null}
 
+      {/* The install came back and the app is still running. Windows exits and
+          Linux restarts before this can render; Android hands the package to
+          the system and closes the app a moment later — or first shows its own
+          confirmation, and a dismissed one leaves the button above to retry. */}
+      {installed && !isInstalling && installError === null ? (
+        <p
+          className="text-[12px] text-[var(--text-muted)]"
+          role="status"
+          data-testid="update-installed"
+        >
+          {installedReason(info?.os ?? '')}
+        </p>
+      ) : null}
+
       {/* "Up to date" is a result, never a default — see the note at the top of
           this file. `hasChecked` rather than `lastCheckedAt`: the daily tick
           records that timestamp without reporting anything here, and a tab that
@@ -211,9 +253,7 @@ function DownloadProgress({
   return (
     <div className="flex flex-col gap-1.5" data-testid="update-progress">
       <p className="text-[12px] text-[var(--text-muted)]">
-        {percent === null
-          ? `Downloading… ${formatBytes(downloaded)}`
-          : `Downloading… ${percent}%`}
+        {percent === null ? `Downloading… ${formatBytes(downloaded)}` : `Downloading… ${percent}%`}
       </p>
       {/* No `role="progressbar"` when the length is unknown: a progressbar with no
           range is a lie a screen reader will happily announce. The percentage is
@@ -234,7 +274,9 @@ function DownloadProgress({
         </div>
       ) : null}
       <p className="text-[12px] text-[var(--text-subtle)]">
-        {total === null ? 'The size was not reported.' : `${formatBytes(downloaded)} of ${formatBytes(total)}`}
+        {total === null
+          ? 'The size was not reported.'
+          : `${formatBytes(downloaded)} of ${formatBytes(total)}`}
       </p>
     </div>
   );
@@ -287,6 +329,13 @@ function permissionRequiredReason(os: string): string | null {
   return os === 'Android'
     ? 'Android will not let Chayote install updates until you allow it. Tap Install and restart again after saying yes on the next screen.'
     : null;
+}
+
+/** What the tab says once the install has been handed over. */
+function installedReason(os: string): string {
+  return os === 'Android'
+    ? 'Android is installing the update and will close Chayote when it is done. If Android asked first and you said no, tap Install and restart again.'
+    : 'The update is installed. Chayote is restarting.';
 }
 
 /** Binary units, because that is what a download is measured in. One decimal

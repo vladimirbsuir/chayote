@@ -34,6 +34,7 @@ function pane(overrides: Partial<UpdatePaneProps> = {}): UpdatePaneProps {
     checkError: null,
     checkErrorCode: null,
     isInstalling: false,
+    installed: false,
     downloaded: 0,
     total: null,
     installError: null,
@@ -177,14 +178,67 @@ describe('UpdatePane', () => {
       <UpdatePane
         {...pane({
           update: FOUND,
-          installError: 'The installer committed without the app being replaced.',
+          installError: 'installer reported aborted',
           installErrorCode: 'INTERNAL',
         })}
       />,
     );
-    expect(screen.getByRole('alert').textContent).toContain(
-      'The installer committed without the app being replaced.',
+    expect(screen.getByRole('alert').textContent).toContain('installer reported aborted');
+  });
+
+  it('reads release notes as text: unwrapped, listed, and capped', () => {
+    /* The v0.2.1 manifest carried the GitHub release body, and the tab printed
+       its table, its asterisks and its hard line breaks verbatim. */
+    render(
+      <UpdatePane
+        {...pane({
+          update: {
+            ...FOUND,
+            notes:
+              '**Android:** install the APK once by hand\nto replace any earlier build.\n\n- Faster search\n- <b>not markup</b>',
+          },
+        })}
+      />,
     );
+    const notes = screen.getByTestId('update-notes');
+    expect(notes.textContent).toContain(
+      'Android: install the APK once by hand to replace any earlier build.',
+    );
+    expect(notes.textContent).not.toContain('**');
+    expect(notes.querySelectorAll('p')).toHaveLength(3);
+    /* Text, never markup. */
+    expect(notes.querySelector('b')).toBeNull();
+    expect(notes.textContent).toContain('<b>not markup</b>');
+    expect(notes.className).toContain('overflow-y-auto');
+  });
+
+  it('says the install was handed over once Android accepted it', () => {
+    render(<UpdatePane {...pane({ info: ANDROID, update: FOUND, installed: true })} />);
+    expect(text('update-installed')).toContain('will close Chayote');
+    expect(screen.queryByRole('alert')).toBeNull();
+    /* Still retryable: Android may have asked, and the answer may have been no. */
+    expect(isDisabled('update-install')).toBe(false);
+  });
+
+  it('says nothing about a handed-over install while another attempt runs or failed', () => {
+    const { rerender } = render(
+      <UpdatePane
+        {...pane({ info: ANDROID, update: FOUND, installed: true, isInstalling: true })}
+      />,
+    );
+    expect(screen.queryByTestId('update-installed')).toBeNull();
+    rerender(
+      <UpdatePane
+        {...pane({
+          info: ANDROID,
+          update: FOUND,
+          installed: true,
+          installError: 'installer reported aborted',
+          installErrorCode: 'INTERNAL',
+        })}
+      />,
+    );
+    expect(screen.queryByTestId('update-installed')).toBeNull();
   });
 
   it('falls back to a general reason on a platform it has no words for', () => {
@@ -221,7 +275,10 @@ describe('UpdatePane', () => {
   it('passes any other error message through unchanged', () => {
     render(
       <UpdatePane
-        {...pane({ checkError: 'There is no update waiting to be installed.', checkErrorCode: 'VALIDATION' })}
+        {...pane({
+          checkError: 'There is no update waiting to be installed.',
+          checkErrorCode: 'VALIDATION',
+        })}
       />,
     );
     expect(screen.getByRole('alert').textContent).toContain(

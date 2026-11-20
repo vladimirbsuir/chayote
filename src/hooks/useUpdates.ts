@@ -82,6 +82,9 @@ export function useCheckForUpdate(): {
 export function useInstallUpdate(): {
   install: () => Promise<void>;
   isInstalling: boolean;
+  /** The install returned without error and this process is still here — the
+      moment between Android accepting the package and closing the app. */
+  installed: boolean;
   downloaded: number;
   total: number | null;
   error: string | null;
@@ -107,6 +110,7 @@ export function useInstallUpdate(): {
   return {
     install: () => mutation.mutateAsync(),
     isInstalling: mutation.isPending,
+    installed: mutation.isSuccess,
     downloaded,
     total,
     error: failureOf(mutation.error, 'The update could not be installed.'),

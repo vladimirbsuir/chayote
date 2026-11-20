@@ -142,6 +142,7 @@ fn with_android_installer(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder
                         ))
                     })?;
                 app.manage(commands::updates::Installer(handle));
+                commands::updates::clear_stale_packages(app);
                 Ok(())
             })
             .build(),
