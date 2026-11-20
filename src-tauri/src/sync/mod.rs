@@ -414,18 +414,38 @@ impl SyncService {
             }
         }
 
-        let (pulled_pull, deferred) = self.pull_all(&client, open_note_id).await?;
+        let (pulled_pull, deferred) =
+            self.pull_all(&client, open_note_id)
+                .await
+                .inspect_err(|err| {
+                    let _ = self
+                        .db
+                        .with_conn(|conn| put_state(conn, KEY_LAST_ERROR, &err.log_line()));
+                })?;
         pulled += pulled_pull;
         let conflicts = self.db.with_conn(|conn| {
             conn.query_row("SELECT COUNT(*) FROM conflicts", (), |row| row.get(0))
                 .map_err(AppError::from)
         })?;
 
+        /* The cycle finished, but a row that failed inside it is still failing:
+        its error stays the status line's until it goes through (§8). Clearing
+        it unconditionally hid every per-row failure behind "last synced". */
         let now = crate::clock::now_ms();
         self.db.with_conn(|conn| {
+            use rusqlite::OptionalExtension as _;
+            let failing: Option<String> = conn
+                .query_row(
+                    "SELECT last_error FROM outbox
+                      WHERE sent_at IS NULL AND last_error IS NOT NULL AND last_error <> ''
+                   ORDER BY id DESC LIMIT 1",
+                    (),
+                    |row| row.get(0),
+                )
+                .optional()?;
             put_state(conn, KEY_LAST_SYNCED, &now.to_string())?;
-            put_state(conn, KEY_LAST_ERROR, "")?;
-            Ok(())
+            put_state(conn, KEY_LAST_ERROR, failing.as_deref().unwrap_or(""))?;
+            Ok::<_, AppError>(())
         })?;
 
         Ok(SyncSummary {
@@ -769,7 +789,16 @@ impl SyncService {
                 self.accept_push("notes", &row.entity_id, rev, row.outbox_id)?;
                 Ok(PushOutcome::Pushed)
             }
-            Some(remote) if remote.deleted_at.is_some() => {
+            /* A tombstone at or below `base_rev` is one this device already
+            knew — its own delete, pushed earlier — so a live local note is a
+            restore, and falls through to the plain update below, which clears
+            `deleted_at`. Only a tombstone newer than the base is a concurrent
+            delete that wins (§5.2); treating both alike put every restored
+            note back in the trash on the next sync. */
+            Some(remote)
+                if remote.deleted_at.is_some()
+                    && (local.deleted_at.is_some() || remote.rev > row.base_rev) =>
+            {
                 if local.deleted_at.is_some() {
                     // Both deleted: converge on the tombstone.
                     self.db.with_conn(|conn| {
@@ -803,8 +832,11 @@ impl SyncService {
                     .await
             }
             Some(_) => {
+                /* The server's real tag set, not an empty stand-in: with `have`
+                empty, a note whose last tag was removed compared equal and the
+                server kept the tag for ever. */
+                let remote_tags = query_remote_note_tags(client, &row.entity_id).await?;
                 let rev = update_remote_note(client, &row.entity_id, &local).await?;
-                let remote_tags: Vec<String> = Vec::new();
                 self.push_note_tags(client, &row.entity_id, &local.tag_ids, &remote_tags)
                     .await?;
                 self.accept_push("notes", &row.entity_id, rev, row.outbox_id)?;
@@ -941,7 +973,7 @@ impl SyncService {
         let now = crate::clock::now_ms();
         self.db.with_conn(|conn| {
             conn.execute(
-                "UPDATE outbox SET sent_at = ?3 WHERE sent_at IS NULL AND entity_id = ?1 AND id <> ?2",
+                "UPDATE outbox SET sent_at = ?3 WHERE sent_at IS NULL AND entity_id = ?1 AND id < ?2",
                 rusqlite::params![entity_id, outbox_id, now],
             )?;
             Ok(())
@@ -952,9 +984,25 @@ impl SyncService {
         let now = crate::clock::now_ms();
         self.db.with_conn(|conn| {
             let tx = conn.transaction()?;
+            /* A row queued *after* the one just pushed is an edit made while the
+            push was on the wire: the entity stays dirty for it, and it is
+            rebased onto the rev just assigned, because it was made on top of
+            the state that rev now names. It used to be marked sent along
+            with the older rows (`id <> ?`) and the entity marked clean, so the
+            last keystrokes before a sync never reached the server. */
+            let newer: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL AND entity_id = ?1 AND id > ?2",
+                rusqlite::params![id, outbox_id],
+                |row| row.get(0),
+            )?;
             tx.execute(
-                &format!("UPDATE {table} SET rev = ?2, dirty = 0 WHERE id = ?1"),
-                rusqlite::params![id, rev],
+                &format!("UPDATE {table} SET rev = ?2, dirty = ?3 WHERE id = ?1"),
+                rusqlite::params![id, rev, i64::from(newer > 0)],
+            )?;
+            tx.execute(
+                "UPDATE outbox SET base_rev = ?3
+                  WHERE sent_at IS NULL AND entity_id = ?1 AND id > ?2 AND base_rev < ?3",
+                rusqlite::params![id, outbox_id, rev],
             )?;
             if table == "notes" {
                 tx.execute(
@@ -967,7 +1015,7 @@ impl SyncService {
             // state just pushed: acknowledge it so it never re-pushes stale
             // content over the server.
             tx.execute(
-                "UPDATE outbox SET sent_at = ?3 WHERE sent_at IS NULL AND entity_id = ?1 AND id <> ?2",
+                "UPDATE outbox SET sent_at = ?3 WHERE sent_at IS NULL AND entity_id = ?1 AND id < ?2",
                 rusqlite::params![id, outbox_id, now],
             )?;
             tx.commit()?;
@@ -2701,6 +2749,51 @@ mod tests {
         tags.delete(&tag.id).expect("tag deletes");
         let status = sync.status().expect("status");
         assert_eq!(status.pending_count, 1);
+    }
+
+    /// An edit queued while a push was on the wire survives the push's
+    /// acknowledgement: it stays unsent, rebased onto the new rev, and the
+    /// note stays dirty. It used to be marked sent with the older rows.
+    #[test]
+    fn accepting_a_push_keeps_edits_queued_during_it() {
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let tags = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db));
+        let tag = tags.create("Before").expect("tag creates");
+        let rows = |db: &Database| {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, sent_at IS NOT NULL, base_rev FROM outbox WHERE entity_id = ?1 ORDER BY id",
+                )?;
+                let out = stmt
+                    .query_map([&tag.id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                    .collect::<Result<Vec<(i64, bool, i64)>, _>>()?;
+                Ok::<_, AppError>(out)
+            })
+            .expect("outbox reads")
+        };
+        let pushed = rows(&db)[0].0;
+
+        // The edit that arrives while the push is in flight.
+        tags.rename(&tag.id, "During").expect("tag renames");
+        sync.accept_push("tags", &tag.id, 42, pushed)
+            .expect("push accepted");
+
+        let after = rows(&db);
+        assert_eq!(after.len(), 2);
+        assert!(after[0].1, "the pushed row is sent");
+        assert!(!after[1].1, "the newer row is still pending");
+        assert_eq!(after[1].2, 42, "and rebased onto the pushed rev");
+        let dirty: i64 = db
+            .with_conn(|conn| {
+                conn.query_row("SELECT dirty FROM tags WHERE id = ?1", [&tag.id], |row| {
+                    row.get(0)
+                })
+                .map_err(AppError::from)
+            })
+            .expect("tag reads");
+        assert_eq!(dirty, 1);
     }
 
     /// Use-remote applies the *parked* document, not the live server row.
