@@ -57,3 +57,5 @@ Thumbs.db
 *.log
 npm-debug.log*
 yarn-error.log*
+# Phone screenshots from scripts/device.mjs
+shots/

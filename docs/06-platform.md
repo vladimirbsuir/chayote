@@ -92,6 +92,26 @@ The portable `.exe` is the unbundled release binary (`npx tauri build --no-bundl
 
 Code signing is out of scope for v1. Document the platform-specific unsigned-launch steps rather than pretending they do not exist.
 
+### 3.7.1 App icon
+
+The artwork is `src-tauri/icons/source/chayote.png` (the fruit on a flat navy field). Every icon is derived from it, never edited by hand:
+
+```powershell
+python scripts/icon-sources.py                            # Pillow
+npx tauri icon src-tauri/icons/source/manifest.json
+```
+
+The script writes three sources and the manifest `tauri icon` reads:
+
+| Source | Becomes | Why it is not the artwork itself |
+|--------|---------|----------------------------------|
+| `icon.png` | Desktop icons (`.ico`, `.icns`, PNGs) | A rounded square (22 % corners) with a 32 px transparent margin. The raw square artwork is a hard-edged tile next to every other app. |
+| `android-fg.png` | Adaptive foreground | The fruit cut out of the field, 62 of 108 dp tall. Launchers mask away the outer 18 dp of every side and may zoom further, so artwork that fills the square reads as cropped and zoomed in — which the first icon did. |
+| `android-mono.png` | Themed (monochrome) icon | Only the green facets, in white. |
+| `manifest.json` → `bg_color` | Adaptive background | The field's colour, sampled from the artwork's border. It was white. |
+
+`tauri icon` also writes an `ios/` folder; iOS is not a target, so it is deleted. The geometry is the sibling Physalis project's, whose icon is the reference for how large the fruit sits on a home screen.
+
 ## 3.8 Updates
 
 **This is the section that makes §3.7's unsigned builds updatable, and the two are related.** The updater's signature is *not* code signing: it is a minisign signature over the artifact, produced at build time and verified in-process before install. It says "this artifact came from the build that holds the private key", and nothing about whether macOS will trust the bundle inside. Both have to hold for an update to work, which is why the two platforms differ.

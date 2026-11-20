@@ -189,6 +189,8 @@ and every tap after measuring landed first try. Aim at the middle of the item
 box rather than its text core — at a scaled root font the items are far taller
 than their text, and an edge tap lands in the neighbour.
 
+**`scripts/device.mjs` wraps all of this.** `node scripts/device.mjs shot <name>` saves a scaled screenshot to `shots/` (gitignored; needs `ffmpeg` on `PATH`) and works on any build. On a debug build, `ui` lists the visible controls with `@refs` from the page itself, and `tap @3`, `long`, `drag`, `type`, `key back` and `eval <js>` act through real `adb shell input` touches, so a tap lands where the page says the control is rather than where a screenshot suggests. `start [--clear]` relaunches the app. Ported from the sibling Physalis project.
+
 **Reading the page on the device — CDP over `adb forward`, no build change needed.** A
 screenshot shows what is on the glass; it cannot say what the page thinks. The WebView in a
 debug build is already inspectable, so a layout claim can be *measured* on the phone:
