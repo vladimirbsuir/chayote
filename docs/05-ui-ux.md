@@ -120,11 +120,16 @@ Rules: the dark palette is not a mechanical inversion — contrast is verified p
 | Editor H1 | 28 px · 650 · 1.25 |
 | Editor H2 | 22 px · 600 · 1.3 |
 | Editor H3 | 19 px · 600 · 1.4 |
-| Note list title | 14 px · 550 · 1.4 |
+| Note list title | 14 px · 550 · 1.4; "Untitled" 400 italic with 0.2 em right padding |
 | Note list excerpt | 13 px · 400 · 1.45, two lines, ellipsis |
 | Note list timestamp | 12 px · 400 · 1.3 |
 | UI label | 13 px · 500 |
 | Sidebar section header | 11 px · 600, uppercase, 0.06 em tracking |
+
+**"Untitled" carries 0.2 em of right padding because its italic is synthesized.** Only the
+upright Inter weights are bundled, so the browser slants the roman glyphs, and a slanted
+ascender leans past its own advance width. The title clips at its box for the ellipsis, so
+without the padding the top of the final `d` was cut off on every platform.
 
 **The body's line height is 1.5, and the gap between paragraphs is 10 px** (ADR-023). It
 ran at 1.7 with a 14 px gap from M2, which is generous enough that a screen of ordinary
