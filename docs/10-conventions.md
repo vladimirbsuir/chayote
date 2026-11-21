@@ -13,7 +13,7 @@ chayote/
 ├── INSTALL.md                   # end-user install guide, separate from the spec
 ├── .github/workflows/
 │   ├── ci.yml                   # gates on every push: typecheck, lint, tests, clippy, e2e
-│   └── release.yml              # M8: clean-runner desktop bundles (nsis, app+dmg, deb+appimage)
+│   └── release.yml              # GitHub Release after green CI on main for an untagged version (ADR-031)
 ├── docs/                              # this specification
 │   ├── 01-product.md
 │   ├── 02-architecture.md
@@ -370,6 +370,7 @@ are handled in `editor.spec.ts` rather than worked around:
 - One logical change per commit. A commit that touches the schema, the UI, and the docs for two unrelated features will be rejected.
 - If a change alters a decision in `docs/`, that commit must include the documentation update. This is the rule from `README.md` §1 and it is the reason the documents stay trustworthy.
 - If a change touches tokens, icon sizes, layout metrics, or user-visible copy, it must also update `prototype/index.html` in the same commit (ADR-016). Visual values come from the prototype; behaviour comes from `05-ui-ux.md`.
+- **Every pull request that changes what the app does bumps the version** in `src-tauri/tauri.conf.json`, `package.json` and `src-tauri/Cargo.toml` (with both lockfiles), as its own `release: X.Y.Z` commit. A green CI run on `main` publishes a release only for a version that has no tag yet (ADR-031, `06-platform.md` §3.8.6), and installed apps only update to a higher version, so a change merged without a bump never reaches a device. Patch for fixes, minor for new behaviour or a server migration. A pull request that only touches docs, tests or CI may skip it.
 - CI on every push: `npm run typecheck`, `npm run lint`, `npm run test`, `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `npm run build`.
 
 ## 12. Documentation rules

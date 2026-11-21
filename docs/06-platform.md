@@ -250,6 +250,10 @@ The Android build needs a keystore instead of this key (§3.8.1): `REQUEST_INSTA
 
 `tauri build` and `latest.json` both take their version from `tauri.conf.json`; the git tag only names the Release. A tag of `v0.9.0` against a config of `0.1.0` would publish a Release whose name lies about its contents, and `requireSignedVersion` would then reject every update it offered. The `version` job in `release.yml` fails the run when they disagree, and a manual dispatch publishes the config's version rather than a branch name.
 
+### 3.8.6 A new version on `main` releases itself
+
+`release.yml` runs after every successful `CI` run on a push to `main` (ADR-031). It reads the version from `tauri.conf.json` at that commit and publishes `v<version>` only when that tag does not exist yet; otherwise it stops after the `version` job with a notice. A release is therefore a version bump merged through a pull request, and a merge without a bump ships nothing. The bump goes in `src-tauri/tauri.conf.json`, `package.json` and `src-tauri/Cargo.toml` together, with the lockfiles refreshed (`npm install --package-lock-only`, `cargo update -p chayote --manifest-path src-tauri/Cargo.toml`). Patch for fixes, minor for new behaviour or a server migration.
+
 ## 4. Android specifics
 
 ### 4.1 Build

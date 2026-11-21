@@ -37,6 +37,12 @@ is needed, since assertions cannot judge taste · a frozen decision would change
 - `main` is always buildable and always shippable. Work happens on topic
   branches (`fix/…`, `feat/…`); nothing lands on `main` except through a
   pull request, merged when CI is green.
+- **Bump the version in every pull request that changes the app** —
+  `src-tauri/tauri.conf.json`, `package.json`, `src-tauri/Cargo.toml` and
+  both lockfiles, as a `release: X.Y.Z` commit. Merging to `main` releases
+  automatically, but only a version that has no tag yet, and installed apps
+  only update to a higher version: without the bump the change never reaches
+  a device (ADR-031, `docs/06-platform.md` §3.8.6).
 - Conventional Commits, one logical change per commit
   (`docs/10-conventions.md` §11): `fix(sync): …`, `feat(ui): …`.
 - Commit at the end of each task, without being asked: once the gates pass,

@@ -6,6 +6,10 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -17,17 +21,37 @@ concurrency:
 jobs:
   version:
     name: Resolve version
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.read.outputs.version }}
       tag: ${{ steps.read.outputs.tag }}
+      sha: ${{ steps.read.outputs.sha }}
+      publish: ${{ steps.read.outputs.publish }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - id: read
         name: Read the version and prove the tag agrees with it
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           version=$(node -p "require('./src-tauri/tauri.conf.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_run" ] &&
+             git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$version is already released; bump src-tauri/tauri.conf.json to publish this commit"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
 
           if [ "${{ github.ref_type }}" = "tag" ]; then
             tag_name="$GITHUB_REF_NAME"
@@ -46,6 +70,7 @@ jobs:
   desktop:
     name: Bundle (${{ matrix.os }})
     needs: version
+    if: needs.version.outputs.publish == 'true'
     runs-on: ${{ matrix.os }}
     environment: release
     strategy:
@@ -60,6 +85,8 @@ jobs:
             bundles: deb,appimage
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -81,6 +108,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ needs.version.outputs.tag }}
+          releaseCommitish: ${{ needs.version.outputs.sha }}
           releaseName: Chayote ${{ needs.version.outputs.version }}
           releaseBody: |
             Chayote ${{ needs.version.outputs.version }}.
@@ -119,10 +147,13 @@ jobs:
   android:
     name: APK (Android)
     needs: [version, desktop]
+    if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     environment: release
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: actions/setup-node@v5
         with:
           node-version: 24
