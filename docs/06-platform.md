@@ -167,6 +167,19 @@ never leave the app, so no `FileProvider` grant is needed and no other app can
 read the package. The `FileProvider` the Tauri template declares in
 `AndroidManifest.xml` stays for the template's own reasons and is not used here.
 
+**The session is staged off the main thread, and the status receiver is never
+exported.** Tauri runs a plugin command on the Activity's main thread, which is
+also the WebView's, so copying a 15 MB APK there froze the app for the length of
+the copy; the copy, the `fsync` and the commit run on a single background
+executor, and the command resolves from there. A copy or commit that throws
+abandons the session rather than only closing it, so failed attempts cannot pile
+up staged sessions. The status receiver is registered through
+`ContextCompat.registerReceiver(…, RECEIVER_NOT_EXPORTED)` on every API level.
+Below Android 13 it used the plain `registerReceiver`, which is exported, so any
+app on an 8–12 device could broadcast `com.chayote.app.UPDATE_STATUS` with its own
+`EXTRA_INTENT` and have Chayote start it. On those versions `androidx.core`
+protects the receiver with the signature permission in §4.2 instead of the flag.
+
 **Two manifest keys, one file.** The APK carries both ARM ABIs, so one signature
 serves both, and `android-aarch64` and `android-armv7` share a URL and a
 signature. They are separate keys because a device asks for the one matching its
