@@ -481,6 +481,34 @@ does **not** reopen it, so the Android button now reads "Install update" and the
 and Play Protect's prompt appears on every self-update of an app it has not
 scanned, which no code here can avoid.
 
+### 4.1e Every TLS sync crashed the app, 2026-11-21
+
+The user pasted a hosted session-pooler string into Settings → Sync on the
+phone and on the laptop. On both, Sync now closed the app about a second
+later, and so did every background pass.
+
+**The chain.** `connect` built its TLS config with `ClientConfig::builder()`,
+which asks `rustls` to pick the process's crypto provider from its crate
+features. Two were enabled: `aws-lc-rs` through this crate's own `rustls`
+dependency with default features, and `ring` through `tauri-plugin-updater`.
+With both present `rustls` refuses to choose and panics ("Could not
+automatically determine the process-level CryptoProvider"). The release
+profile's `panic = "abort"` turns that into a closed app. A one-line test
+calling `ClientConfig::builder()` reproduced the panic in `cargo test`.
+
+**Why no test saw it.** Every `live_*` sync test talks to a local container
+with `sslmode=disable`, so no test built a TLS config. Hosted Postgres always
+speaks TLS.
+
+**The fix.** `tls_config` passes `ring` explicitly through
+`builder_with_provider`, and `rustls` is built without default features, which
+removes `aws-lc-rs` from `Cargo.lock`. `tls_config_builds_for_every_encrypted_mode`
+builds the config for `require` and `verify-full`; it also passed with the old
+`Cargo.toml` restored, so the code no longer depends on which providers the
+dependency tree happens to enable. A temporary test (not committed) then
+connected through the fixed `connect` to the user's own hosted session pooler and read
+`select version()` back over TLS.
+
 ## 5. Gates per milestone
 
 Run all of these before declaring any milestone done. They are also the CI gate, per `10-conventions.md` §11.
