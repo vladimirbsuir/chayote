@@ -209,6 +209,9 @@ function installFailure(code: string | null, message: string, os: string): strin
       'This platform has not been allowed to install the update yet.'
     );
   }
+  if (code === 'NETWORK') {
+    return 'Could not download the update. Check your connection and try again.';
+  }
   return message;
 }
 

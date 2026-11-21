@@ -39,6 +39,76 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 029 | One desktop instance, and a startup failure that says why | Accepted |
 | 030 | The app creates and upgrades the server schema itself | Accepted |
 | 031 | A green push to `main` with a new version releases itself | Accepted |
+| 032 | A release stays a draft until every platform is in `latest.json` | Accepted |
+| 033 | Updater failures say which side failed | Accepted |
+
+---
+
+## ADR-033 - Updater failures say which side failed
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Changes:** `02-architecture.md` §7, `10-conventions.md` §6
+
+**Context.** Every error from `tauri-plugin-updater` became `NETWORK`, and the
+Updates tab turns `NETWORK` into "Check your connection and try again." On
+2026-11-21 a phone with a working connection showed exactly that for fifteen
+minutes, because the published `latest.json` had no Android entry yet (ADR-032).
+The same mapping made a dropped download on install read "Could not reach the
+sync server."
+
+**Decision.** `commands::updates::update_error` classifies the plugin error:
+
+| Plugin error | Code | The reader sees |
+|---|---|---|
+| transport failure (`Reqwest`, not decode or status) | `NETWORK` | Check your connection and try again |
+| non-success status, no manifest, unreadable manifest | `UPDATE_SERVER` | The update server is not answering properly. Try again later. |
+| no entry for this platform (`TargetNotFound`, `TargetsNotFound`) | `UPDATE_NOT_FOR_DEVICE` | A new version is out, but not yet for this device. Try again later. |
+| signature, signed-version or package-format failure | `UPDATE_REJECTED` | The update failed its signature check, so Chayote did not install it. |
+| anything else | `INTERNAL` | the generic message |
+
+The plugin's text stays in `details` for the log. The tab words `NETWORK` on
+install as a download problem.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Treat a missing platform entry as "up to date" | That is the silent failure `11-verification.md` §4.1 warns about: a broken pipeline would tell every device it is current for ever. After ADR-032 a published release always has the entry, so the case means a broken release and is said honestly. |
+| Show the plugin's own message | It is written for developers ("the platform `android-aarch64` was not found in the response `platforms` object"). |
+
+**Consequences.** Three new error codes, which `10-conventions.md` §6 allows
+without a breaking change. The frontend needs no case for them: it shows the
+message of any code it does not word itself.
+
+---
+
+## ADR-032 - A release stays a draft until every platform is in `latest.json`
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Changes:** `06-platform.md` §3.8.6
+
+**Context.** `tauri-action` created the GitHub Release as published as soon as
+the first desktop bundle finished. From then on
+`releases/latest/download/latest.json` pointed at the new release, which had no
+manifest for the first seconds and no Android entries until the APK job ended,
+about fifteen minutes later. Every Android check in that window failed. With
+ADR-031 a release starts on every version bump, so the window is no longer rare.
+
+**Decision.** The `version` job opens the release as a **draft** with
+`gh release create --draft`, its body from `.github/release-notes.md`. The
+desktop jobs upload to it (`releaseDraft: true`), the Android job merges its
+keys into its `latest.json`, and only then `gh release edit --draft=false
+--latest` publishes it. The read-back of the public URLs moves after the
+publish. A draft has no git tag, so a failed run leaves a draft that the next
+run for the same version reuses, and no device ever sees it.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Let `tauri-action` create the draft | It finds a draft by listing releases, so two bundle jobs finishing together could each create one, and the release would split across two drafts. |
+| Build Android before the desktop jobs | Moves the window rather than closing it: whatever uploads first publishes a partial release. |
+
+**Consequences.** Devices see a release only when it is complete. A failed run
+leaves a draft on the releases page for a maintainer to rerun or delete.
 
 ---
 

@@ -125,6 +125,21 @@ describe('UpdatePane', () => {
     expect(screen.getByRole('alert').className).toContain('var(--danger)');
   });
 
+  it('words a dropped download as a connection problem, not a sync one', () => {
+    render(
+      <UpdatePane
+        {...pane({
+          update: FOUND,
+          installError: 'Could not reach the sync server.',
+          installErrorCode: 'NETWORK',
+        })}
+      />,
+    );
+    const alert = screen.getByRole('alert').textContent;
+    expect(alert).toContain('Could not download the update. Check your connection and try again.');
+    expect(alert).not.toContain('sync server');
+  });
+
   it('passes any other install error through unchanged', () => {
     render(
       <UpdatePane

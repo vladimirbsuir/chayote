@@ -27,6 +27,15 @@ pub enum AppError {
     #[error("Could not reach the sync server.")]
     Network(String),
 
+    #[error("The update server is not answering properly. Try again later.")]
+    UpdateServer(String),
+
+    #[error("A new version is out, but not yet for this device. Try again later.")]
+    UpdateNotForDevice(String),
+
+    #[error("The update failed its signature check, so Chayote did not install it.")]
+    UpdateRejected(String),
+
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     #[error("Android has not been allowed to install updates for Chayote yet.")]
     UpdatePermissionRequired,
@@ -46,6 +55,9 @@ impl AppError {
             Self::DocTooLarge => "DOC_TOO_LARGE",
             Self::CycleDetected => "CYCLE_DETECTED",
             Self::Network(_) => "NETWORK",
+            Self::UpdateServer(_) => "UPDATE_SERVER",
+            Self::UpdateNotForDevice(_) => "UPDATE_NOT_FOR_DEVICE",
+            Self::UpdateRejected(_) => "UPDATE_REJECTED",
             Self::UpdatePermissionRequired => "UPDATE_PERMISSION_REQUIRED",
             Self::Internal(_) => "INTERNAL",
         }
@@ -66,7 +78,10 @@ impl AppError {
             Self::DbOpen(detail)
             | Self::Validation(detail)
             | Self::Internal(detail)
-            | Self::Network(detail) => Some(detail.clone()),
+            | Self::Network(detail)
+            | Self::UpdateServer(detail)
+            | Self::UpdateNotForDevice(detail)
+            | Self::UpdateRejected(detail) => Some(detail.clone()),
             _ => None,
         }
     }

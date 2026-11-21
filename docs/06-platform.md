@@ -254,6 +254,8 @@ The Android build needs a keystore instead of this key (§3.8.1): `REQUEST_INSTA
 
 `release.yml` runs after every successful `CI` run on a push to `main` (ADR-031). It reads the version from `tauri.conf.json` at that commit and publishes `v<version>` only when that tag does not exist yet; otherwise it stops after the `version` job with a notice. A release is therefore a version bump merged through a pull request, and a merge without a bump ships nothing. The bump goes in `src-tauri/tauri.conf.json`, `package.json` and `src-tauri/Cargo.toml` together, with the lockfiles refreshed (`npm install --package-lock-only`, `cargo update -p chayote --manifest-path src-tauri/Cargo.toml`). Patch for fixes, minor for new behaviour or a server migration.
 
+The release is opened as a draft and published only after the Android job has merged its keys into `latest.json` (ADR-032), so `releases/latest` never points at a release a device cannot update from. A run that fails leaves an untagged draft, which the next run for that version reuses.
+
 ## 4. Android specifics
 
 ### 4.1 Build
