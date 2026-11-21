@@ -19,6 +19,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.Plugin
 import java.io.File
 import java.io.FileInputStream
+import java.util.concurrent.Executors
 
 @TauriPlugin
 class UpdaterPlugin(private val host: Activity) : Plugin(host) {
@@ -43,6 +44,8 @@ class UpdaterPlugin(private val host: Activity) : Plugin(host) {
 
   private var statusReceiverRegistered = false
 
+  private val staging = Executors.newSingleThreadExecutor()
+
   @Command
   fun install(invoke: Invoke) {
     val args = try {
@@ -64,11 +67,14 @@ class UpdaterPlugin(private val host: Activity) : Plugin(host) {
       return
     }
 
-    try {
-      commit(apk)
-      invoke.resolveObject(mapOf("status" to STATUS_COMMITTED))
-    } catch (err: Exception) {
-      invoke.reject("could not stage the update", err)
+    registerStatusReceiver()
+    staging.execute {
+      try {
+        commit(apk)
+        invoke.resolveObject(mapOf("status" to STATUS_COMMITTED))
+      } catch (err: Exception) {
+        invoke.reject("could not stage the update", err)
+      }
     }
   }
 
@@ -84,6 +90,7 @@ class UpdaterPlugin(private val host: Activity) : Plugin(host) {
     }
 
     val session = installer.openSession(installer.createSession(params))
+    var committed = false
     try {
       session.openWrite(ENTRY_NAME, 0, apk.length().toLong()).use { output ->
         FileInputStream(apk).use { input ->
@@ -93,12 +100,13 @@ class UpdaterPlugin(private val host: Activity) : Plugin(host) {
             if (read <= 0) break
             output.write(buffer, 0, read)
           }
-          output.flush()
+          session.fsync(output)
         }
       }
-      registerStatusReceiver()
       session.commit(statusIntentSender())
+      committed = true
     } finally {
+      if (!committed) session.abandon()
       session.close()
     }
   }
@@ -114,11 +122,7 @@ class UpdaterPlugin(private val host: Activity) : Plugin(host) {
   private fun registerStatusReceiver() {
     if (statusReceiverRegistered) return
     val filter = IntentFilter(STATUS_ACTION)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      ContextCompat.registerReceiver(host, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-    } else {
-      host.registerReceiver(receiver, filter)
-    }
+    ContextCompat.registerReceiver(host, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
     statusReceiverRegistered = true
   }
 

@@ -8,6 +8,7 @@ const UNTITLED = 'Untitled';
 type NoteCardProps = {
   note: NoteRow;
   isOpen: boolean;
+  tabbable?: boolean;
   timestamp: string;
   folderName: string | null;
   showFolder: boolean;
@@ -25,6 +26,7 @@ type NoteCardProps = {
 export const NoteCard = memo(function NoteCard({
   note,
   isOpen,
+  tabbable = isOpen,
   timestamp,
   folderName,
   showFolder,
@@ -60,7 +62,7 @@ export const NoteCard = memo(function NoteCard({
     <div
       role="option"
       aria-selected={isOpen}
-      tabIndex={isOpen ? 0 : -1}
+      tabIndex={tabbable ? 0 : -1}
       data-testid="note-card"
       data-note-id={note.id}
       onClick={() => {

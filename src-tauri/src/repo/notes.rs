@@ -130,6 +130,11 @@ impl NotesRepo for SqliteNotesRepo {
         let folder = folder_id.map(str::to_owned);
 
         self.db.with_conn(move |conn| {
+            if let Some(folder_id) = folder.as_deref() {
+                if !folder_is_live(conn, folder_id)? {
+                    return Err(AppError::NotFound);
+                }
+            }
             let tx = conn.transaction()?;
             tx.execute(
                 "INSERT INTO notes (id, title, title_source, doc_json, plain_text, excerpt,
@@ -366,9 +371,11 @@ impl NotesRepo for SqliteNotesRepo {
 }
 
 fn folder_is_live(conn: &rusqlite::Connection, id: &str) -> Result<bool, AppError> {
-    let mut stmt = conn.prepare("SELECT 1 FROM folders WHERE id = ?1")?;
-    let hit = stmt.query_row([id], |_| Ok(())).is_ok();
-    Ok(hit)
+    use rusqlite::OptionalExtension as _;
+    Ok(conn
+        .query_row("SELECT 1 FROM folders WHERE id = ?1", [id], |_| Ok(()))
+        .optional()?
+        .is_some())
 }
 
 fn replace_tags(

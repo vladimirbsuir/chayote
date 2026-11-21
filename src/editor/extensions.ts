@@ -9,6 +9,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { TaskItemView } from './TaskItemView'
 import { Indent } from './indent'
+import { DepthGuard } from './depthGuard'
 
 const TaskItemWithCheckbox = TaskItem.extend({
   addNodeView() {
@@ -74,11 +75,13 @@ export const EDITOR_EXTENSIONS = [
     gapcursor: false,
     link: false,
     trailingNode: false,
+    underline: false,
     undoRedo: { depth: 200, newGroupDelay: 500 },
   }),
   TaskList,
   TaskItemWithCheckbox.configure({ nested: true }),
   Indent,
+  DepthGuard,
   Typography,
   EditorShortcuts,
   Placeholder.configure({

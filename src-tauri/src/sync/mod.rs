@@ -122,7 +122,7 @@ impl SyncService {
             );
             let previous = get_state(&tx, KEY_ENDPOINT)?;
             if previous.as_deref() != Some(endpoint.as_str()) {
-                rebootstrap_tx(&tx)?;
+                rebootstrap_tx(&tx, previous.is_some())?;
                 put_state(&tx, KEY_ENDPOINT, &endpoint)?;
             }
             put_state(
@@ -139,7 +139,7 @@ impl SyncService {
     pub fn reupload_all(&self) -> Result<i64, AppError> {
         self.db.with_conn(|conn| {
             let tx = conn.transaction()?;
-            rebootstrap_tx(&tx)?;
+            rebootstrap_tx(&tx, false)?;
             let queued: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM outbox WHERE sent_at IS NULL",
                 (),
@@ -405,11 +405,17 @@ impl SyncService {
             let now = crate::clock::now_ms();
             client_execute(
                 client,
-                "INSERT INTO tags (id, name, rev, created_at, updated_at, deleted_at)
-                 VALUES ($1::uuid, '', nextval('sync_rev_seq'), $2, $2, $2)
-                 ON CONFLICT (id) DO UPDATE
-                 SET deleted_at = EXCLUDED.deleted_at, updated_at = EXCLUDED.updated_at,
-                     rev = nextval('sync_rev_seq')",
+                "WITH tombstone AS (
+                   INSERT INTO tags (id, name, rev, created_at, updated_at, deleted_at)
+                   VALUES ($1::uuid, '', nextval('sync_rev_seq'), $2, $2, $2)
+                   ON CONFLICT (id) DO UPDATE
+                   SET deleted_at = EXCLUDED.deleted_at, updated_at = EXCLUDED.updated_at,
+                       rev = nextval('sync_rev_seq')
+                   RETURNING id
+                 ), unlinked AS (
+                   DELETE FROM note_tags WHERE tag_id = $1::uuid
+                 )
+                 SELECT id FROM tombstone",
                 &[&id as _, &now as _],
             )
             .await?;
@@ -648,6 +654,16 @@ impl SyncService {
                 .as_ref()
                 .and_then(|note| note.deleted_at)
                 .unwrap_or(now);
+            let edited_elsewhere = match &local {
+                Some(_) => match query_remote_note(client, &row.entity_id).await? {
+                    Some(remote) if remote.deleted_at.is_none() && remote.rev > row.base_rev => {
+                        let tags = query_remote_note_tags(client, &row.entity_id).await?;
+                        Some((remote, tags))
+                    }
+                    _ => None,
+                },
+                None => None,
+            };
             let rev = query_rev(
                 client,
                 "INSERT INTO notes (id, doc_json, rev, created_at, updated_at, deleted_at)
@@ -659,26 +675,41 @@ impl SyncService {
                 &[&id as _, &now as _, &tombstone_at as _],
             )
             .await?;
-            if local.is_some() {
-                self.db.with_conn(|conn| {
-                    conn.execute(
-                        "UPDATE notes SET rev = ?2, dirty = 0 WHERE id = ?1",
-                        rusqlite::params![row.entity_id, rev],
-                    )?;
-                    Ok::<_, AppError>(())
-                })?;
-            }
-            self.mark_sent(row.outbox_id)?;
-            return Ok(PushOutcome::Pushed);
+            let Some(local) = local else {
+                self.mark_sent(row.outbox_id)?;
+                return Ok(PushOutcome::Pushed);
+            };
+            self.db.with_conn(|conn| {
+                let newer = merge::local_touches(conn, &row.entity_id, Some(row.outbox_id))?;
+                let tx = conn.transaction()?;
+                let rebase = match &edited_elsewhere {
+                    Some((remote, remote_tags)) => {
+                        let adopted = merge::merge_note(
+                            &local,
+                            remote,
+                            remote_tags,
+                            merge::Touched::default(),
+                        );
+                        merge::write_merged(&tx, &row.entity_id, &adopted, newer)?;
+                        merge::may_rebase(&adopted, newer)
+                    }
+                    None => true,
+                };
+                accept_push_tx(&tx, "notes", &row.entity_id, rev, row.outbox_id, rebase)?;
+                tx.commit()?;
+                Ok::<_, AppError>(())
+            })?;
+            return Ok(if edited_elsewhere.is_some() {
+                PushOutcome::Rebased
+            } else {
+                PushOutcome::Pushed
+            });
         }
         let local = local.expect("checked above");
 
         match query_remote_note(client, &row.entity_id).await? {
             None => {
                 let rev = insert_remote_note(client, &row.entity_id, &local).await?;
-                let remote_tags: Vec<String> = Vec::new();
-                self.push_note_tags(client, &row.entity_id, &local.tag_ids, &remote_tags)
-                    .await?;
                 self.accept_push("notes", &row.entity_id, rev, row.outbox_id)?;
                 Ok(PushOutcome::Pushed)
             }
@@ -715,10 +746,7 @@ impl SyncService {
                     .await
             }
             Some(_) => {
-                let remote_tags = query_remote_note_tags(client, &row.entity_id).await?;
                 let rev = update_remote_note(client, &row.entity_id, &local).await?;
-                self.push_note_tags(client, &row.entity_id, &local.tag_ids, &remote_tags)
-                    .await?;
                 self.accept_push("notes", &row.entity_id, rev, row.outbox_id)?;
                 Ok(PushOutcome::Pushed)
             }
@@ -739,8 +767,6 @@ impl SyncService {
         let merged = merge::merge_note(local, remote, &remote_tags, touched);
 
         let rev = update_remote_note(client, &row.entity_id, &merged.note).await?;
-        self.push_note_tags(client, &row.entity_id, &merged.note.tag_ids, &remote_tags)
-            .await?;
 
         self.db.with_conn(|conn| {
             let newer = merge::local_touches(conn, &row.entity_id, Some(row.outbox_id))?;
@@ -774,37 +800,6 @@ impl SyncService {
         })
     }
 
-    async fn push_note_tags(
-        &self,
-        client: &Client,
-        note_id: &str,
-        want: &[String],
-        have: &[String],
-    ) -> Result<(), AppError> {
-        if want == have {
-            return Ok(());
-        }
-        let note = uid(note_id)?;
-        let want_ids: Vec<uuid::Uuid> =
-            want.iter().map(|tag| uid(tag)).collect::<Result<_, _>>()?;
-        let now = crate::clock::now_ms();
-        client_execute(
-            client,
-            "DELETE FROM note_tags WHERE note_id = $1::uuid",
-            &[&note as _],
-        )
-        .await?;
-        for tag_id in &want_ids {
-            client_execute(
-                client,
-                "INSERT INTO note_tags (note_id, tag_id, created_at)
-                 VALUES ($1::uuid, $2::uuid, $3) ON CONFLICT DO NOTHING",
-                &[&note as _, tag_id as _, &now as _],
-            )
-            .await?;
-        }
-        Ok(())
-    }
     fn mark_sent(&self, outbox_id: i64) -> Result<(), AppError> {
         let now = crate::clock::now_ms();
         self.db.with_conn(|conn| {
@@ -1308,9 +1303,13 @@ fn endpoint_id(conn_str: &str) -> String {
     format!("{}@{}:{}/{}", user, host.to_lowercase(), port, dbname)
 }
 
-fn rebootstrap_tx(tx: &rusqlite::Transaction<'_>) -> Result<(), AppError> {
+fn rebootstrap_tx(tx: &rusqlite::Transaction<'_>, new_server: bool) -> Result<(), AppError> {
     for (table, entity) in [("tags", "tag"), ("folders", "folder"), ("notes", "note")] {
-        tx.execute(&format!("UPDATE {table} SET dirty = 1"), ())?;
+        if new_server {
+            tx.execute(&format!("UPDATE {table} SET dirty = 1, rev = 0"), ())?;
+        } else {
+            tx.execute(&format!("UPDATE {table} SET dirty = 1"), ())?;
+        }
         let mut stmt = tx.prepare(&format!("SELECT id, rev, deleted_at FROM {table}"))?;
         let rows: Vec<(String, i64, Option<i64>)> = stmt
             .query_map((), |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
@@ -1467,9 +1466,44 @@ fn pending_batch(conn: &mut rusqlite::Connection, now_ms: i64) -> Result<Vec<Out
             base_rev,
         })
         .collect();
-    batch.sort_by_key(|row| (entity_rank(&row.entity), row.outbox_id));
+    let mut depths: HashMap<String, usize> = HashMap::new();
+    for row in batch.iter().filter(|row| row.entity == "folder") {
+        depths.insert(row.entity_id.clone(), folder_depth(conn, &row.entity_id)?);
+    }
+    batch.sort_by_key(|row| {
+        (
+            entity_rank(&row.entity),
+            depths.get(&row.entity_id).copied().unwrap_or(0),
+            row.outbox_id,
+        )
+    });
     batch.truncate(BATCH_ROWS);
     Ok(batch)
+}
+
+fn folder_depth(conn: &rusqlite::Connection, id: &str) -> Result<usize, AppError> {
+    use rusqlite::OptionalExtension as _;
+    let mut seen = std::collections::HashSet::new();
+    let mut current = id.to_owned();
+    let mut depth = 0;
+    while seen.insert(current.clone()) {
+        let parent: Option<String> = conn
+            .query_row(
+                "SELECT parent_id FROM folders WHERE id = ?1",
+                [&current],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        match parent {
+            Some(parent) => {
+                depth += 1;
+                current = parent;
+            }
+            None => break,
+        }
+    }
+    Ok(depth)
 }
 
 enum PushOutcome {
@@ -1766,7 +1800,9 @@ async fn query_remote_note_tags(client: &Client, note_id: &str) -> Result<Vec<St
     let rows = tokio::time::timeout(
         QUERY_TIMEOUT,
         client.query(
-            "SELECT tag_id::text FROM note_tags WHERE note_id = $1::uuid ORDER BY tag_id",
+            "SELECT nt.tag_id::text FROM note_tags nt
+               JOIN tags t ON t.id = nt.tag_id AND t.deleted_at IS NULL
+              WHERE nt.note_id = $1::uuid ORDER BY nt.tag_id",
             &[&note_id as _],
         ),
     )
@@ -1789,8 +1825,9 @@ async fn query_remote_tag_sets(
     let rows = tokio::time::timeout(
         QUERY_TIMEOUT,
         client.query(
-            "SELECT note_id::text, tag_id::text FROM note_tags
-              WHERE note_id = ANY($1::uuid[]) ORDER BY note_id, tag_id",
+            "SELECT nt.note_id::text, nt.tag_id::text FROM note_tags nt
+               JOIN tags t ON t.id = nt.tag_id AND t.deleted_at IS NULL
+              WHERE nt.note_id = ANY($1::uuid[]) ORDER BY nt.note_id, nt.tag_id",
             &[&ids as _],
         ),
     )
@@ -1809,16 +1846,26 @@ async fn query_remote_tag_sets(
 async fn insert_remote_note(client: &Client, id: &str, local: &LocalNote) -> Result<i64, AppError> {
     let id = uid(id)?;
     let folder = uid_opt(local.folder_id.as_deref())?;
+    let tags = tag_uids(&local.tag_ids)?;
     let doc: serde_json::Value = serde_json::from_str(&local.doc_json)
         .map_err(|err| AppError::internal(format!("local document is not valid JSON: {err}")))?;
+    let now = crate::clock::now_ms();
     query_rev(
         client,
-        "INSERT INTO notes (id, title, title_source, doc_json, plain_text, excerpt,
-                            word_count, folder_id, is_pinned, rev,
-                            created_at, updated_at, deleted_at, synced_at)
-         VALUES ($1::uuid, $2, $3, $4::jsonb, $5, $6, $7, $8::uuid, $9, nextval('sync_rev_seq'),
-                 $10, $11, $12, $13)
-         RETURNING rev",
+        "WITH inserted AS (
+           INSERT INTO notes (id, title, title_source, doc_json, plain_text, excerpt,
+                              word_count, folder_id, is_pinned, rev,
+                              created_at, updated_at, deleted_at, synced_at)
+           VALUES ($1::uuid, $2, $3, $4::jsonb, $5, $6, $7, $8::uuid, $9, nextval('sync_rev_seq'),
+                   $10, $11, $12, $11)
+           RETURNING id, rev
+         ), linked AS (
+           INSERT INTO note_tags (note_id, tag_id, created_at)
+           SELECT inserted.id, t.id, $14
+             FROM inserted, tags t
+            WHERE t.id = ANY($13::uuid[]) AND t.deleted_at IS NULL
+         )
+         SELECT rev FROM inserted",
         &[
             &id as _,
             &local.title as _,
@@ -1832,7 +1879,8 @@ async fn insert_remote_note(client: &Client, id: &str, local: &LocalNote) -> Res
             &local.created_at as _,
             &local.updated_at as _,
             &local.deleted_at as _,
-            &local.updated_at as _,
+            &tags as _,
+            &now as _,
         ],
     )
     .await
@@ -1841,16 +1889,31 @@ async fn insert_remote_note(client: &Client, id: &str, local: &LocalNote) -> Res
 async fn update_remote_note(client: &Client, id: &str, local: &LocalNote) -> Result<i64, AppError> {
     let id = uid(id)?;
     let folder = uid_opt(local.folder_id.as_deref())?;
+    let tags = tag_uids(&local.tag_ids)?;
     let doc: serde_json::Value = serde_json::from_str(&local.doc_json)
         .map_err(|err| AppError::internal(format!("local document is not valid JSON: {err}")))?;
+    let now = crate::clock::now_ms();
     query_rev(
         client,
-        "UPDATE notes
-            SET title = $2, title_source = $3, doc_json = $4::jsonb, plain_text = $5,
-                excerpt = $6, word_count = $7, folder_id = $8::uuid, is_pinned = $9,
-                updated_at = $10, deleted_at = $11, synced_at = $10,
-                rev = nextval('sync_rev_seq')
-          WHERE id = $1::uuid RETURNING rev",
+        "WITH updated AS (
+           UPDATE notes
+              SET title = $2, title_source = $3, doc_json = $4::jsonb, plain_text = $5,
+                  excerpt = $6, word_count = $7, folder_id = $8::uuid, is_pinned = $9,
+                  updated_at = $10, deleted_at = $11, synced_at = $10,
+                  rev = nextval('sync_rev_seq')
+            WHERE id = $1::uuid
+           RETURNING id, rev
+         ), unlinked AS (
+           DELETE FROM note_tags
+            WHERE note_id IN (SELECT id FROM updated) AND NOT (tag_id = ANY($12::uuid[]))
+         ), linked AS (
+           INSERT INTO note_tags (note_id, tag_id, created_at)
+           SELECT updated.id, t.id, $13
+             FROM updated, tags t
+            WHERE t.id = ANY($12::uuid[]) AND t.deleted_at IS NULL
+           ON CONFLICT DO NOTHING
+         )
+         SELECT rev FROM updated",
         &[
             &id as _,
             &local.title as _,
@@ -1863,9 +1926,15 @@ async fn update_remote_note(client: &Client, id: &str, local: &LocalNote) -> Res
             &local.is_pinned as _,
             &local.updated_at as _,
             &local.deleted_at as _,
+            &tags as _,
+            &now as _,
         ],
     )
     .await
+}
+
+fn tag_uids(tag_ids: &[String]) -> Result<Vec<uuid::Uuid>, AppError> {
+    tag_ids.iter().map(|tag| uid(tag)).collect()
 }
 
 fn docs_equal(local: &str, remote: &str) -> bool {
@@ -2487,6 +2556,129 @@ mod tests {
     }
 
     #[test]
+    fn pending_batch_pushes_a_parent_folder_before_its_child() {
+        use crate::repo::FoldersRepo as _;
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let folders = crate::repo::folders::SqliteFoldersRepo::new(Arc::clone(&db));
+        let parent = folders.create("Parent", None).expect("parent");
+        let child = folders.create("Child", Some(&parent.id)).expect("child");
+        folders.rename(&parent.id, "Renamed").expect("rename");
+
+        let batch = db
+            .with_conn(|conn| pending_batch(conn, crate::clock::now_ms()))
+            .expect("batch reads");
+        let order: Vec<&str> = batch
+            .iter()
+            .filter(|row| row.entity == "folder")
+            .map(|row| row.entity_id.as_str())
+            .collect();
+        assert_eq!(order, vec![parent.id.as_str(), child.id.as_str()]);
+    }
+
+    #[test]
+    fn a_folder_tombstone_also_tombstones_children_the_deleting_device_never_saw() {
+        use crate::repo::FoldersRepo as _;
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let folders = crate::repo::folders::SqliteFoldersRepo::new(Arc::clone(&db));
+        let parent = folders.create("Parent", None).expect("parent");
+        let child = folders.create("Child", Some(&parent.id)).expect("child");
+        let gone = folders
+            .create("Gone too", Some(&parent.id))
+            .expect("second child");
+        db.with_conn(|conn| {
+            conn.execute("UPDATE folders SET rev = 4, dirty = 0", ())?;
+            conn.execute("UPDATE outbox SET sent_at = 1", ())?;
+            Ok::<_, AppError>(())
+        })
+        .expect("synced");
+
+        let tombstone = |id: &str, rev: i64| RemoteFolder {
+            id: id.to_owned(),
+            name: String::new(),
+            parent_id: None,
+            position: 0,
+            rev,
+            created_at: 1,
+            updated_at: 2,
+            deleted_at: Some(2),
+        };
+        db.with_conn(|conn| {
+            tree::apply_remote_folders(conn, &[tombstone(&parent.id, 10), tombstone(&gone.id, 11)])
+        })
+        .expect("tombstones apply");
+
+        let queued: Vec<(String, String)> = db
+            .with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT entity_id, op FROM outbox WHERE sent_at IS NULL ORDER BY id",
+                )?;
+                let rows = stmt
+                    .query_map((), |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok::<_, AppError>(rows)
+            })
+            .expect("outbox reads");
+        assert_eq!(queued, vec![(child.id.clone(), "delete".to_owned())]);
+    }
+
+    #[test]
+    fn a_new_server_does_not_inherit_the_old_servers_revisions() {
+        let db = Database::open_in_memory().expect("memory db");
+        let sync = SyncService::new(Arc::new(db));
+        let db = sync.db.clone();
+        let notes = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db));
+        let created = notes.create(None).expect("note creates");
+        sync.set_config("postgresql://u:p@a:5432/db?sslmode=disable", true)
+            .expect("first server");
+        db.with_conn(|conn| {
+            conn.execute("UPDATE notes SET rev = 5000, dirty = 0", ())?;
+            conn.execute("UPDATE outbox SET sent_at = 1", ())?;
+            Ok::<_, AppError>(())
+        })
+        .expect("synced against the first server");
+
+        sync.reupload_all().expect("same server re-upload");
+        let kept: i64 = db
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT MAX(base_rev) FROM outbox WHERE sent_at IS NULL",
+                    (),
+                    |row| row.get(0),
+                )
+                .map_err(AppError::from)
+            })
+            .expect("reads");
+        assert_eq!(
+            kept, 5000,
+            "re-uploading to the same server keeps its revisions"
+        );
+
+        sync.set_config("postgresql://u:p@b:5432/db?sslmode=disable", true)
+            .expect("second server");
+        let (rev, base): (i64, i64) = db
+            .with_conn(|conn| {
+                let rev = conn.query_row(
+                    "SELECT rev FROM notes WHERE id = ?1",
+                    [&created.summary.id],
+                    |row| row.get(0),
+                )?;
+                let base = conn.query_row(
+                    "SELECT base_rev FROM outbox WHERE sent_at IS NULL AND entity_id = ?1
+                      ORDER BY id DESC LIMIT 1",
+                    [&created.summary.id],
+                    |row| row.get(0),
+                )?;
+                Ok::<_, AppError>((rev, base))
+            })
+            .expect("reads");
+        assert_eq!((rev, base), (0, 0));
+    }
+
+    #[test]
     fn connection_string_validation_rejects_non_postgres() {
         let db = Database::open_in_memory().expect("memory db");
         let sync = SyncService::new(Arc::new(db));
@@ -2963,6 +3155,140 @@ mod tests {
     }
 
     static LIVE_2DEV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn live_dead_tags_and_stale_trash_do_not_lose_or_block_anything() {
+        let _turn = LIVE_2DEV.lock().await;
+        let url = match std::env::var("CHAYOTE_SYNC_2DEV_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping two-device sync test: CHAYOTE_SYNC_2DEV_URL unset");
+                return;
+            }
+        };
+
+        fn device(tag: &str) -> (std::path::PathBuf, Arc<Database>, SyncService) {
+            let dir = std::env::temp_dir().join(format!(
+                "chayote-sync-dead-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("temp dir");
+            let db = Arc::new(Database::open(&dir).expect("database opens"));
+            let sync = SyncService::new(Arc::clone(&db));
+            (dir, db, sync)
+        }
+        fn text_doc(text: &str) -> serde_json::Value {
+            serde_json::json!({
+                "type": "doc",
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]
+            })
+        }
+
+        let client = connect(&url).await.expect("connects to test Postgres");
+        client
+            .batch_execute(include_str!("../../../postgres/schema.sql"))
+            .await
+            .expect("server schema applies");
+        client
+            .execute(
+                "TRUNCATE note_tags, notes, tags, folders RESTART IDENTITY",
+                &[],
+            )
+            .await
+            .expect("server starts empty");
+
+        let (dir_a, db_a, sync_a) = device("a");
+        let (dir_b, db_b, sync_b) = device("b");
+        sync_a.set_config(&url, true).expect("A config saves");
+        sync_b.set_config(&url, true).expect("B config saves");
+        let tags_a = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db_a));
+        let notes_a = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db_a));
+        let notes_b = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db_b));
+
+        let doomed = tags_a.create("Doomed").expect("tag creates");
+        let created = notes_a.create(None).expect("note creates");
+        let id = created.summary.id.clone();
+        notes_a
+            .save(&crate::repo::SaveNoteInput {
+                id: id.clone(),
+                doc: text_doc("original"),
+                folder_id: None,
+                tag_ids: vec![doomed.id.clone()],
+                is_pinned: false,
+            })
+            .expect("note saves");
+        sync_a
+            .run_cycle(None)
+            .await
+            .expect("A pushes the tagged note");
+        let linked: i64 = client
+            .query_one("SELECT COUNT(*) FROM note_tags", &[])
+            .await
+            .expect("counts")
+            .get(0);
+        assert_eq!(linked, 1, "the note and its tag land together");
+
+        tags_a.delete(&doomed.id).expect("tag deletes");
+        sync_a
+            .run_cycle(None)
+            .await
+            .expect("A pushes the tag tombstone");
+        let linked: i64 = client
+            .query_one("SELECT COUNT(*) FROM note_tags", &[])
+            .await
+            .expect("counts")
+            .get(0);
+        assert_eq!(linked, 0, "a tag tombstone takes its links with it");
+
+        let first_b = sync_b
+            .run_cycle(None)
+            .await
+            .expect("a fresh device pulls past the dead tag");
+        assert!(first_b.pulled >= 1, "B downloads the note: {first_b:?}");
+        assert!(notes_b
+            .get(&id)
+            .expect("B reads note")
+            .summary
+            .tags
+            .is_empty());
+
+        notes_b
+            .save(&crate::repo::SaveNoteInput {
+                id: id.clone(),
+                doc: text_doc("edited on B"),
+                folder_id: None,
+                tag_ids: vec![],
+                is_pinned: false,
+            })
+            .expect("B edits");
+        sync_b.run_cycle(None).await.expect("B pushes its edit");
+
+        notes_a.soft_delete(&id).expect("A trashes its stale copy");
+        sync_a.run_cycle(None).await.expect("A pushes the trash");
+        let trashed = notes_a.get(&id).expect("A reads the trashed note");
+        assert!(
+            trashed.summary.excerpt.contains("edited on B"),
+            "the trashed copy takes B's newer text: {:?}",
+            trashed.summary.excerpt
+        );
+
+        notes_a.restore(&id).expect("A restores");
+        sync_a.run_cycle(None).await.expect("A pushes the restore");
+        sync_b.run_cycle(None).await.expect("B pulls the restore");
+        let on_b = notes_b.get(&id).expect("B reads note");
+        assert!(on_b.deleted_at.is_none(), "the restore reaches B");
+        assert!(
+            on_b.summary.excerpt.contains("edited on B"),
+            "B's edit survives A's stale trash and restore: {:?}",
+            on_b.summary.excerpt
+        );
+
+        drop((db_a, db_b, sync_a, sync_b));
+        let _ = std::fs::remove_dir_all(dir_a);
+        let _ = std::fs::remove_dir_all(dir_b);
+    }
 
     #[tokio::test]
     async fn live_two_devices_share_tag_union_and_lww() {

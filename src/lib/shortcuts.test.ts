@@ -13,6 +13,17 @@ describe('isLetterShortcut', () => {
     expect(isLetterShortcut({ key: 'в', code: 'KeyD' }, 'd')).toBe(true);
   });
 
+  it('follows the printed Latin letter, not the physical key, on Dvorak', () => {
+    expect(isLetterShortcut({ key: 'b', code: 'KeyN' }, 'n')).toBe(false);
+    expect(isLetterShortcut({ key: 'b', code: 'KeyN' }, 'b')).toBe(true);
+    expect(isLetterShortcut({ key: 'u', code: 'KeyF' }, 'f')).toBe(false);
+  });
+
+  it('ignores AltGr, which reports Ctrl and Alt together', () => {
+    expect(isLetterShortcut({ key: 'ń', code: 'KeyN', altKey: true }, 'n')).toBe(false);
+    expect(isLetterShortcut({ key: 's', code: 'KeyS', altKey: true }, 's')).toBe(false);
+  });
+
   it('rejects other keys', () => {
     expect(isLetterShortcut({ key: 'x', code: 'KeyX' }, 'f')).toBe(false);
     expect(isLetterShortcut({ key: 'а', code: 'KeyF' }, 'n')).toBe(false);

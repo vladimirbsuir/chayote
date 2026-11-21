@@ -73,6 +73,11 @@ export function createMockBackend(
 ): Backend {
   const state = db;
   const syncState = { connectionString: '', enabled: false };
+  let created = 0;
+  const freshId = (prefix: string): Uuid => {
+    created += 1;
+    return uuidFrom(`${prefix}-${created}`);
+  };
 
   const liveNotes = (): MockNote[] => state.notes;
 
@@ -102,7 +107,7 @@ export function createMockBackend(
     notes_create: ({ folderId }) => {
       const timestamp = nowMs();
       const note: MockNote = {
-        id: uuidFrom(`n-${timestamp}-${state.notes.length}`),
+        id: freshId(`n-${timestamp}`),
         doc: EMPTY_DOC,
         title: '',
         titleSource: 'auto',
@@ -205,7 +210,7 @@ export function createMockBackend(
       }
       const siblings = state.folders.filter((folder) => folder.parentId === parentId);
       const folder = {
-        id: uuidFrom(`f-${clean}-${siblings.length}`),
+        id: freshId(`f-${clean}`),
         name: clean,
         parentId,
         position: siblings.length,
@@ -269,7 +274,7 @@ export function createMockBackend(
       if (existing !== undefined) {
         return { ...existing, count: countNotes(state, existing.id) };
       }
-      const tag = { id: uuidFrom(`t-${clean}`), name: clean };
+      const tag = { id: freshId(`t-${clean}`), name: clean };
       state.tags.push(tag);
       return { ...tag, count: 0 };
     },

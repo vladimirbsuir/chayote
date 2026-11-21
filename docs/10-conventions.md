@@ -82,6 +82,7 @@ chayote/
 │   │   ├── pasteSanitizer.ts
 │   │   ├── clipboardSerializer.ts
 │   │   ├── TaskItemView.tsx            # task-checkbox node view; ADR-015 check icon
+│   │   ├── depthGuard.ts              # drops transactions deeper than the validator's 12 levels
 │   │   └── NoteEditor.tsx              # one instance per note_id; see §6
 │   ├── components/                    # presentational, one responsibility each
 │   │   ├── TopBar.tsx
@@ -134,7 +135,8 @@ chayote/
     │   ├── 0004_sync.sql
     │   ├── 0005_sync_backoff.sql
     │   ├── 0006_note_title_field.sql
-    │   └── 0007_tags_live_unique.sql
+    │   ├── 0007_tags_live_unique.sql
+    │   └── 0008_fts_update_columns.sql
     └── src/
         ├── main.rs
         ├── lib.rs

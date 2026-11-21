@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ReactNode } from 'react';
 import type { NoteRow } from '../types/ipc';
@@ -64,8 +65,6 @@ export function NoteList({
 
   const openMenu = useCallback(
     (id: Uuid, anchor: HTMLElement): void => {
-      const note = notes.find((candidate) => candidate.id === id);
-      if (note === undefined) return;
       const rect = anchor.getBoundingClientRect();
       const up =
         rect.bottom + MENU_ESTIMATED_HEIGHT > window.innerHeight &&
@@ -82,7 +81,7 @@ export function NoteList({
         },
       });
     },
-    [hasRowActions, notes],
+    [hasRowActions],
   );
   const closeMenu = useCallback((): void => {
     setMenu(null);
@@ -103,6 +102,44 @@ export function NoteList({
     getItemKey: (index) => notes[index]?.id ?? index,
   });
 
+  const [focusedId, setFocusedId] = useState<Uuid | null>(null);
+  const tabbableId =
+    (focusedId !== null && notes.some((note) => note.id === focusedId) ? focusedId : null) ??
+    (openNoteId !== null && notes.some((note) => note.id === openNoteId) ? openNoteId : null) ??
+    notes[0]?.id ??
+    null;
+
+  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const card = (event.target as HTMLElement).closest<HTMLElement>('[role="option"]');
+    if (card === null || card !== event.target) return;
+    const current = notes.findIndex((note) => note.id === card.dataset.noteId);
+    if (current < 0) return;
+    const last = notes.length - 1;
+    const next =
+      event.key === 'ArrowDown'
+        ? Math.min(last, current + 1)
+        : event.key === 'ArrowUp'
+          ? Math.max(0, current - 1)
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? last
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    const id = notes[next]?.id;
+    if (id === undefined) return;
+    setFocusedId(id);
+    virtualizer.scrollToIndex(next);
+    const focusCard = (): void => {
+      scrollRef.current
+        ?.querySelector<HTMLElement>(`[role="option"][data-note-id="${id}"]`)
+        ?.focus();
+    };
+    focusCard();
+    requestAnimationFrame(focusCard);
+  };
+
   if (notes.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-start justify-center px-4 pt-8">
@@ -117,6 +154,7 @@ export function NoteList({
       role="listbox"
       aria-label="Notes"
       data-testid="note-list"
+      onKeyDown={moveFocus}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2"
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
@@ -140,6 +178,7 @@ export function NoteList({
               <NoteCard
                 note={note}
                 isOpen={note.id === openNoteId}
+                tabbable={note.id === tabbableId}
                 timestamp={relativeTime(note.updatedAt, now)}
                 folderName={
                   note.folderId === null ? null : (folderNames.get(note.folderId) ?? null)

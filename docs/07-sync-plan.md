@@ -156,6 +156,20 @@ updates cleanly instead of parking again.
   device's push hit the server's unique index and retried for ever, and its
   pull hit the local one and failed every cycle. A rename onto another live
   tag's name on the *same* device is refused as `VALIDATION`.
+- **Folders are pushed parent-first.** The batch orders folder rows by their
+  depth in the local tree. Ordering by outbox id alone pushed a child created
+  under a parent that was renamed afterwards before the parent itself, and a
+  new parent does not exist on the server yet, so the child failed the foreign
+  key and backed off with every note filed in it.
+- **A pulled folder tombstone deletes the subtree everywhere.** Deleting a
+  folder deletes its subtree (`03-data-model.md` §3.2), and the deleting
+  device queues a tombstone for every descendant it holds. A child created on
+  another device and never seen by the deleting one got no tombstone, so the
+  receiving device's cascade removed it locally with no outbox row while the
+  deleting device later pulled it and filed it at the root: one folder, alive
+  on one device and gone on the other, for good. Applying a tombstone now
+  queues a tombstone for each local descendant that is not itself in the
+  pulled rows.
 - A pull filing a note into a folder the device does not hold (deleted here,
   never arrived): the note is unfiled instead of failing the cycle — the same
   `ON DELETE SET NULL` semantics a local folder delete gets. Crashing the
@@ -174,6 +188,23 @@ is lost — the server side already applied the full union, and the retry
 completes the links once the tag row arrives. Filtering the unknown tag
 instead would clobber the server union on the next push.
 
+**A deleted tag takes its links with it on the server.** A local tag delete
+drops its `note_tags` rows by cascade but queues no note, and the tombstone
+push used to set only `tags.deleted_at`, so the server kept links to a dead
+tag. A device that never had the tag — a new one, or one after a server
+switch — then pulled a note whose set named it, the local insert failed the
+foreign key, and every pull failed on that note for ever. The tombstone push
+now deletes the tag's server links in the same statement, and every read of
+a server tag set joins live tags, which also heals a server that already
+holds such links.
+
+**A note and its tag set are one server write.** The note row, its revision
+and its `note_tags` are written by a single statement (data-modifying CTEs),
+so a pull can never see the new `rev` with the old or a half-written set and
+move its watermark past it, and a dropped connection cannot leave the server
+note with its links deleted and not re-inserted. Links to tags the server
+holds only as tombstones are skipped there, for the reason above.
+
 ### 5.4 Deletes
 
 Soft deletes propagate as tombstone writes. Tombstones are retained
@@ -184,6 +215,17 @@ resurrecting what it never saw deleted. Permanent delete is refused while
 `rev` has never been synced, so a never-pushed note cannot vanish from
 another device without ever existing there.
 
+**A delete push compares `base_rev` like any other push.** The tombstone is
+written whatever the server holds, but when the server's row is newer than
+the device's base — another device edited the note the device just trashed —
+the device takes that newer content into its trashed copy (as a merge with
+nothing touched locally) before it adopts the tombstone's `rev`. It used to
+adopt the `rev` over its own stale text, so a later restore pushed that stale
+text as a plain update and the other device's edit was gone everywhere,
+without a conflict. The acknowledgement goes through the same path as any
+push, so a restore queued while the delete was in flight stays dirty and is
+rebased instead of being re-trashed by the next push.
+
 ## 6. Bootstrap
 
 First sync on a device with existing local data needs no special case: the
@@ -192,7 +234,12 @@ dependency order — tags → folders → notes → `note_tags` — *is* the upl
 and pull only starts after. If a row's ID already exists remotely, treat it
 as a conflict per §5. Saving a *different* connection string re-queues
 everything and restarts the watermarks, because revisions are meaningless
-against a server that has never seen the device.
+against a server that has never seen the device. The local `rev` of every row
+is reset to 0 with them, and the queued rows carry base 0: the old server's
+revisions used as a base made a stale row look newer than an edit another
+device had already made on the new server, so it was pushed as a plain update
+over it, and the pull skipped new-server rows whose `rev` was below the old
+one. "Re-upload everything" against the *same* server keeps the revisions.
 
 Recovery after a server wipe is the same operation on demand: "Re-upload
 everything" (`sync_reupload`) re-queues every surviving row and restarts the

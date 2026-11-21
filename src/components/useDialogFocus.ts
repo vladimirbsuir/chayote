@@ -32,8 +32,19 @@ export function useDialogFocus(onCancel: () => void): DialogFocus {
 
   useEffect(() => {
     const onDocumentKeyDown = (event: KeyboardEvent): void => {
+      const panel = panelRef.current;
+      if (panel === null || panel.contains(event.target as Node)) return;
+      if (event.key === 'Tab') {
+        const origin = event.target instanceof Element ? event.target : null;
+        if (origin?.closest('[aria-modal="true"]') != null) return;
+        const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
+        const target = event.shiftKey ? focusable[focusable.length - 1] : focusable[0];
+        if (target === undefined) return;
+        event.preventDefault();
+        target.focus();
+        return;
+      }
       if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (panelRef.current?.contains(event.target as Node)) return;
       event.preventDefault();
       cancelRef.current();
     };

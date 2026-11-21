@@ -98,14 +98,15 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
             "0004_sync.sql",
             "0005_sync_backoff.sql",
             "0006_note_title_field.sql",
-            "0007_tags_live_unique.sql"
+            "0007_tags_live_unique.sql",
+            "0008_fts_update_columns.sql"
         ]
     );
     assert_eq!(applied[0].0, 1);
 
     let reopened = Arc::new(Database::open(f._dir.path()).expect("reopen"));
     let again = crate::db::migrate::applied_all(&reopened).expect("readable again");
-    assert_eq!(again.len(), 7);
+    assert_eq!(again.len(), 8);
 }
 
 #[test]
@@ -1737,4 +1738,93 @@ fn update_payloads_match_the_typescript_types() {
             "UpdateSummary carries {field}"
         );
     }
+}
+
+#[test]
+fn a_word_with_punctuation_finds_the_note_it_came_from() {
+    let f = fixture("fts-punctuation");
+    let repo = notes(&f.db);
+    let created = repo.create(None).expect("create");
+    repo.save(&on(
+        &created.summary.id,
+        note_with_text("send the e-mail, don't forget example.com and pi 3.14"),
+    ))
+    .expect("save");
+
+    let search = SearchService::new(Arc::clone(&f.db));
+    for query in ["e-mail", "don't", "example.com", "3.14", "exam", "e-ma"] {
+        let page = search
+            .query(&SearchInput {
+                query: query.to_owned(),
+                filter: NoteFilter::new(Selection::All),
+                limit: 20,
+                offset: 0,
+            })
+            .expect("search");
+        assert_eq!(page.total, 1, "query {query:?} finds the note");
+    }
+    assert_eq!(
+        SearchService::to_fts_match("e-mail and"),
+        Some("\"e mail\"* AND \"and\"*".to_owned())
+    );
+}
+
+#[test]
+fn pinning_does_not_rewrite_the_search_index() {
+    let f = fixture("fts-pin");
+    let repo = notes(&f.db);
+    let created = repo.create(None).expect("create");
+    repo.save(&on(&created.summary.id, note_with_text("indexed words")))
+        .expect("save");
+    repo.set_pinned(&created.summary.id, true).expect("pin");
+    let trigger_sql: String =
+        f.db.with_conn(|conn| {
+            Ok::<_, crate::error::AppError>(conn.query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'notes_fts_au'",
+                [],
+                |row| row.get(0),
+            )?)
+        })
+        .expect("trigger sql");
+    assert!(trigger_sql.contains("UPDATE OF title, plain_text"));
+    assert_eq!(
+        scalar(
+            &f.db,
+            "SELECT COUNT(*) FROM notes_fts WHERE notes_fts MATCH 'indexed'"
+        ),
+        1
+    );
+}
+
+#[test]
+fn creating_a_note_in_a_missing_folder_is_not_found() {
+    let f = fixture("create-missing-folder");
+    let repo = notes(&f.db);
+    let err = repo
+        .create(Some("0190a7d0-0000-7000-8000-000000000000"))
+        .expect_err("missing folder");
+    assert!(matches!(err, crate::error::AppError::NotFound));
+    assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM notes"), 0);
+    assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 0);
+}
+
+#[test]
+fn listing_more_notes_than_one_tag_lookup_holds_keeps_every_tag() {
+    let f = fixture("tags-chunked");
+    let repo = notes(&f.db);
+    let tag = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&f.db))
+        .create("bulk")
+        .expect("tag");
+    for _ in 0..1_201 {
+        let created = repo.create(None).expect("create");
+        repo.save(&SaveNoteInput {
+            tag_ids: vec![tag.id.clone()],
+            ..on(&created.summary.id, note_with_text("tagged"))
+        })
+        .expect("save");
+    }
+
+    let listed = repo.list(&NoteFilter::new(Selection::All)).expect("list");
+    assert_eq!(listed.len(), 1_201);
+    assert!(listed.iter().all(|note| note.tags.len() == 1));
 }

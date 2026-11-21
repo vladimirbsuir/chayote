@@ -1,5 +1,5 @@
 export function isLetterShortcut(
-  event: { key: string; code: string },
+  event: { key: string; code: string; altKey?: boolean },
   letter:
     | 'a'
     | 'b'
@@ -28,5 +28,8 @@ export function isLetterShortcut(
     | 'y'
     | 'z',
 ): boolean {
-  return event.key.toLowerCase() === letter || event.code === `Key${letter.toUpperCase()}`;
+  if (event.altKey === true) return false;
+  const key = event.key.toLowerCase();
+  if (/^[a-z]$/.test(key)) return key === letter;
+  return event.code === `Key${letter.toUpperCase()}`;
 }

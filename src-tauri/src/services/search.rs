@@ -29,16 +29,17 @@ impl SearchService {
         let tokens: Vec<String> = input
             .split_whitespace()
             .filter_map(|token| {
-                let cleaned: String = token
-                    .chars()
-                    .filter(|c| c.is_alphanumeric() || *c == '_')
+                let parts: Vec<&str> = token
+                    .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .filter(|part| !part.is_empty())
                     .collect();
-                if cleaned.is_empty() {
-                    None
-                } else if KEYWORDS.contains(&cleaned.to_uppercase().as_str()) {
-                    Some(format!("\"{cleaned}\"*"))
-                } else {
-                    Some(format!("{cleaned}*"))
+                match parts.as_slice() {
+                    [] => None,
+                    [word] if KEYWORDS.contains(&word.to_uppercase().as_str()) => {
+                        Some(format!("\"{word}\"*"))
+                    }
+                    [word] => Some(format!("{word}*")),
+                    phrase => Some(format!("\"{}\"*", phrase.join(" "))),
                 }
             })
             .collect();

@@ -49,6 +49,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0007_tags_live_unique.sql"),
         data: None,
     },
+    Migration {
+        name: "0008_fts_update_columns.sql",
+        sql: include_str!("../../migrations/0008_fts_update_columns.sql"),
+        data: None,
+    },
 ];
 
 pub fn run(db: &Database) -> Result<(), AppError> {

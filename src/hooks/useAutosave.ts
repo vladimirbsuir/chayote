@@ -23,12 +23,14 @@ type Pending = { target: SaveNoteInput; forced: boolean };
 export function createAutosave(onSaved: (note: Note) => void): Autosave {
   let onSavedRef = onSaved;
   let inFlight = false;
+  let inFlightId: Uuid | null = null;
   let flight: Promise<void> | null = null;
   let settleFlight: (() => void) | null = null;
   const pending = new Map<Uuid, Pending>();
   const lastSaved = new Map<Uuid, string>();
   let attempts = 0;
   let retry: ReturnType<typeof setTimeout> | null = null;
+  let retryId: Uuid | null = null;
   let disposed = false;
 
   const clearRetry = (): void => {
@@ -36,6 +38,7 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
       clearTimeout(retry);
       retry = null;
     }
+    retryId = null;
   };
 
   const enqueue = (target: SaveNoteInput, force: boolean): void => {
@@ -55,6 +58,13 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
     return first.done === true ? null : take(first.value);
   };
 
+  const takeReady = (): Pending | null => {
+    for (const id of pending.keys()) {
+      if (retry === null || id !== retryId) return take(id);
+    }
+    return null;
+  };
+
   const settleFlights = async (): Promise<void> => {
     let current = flight;
     while (current !== null) {
@@ -64,9 +74,11 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
   };
 
   const drainLeftovers = async (): Promise<void> => {
-    if (pending.size > 0 && retry === null) {
-      await persist(takeNext());
+    let entry = takeReady();
+    while (entry !== null) {
+      await persist(entry);
       await settleFlights();
+      entry = takeReady();
     }
   };
 
@@ -86,6 +98,7 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
     }
 
     inFlight = true;
+    inFlightId = target.id;
     flight = new Promise<void>((resolve) => {
       settleFlight = resolve;
     });
@@ -105,13 +118,16 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
       enqueue(newer?.target ?? target, forced || (newer?.forced ?? false));
       clearRetry();
       if (!disposed) {
+        retryId = target.id;
         retry = setTimeout(() => {
           retry = null;
+          retryId = null;
           void persist(takeNext());
         }, retryDelayMs(attempts));
       }
     } finally {
       inFlight = false;
+      inFlightId = null;
       settleFlight?.();
       settleFlight = null;
       flight = null;
@@ -125,7 +141,11 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
     noteChanged: (target) => {
       disposed = false;
       const forced = pending.get(target.id)?.forced ?? false;
-      if (!forced && JSON.stringify(target.doc) === lastSaved.get(target.id)) return;
+      const writing = inFlightId === target.id || retryId === target.id;
+      if (!forced && !writing && JSON.stringify(target.doc) === lastSaved.get(target.id)) {
+        if (pending.delete(target.id)) markSaved(target.id);
+        return;
+      }
 
       enqueue(target, false);
       markUnsaved(target.id);
@@ -142,12 +162,10 @@ export function createAutosave(onSaved: (note: Note) => void): Autosave {
     flush: async (target) => {
       disposed = false;
       scheduleSave.cancel();
-      let entry: Pending | null = null;
-      if (target !== undefined) {
-        entry = { target, forced: take(target.id)?.forced ?? false };
-      } else if (retry === null) {
-        entry = takeNext();
-      }
+      const entry: Pending | null =
+        target === undefined
+          ? takeReady()
+          : { target, forced: take(target.id)?.forced ?? false };
       await persist(entry);
       await settleFlights();
       await drainLeftovers();

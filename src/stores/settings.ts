@@ -38,11 +38,11 @@ const PERSISTED: ReadonlyArray<keyof Settings> = [
 ];
 
 let write: Debounced<[]> | null = null;
+let lastWrite: Promise<void> = Promise.resolve();
 
 function persist(state: SettingsState): void {
   const values = Object.fromEntries(PERSISTED.map((key) => [key, state[key]])) as Settings;
-  void saveSettings(values).catch(() => {
-  });
+  lastWrite = saveSettings(values).catch(() => {});
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => {
@@ -52,7 +52,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
   const update = (patch: Partial<Settings>): void => {
     set(patch);
-    write?.();
+    if (get().hydrated) write?.();
   };
 
   return {
@@ -115,6 +115,11 @@ export async function hydrateSettings(): Promise<void> {
 
 export function flushSettings(): void {
   write?.flush();
+}
+
+export async function flushSettingsAsync(): Promise<void> {
+  write?.flush();
+  await lastWrite;
 }
 
 export function applyAccent(choice: AccentChoice): void {

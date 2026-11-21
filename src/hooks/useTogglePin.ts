@@ -6,7 +6,7 @@ import type { Uuid } from '../types/note';
 
 type TogglePin = (id: Uuid, isPinned: boolean) => void;
 
-export function useTogglePin(): {
+export function useTogglePin(onError?: (error: unknown) => void): {
   togglePin: TogglePin;
   pendingId: Uuid | null;
 } {
@@ -15,8 +15,9 @@ export function useTogglePin(): {
   const mutation = useMutation({
     mutationFn: ({ id, isPinned }: { id: Uuid; isPinned: boolean }) =>
       notesApi.setPinned(id, isPinned),
-    onMutate: ({ id, isPinned }) => {
-queryClient.setQueriesData(
+    onMutate: async ({ id, isPinned }) => {
+      await queryClient.cancelQueries({ queryKey: ['notes'] });
+      queryClient.setQueriesData(
         { queryKey: ['notes'] },
         (existing: NoteSummary[] | undefined) =>
           Array.isArray(existing)
@@ -28,6 +29,11 @@ queryClient.setQueriesData(
       queryClient.setQueryData(qk.note(saved.id), saved);
       void queryClient.invalidateQueries({ queryKey: ['notes'] });
       void queryClient.invalidateQueries({ queryKey: ['search'] });
+    },
+    onError: (error, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: ['notes'] });
+      void queryClient.invalidateQueries({ queryKey: qk.note(id) });
+      onError?.(error);
     },
   });
 
