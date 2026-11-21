@@ -8,6 +8,7 @@ use crate::db::Database;
 use crate::error::AppError;
 
 mod merge;
+mod schema;
 mod tag_merge;
 mod tree;
 
@@ -270,11 +271,16 @@ impl SyncService {
         })?;
 
         let conn_str = self.configured_connection()?;
-        let client = connect(&conn_str).await.inspect_err(|err| {
+        let record = |err: &AppError| {
             let _ = self
                 .db
                 .with_conn(|conn| put_state(conn, KEY_LAST_ERROR, &err.log_line()));
-        })?;
+        };
+        let mut client = connect(&conn_str).await.inspect_err(record)?;
+        schema::ensure_server_schema(&mut client)
+            .await
+            .inspect_err(record)?;
+        let client = client;
 
         let mut pushed = 0i64;
         let mut pulled = 0i64;
@@ -2738,7 +2744,7 @@ mod tests {
         let code = |state: &str| classify_sqlstate(state, "detail".into()).code();
         assert_eq!(code("28P01"), "VALIDATION", "bad password");
         assert_eq!(code("3D000"), "VALIDATION", "no such database");
-        assert_eq!(code("42P01"), "VALIDATION", "schema.sql never applied");
+        assert_eq!(code("42P01"), "VALIDATION", "Chayote tables missing");
         assert_eq!(code("23505"), "INTERNAL", "unique violation");
         assert_eq!(code("23503"), "INTERNAL", "foreign key violation");
         assert_eq!(code("57P01"), "NETWORK", "server shutting down");
@@ -2928,9 +2934,8 @@ mod tests {
         let db = Arc::new(Database::open(&dir).expect("database opens"));
         let sync = SyncService::new(Arc::clone(&db));
 
-        let client = connect(&url).await.expect("connects to test Postgres");
-        client
-            .batch_execute(include_str!("../../../postgres/schema.sql"))
+        let mut client = connect(&url).await.expect("connects to test Postgres");
+        schema::ensure_server_schema(&mut client)
             .await
             .expect("server schema applies");
         client
@@ -3170,7 +3175,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    static LIVE_2DEV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    pub(super) static LIVE_2DEV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[tokio::test]
     async fn live_dead_tags_and_stale_trash_do_not_lose_or_block_anything() {
@@ -3202,9 +3207,8 @@ mod tests {
             })
         }
 
-        let client = connect(&url).await.expect("connects to test Postgres");
-        client
-            .batch_execute(include_str!("../../../postgres/schema.sql"))
+        let mut client = connect(&url).await.expect("connects to test Postgres");
+        schema::ensure_server_schema(&mut client)
             .await
             .expect("server schema applies");
         client
@@ -3332,9 +3336,8 @@ mod tests {
         let (dir_a, db_a, sync_a) = device("a");
         let (dir_b, db_b, sync_b) = device("b");
 
-        let client = connect(&url).await.expect("connects to test Postgres");
-        client
-            .batch_execute(include_str!("../../../postgres/schema.sql"))
+        let mut client = connect(&url).await.expect("connects to test Postgres");
+        schema::ensure_server_schema(&mut client)
             .await
             .expect("server schema applies");
         client
@@ -3548,9 +3551,8 @@ mod tests {
         let (dir_a, db_a, sync_a) = device("a");
         let (dir_b, db_b, sync_b) = device("b");
 
-        let client = connect(&url).await.expect("connects to test Postgres");
-        client
-            .batch_execute(include_str!("../../../postgres/schema.sql"))
+        let mut client = connect(&url).await.expect("connects to test Postgres");
+        schema::ensure_server_schema(&mut client)
             .await
             .expect("server schema applies");
         client
