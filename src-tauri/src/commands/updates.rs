@@ -40,7 +40,7 @@ pub async fn updates_check(
     app: AppHandle,
     pending: State<'_, PendingUpdate>,
 ) -> Result<Option<UpdateSummary>, AppError> {
-    let update = updater(&app)?.check().await.map_err(network)?;
+    let update = updater(&app)?.check().await.map_err(update_error)?;
     let summary = update.as_ref().map(|found| UpdateSummary {
         version: found.version.clone(),
         date: found.date.map(|date| date.to_string()),
@@ -63,7 +63,7 @@ pub async fn updates_install(
 ) -> Result<(), AppError> {
     let update = current(&pending)?;
     let bytes = download(&update, &on_event).await?;
-    update.install(&bytes).map_err(network)?;
+    update.install(&bytes).map_err(update_error)?;
     restart_after_install(&app);
     Ok(())
 }
@@ -124,7 +124,7 @@ async fn download(update: &Update, on_event: &Channel<DownloadEvent>) -> Result<
             },
         )
         .await
-        .map_err(network)
+        .map_err(update_error)
 }
 
 fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, AppError> {
@@ -132,7 +132,7 @@ fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, AppError> {
     let builder = app.updater_builder();
     #[cfg(target_os = "android")]
     let builder = builder.target(android_target());
-    builder.build().map_err(network)
+    builder.build().map_err(update_error)
 }
 
 #[cfg(target_os = "android")]
@@ -246,6 +246,28 @@ fn lock(pending: &PendingUpdate) -> Result<std::sync::MutexGuard<'_, Pending>, A
         .map_err(|err| AppError::internal(format!("updater state poisoned: {err}")))
 }
 
-pub(crate) fn network(err: tauri_plugin_updater::Error) -> AppError {
-    AppError::Network(err.to_string())
+pub(crate) fn update_error(err: tauri_plugin_updater::Error) -> AppError {
+    use tauri_plugin_updater::Error as Plugin;
+    let detail = err.to_string();
+    match err {
+        Plugin::Reqwest(source) if source.is_decode() || source.is_status() => {
+            AppError::UpdateServer(detail)
+        }
+        Plugin::Reqwest(_) => AppError::Network(detail),
+        Plugin::ReleaseNotFound
+        | Plugin::Network(_)
+        | Plugin::Serialization(_)
+        | Plugin::Semver(_) => AppError::UpdateServer(detail),
+        Plugin::TargetNotFound(_) | Plugin::TargetsNotFound(_) => {
+            AppError::UpdateNotForDevice(detail)
+        }
+        Plugin::Minisign(_)
+        | Plugin::Base64(_)
+        | Plugin::SignatureUtf8(_)
+        | Plugin::SignedVersionMismatch { .. }
+        | Plugin::MissingSignedVersion
+        | Plugin::InvalidUpdaterFormat
+        | Plugin::BinaryNotFoundInArchive => AppError::UpdateRejected(detail),
+        _ => AppError::Internal(detail),
+    }
 }

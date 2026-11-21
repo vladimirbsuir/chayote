@@ -254,7 +254,10 @@ The mock adapter implements the same command names against in-memory fixtures. I
 | `DOC_INVALID` | Document violates the schema | Recovery screen (`04-editor.md` §8.4) |
 | `DOC_TOO_LARGE` | Document exceeds 5 MB | Keep the buffer, offer export as plain text |
 | `CYCLE_DETECTED` | Folder move into own descendant | Inline explanation |
-| `NETWORK` | Sync request failed | Defer, retry with backoff |
+| `NETWORK` | Sync request failed, or the updater could not connect | Defer, retry with backoff; the Updates tab says to check the connection |
+| `UPDATE_SERVER` | The update server answered, but not with a usable manifest or file | Show the message; try again later (ADR-033) |
+| `UPDATE_NOT_FOR_DEVICE` | The latest release has no build for this platform | Show the message; try again later (ADR-033) |
+| `UPDATE_REJECTED` | The update failed its signature or version check | Show the message; nothing is installed (ADR-033) |
 | `INTERNAL` | Anything unclassified | Log with the full chain, show the generic state |
 
 Messages are user-facing and plain. The technical detail goes in `details` and the log, never in the message shown to the user.

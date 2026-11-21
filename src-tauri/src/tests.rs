@@ -1681,25 +1681,48 @@ fn update_support_names_a_real_platform() {
 
 #[cfg(desktop)]
 #[test]
-fn an_updater_failure_is_a_network_error_that_keeps_its_detail_back() {
-    let mapped = crate::commands::updates::network(tauri_plugin_updater::Error::Network(
-        "the endpoint refused the connection".into(),
-    ));
-    assert_eq!(mapped.code(), "NETWORK");
-    let detail = mapped
-        .details()
-        .expect("the transport error is kept for the log");
-    assert!(
-        detail.contains("the endpoint refused the connection"),
-        "got {detail}"
-    );
+fn an_updater_failure_is_classified_and_keeps_its_detail_back() {
+    use crate::commands::updates::update_error;
+    use tauri_plugin_updater::Error as Plugin;
 
-    let wire = serde_json::to_value(mapped).expect("serialises");
-    assert_eq!(wire["code"], "NETWORK");
-    assert_ne!(
-        wire["message"], wire["details"],
-        "the reader-facing message must not be the transport error"
-    );
+    let cases = [
+        (
+            Plugin::Network("Download request failed with status: 404".into()),
+            "UPDATE_SERVER",
+        ),
+        (Plugin::ReleaseNotFound, "UPDATE_SERVER"),
+        (
+            Plugin::TargetNotFound("android-aarch64".into()),
+            "UPDATE_NOT_FOR_DEVICE",
+        ),
+        (
+            Plugin::TargetsNotFound(vec!["windows-x86_64-nsis".into()]),
+            "UPDATE_NOT_FOR_DEVICE",
+        ),
+        (
+            Plugin::SignedVersionMismatch {
+                signed: "0.2.0".into(),
+                announced: "0.9.0".into(),
+            },
+            "UPDATE_REJECTED",
+        ),
+        (Plugin::MissingSignedVersion, "UPDATE_REJECTED"),
+        (Plugin::EmptyEndpoints, "INTERNAL"),
+    ];
+
+    for (source, code) in cases {
+        let raw = source.to_string();
+        let mapped = update_error(source);
+        assert_eq!(mapped.code(), code, "for {raw}");
+        assert_eq!(mapped.details().as_deref(), Some(raw.as_str()));
+
+        let wire = serde_json::to_value(mapped).expect("serialises");
+        assert_eq!(wire["code"], code);
+        assert_ne!(
+            wire["message"], wire["details"],
+            "the reader-facing message must not be the plugin error"
+        );
+    }
 }
 
 #[cfg(desktop)]
