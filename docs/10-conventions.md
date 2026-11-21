@@ -82,6 +82,7 @@ chayote/
 │   │   ├── pasteSanitizer.ts
 │   │   ├── clipboardSerializer.ts
 │   │   ├── TaskItemView.tsx            # task-checkbox node view; ADR-015 check icon
+│   │   ├── depthGuard.ts              # drops transactions deeper than the validator's 12 levels
 │   │   └── NoteEditor.tsx              # one instance per note_id; see §6
 │   ├── components/                    # presentational, one responsibility each
 │   │   ├── TopBar.tsx

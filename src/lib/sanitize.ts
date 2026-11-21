@@ -59,7 +59,7 @@ const FORBID_TAGS = [
   'applet',
 ]
 
-const MAX_NESTING_DEPTH = 12
+const MAX_NESTING_DEPTH = 11
 
 export function sanitizeAndNormalize(html: string): string {
   if (html.length === 0) return ''
@@ -142,11 +142,13 @@ function replaceWithParagraph(cell: Element): void {
 }
 
 function flatten(node: Element, depth: number): void {
-  for (const child of Array.from(node.children)) {
-    if (depth >= MAX_NESTING_DEPTH) {
-      unwrap(child)
-      continue
+  if (depth >= MAX_NESTING_DEPTH) {
+    for (const descendant of Array.from(node.querySelectorAll('*'))) {
+      if (descendant.tagName !== 'BR') unwrap(descendant)
     }
+    return
+  }
+  for (const child of Array.from(node.children)) {
     flatten(child, depth + 1)
   }
 }

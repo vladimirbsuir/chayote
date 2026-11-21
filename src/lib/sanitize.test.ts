@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { hasVisibleContent, sanitizeAndNormalize, sanitizeSnippet, textToParagraphs } from './sanitize';
+import {
+  MAX_NESTING_DEPTH,
+  hasVisibleContent,
+  sanitizeAndNormalize,
+  sanitizeSnippet,
+  textToParagraphs,
+} from './sanitize';
 
 describe('sanitizeAndNormalize', () => {
   it('removes script and style elements along with their subtree', () => {
@@ -84,6 +90,22 @@ describe('sanitizeAndNormalize', () => {
       expect(depth).toBeLessThanOrEqual(12);
     }
     expect(clean).toContain(deep);
+  });
+
+  it('unwraps every level past the cap, including children moved up by an earlier unwrap', () => {
+    const html = `${'<blockquote>'.repeat(20)}deep${'</blockquote>'.repeat(20)}`;
+
+    const clean = sanitizeAndNormalize(html);
+
+    let depth = 0;
+    let deepest = 0;
+    for (let i = 0; i < clean.length; i++) {
+      if (clean.startsWith('<blockquote>', i)) depth += 1;
+      if (clean.startsWith('</blockquote>', i)) depth -= 1;
+      deepest = Math.max(deepest, depth);
+    }
+    expect(deepest).toBeLessThan(MAX_NESTING_DEPTH);
+    expect(clean).toContain('deep');
   });
 
   it('removes an iframe, an object, and a form with its subtree', () => {

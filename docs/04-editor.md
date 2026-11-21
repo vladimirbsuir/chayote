@@ -79,6 +79,7 @@ import Typography from '@tiptap/extension-typography'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Indent } from '../src/editor/indent'
+import { DepthGuard } from '../src/editor/depthGuard'
 
 const EditorShortcuts = Extension.create({ /* §7 bindings */ })
 
@@ -90,11 +91,13 @@ export const EDITOR_EXTENSIONS = [
     gapcursor: false,
     link: false,
     trailingNode: false,
+    underline: false,
     undoRedo: { depth: 200, newGroupDelay: 500 },
   }),
   TaskList,
   TaskItem.configure({ nested: true }),
   Indent,
+  DepthGuard,
   Typography,
   EditorShortcuts,
   Placeholder.configure({
@@ -111,6 +114,8 @@ Notes:
 - `gapcursor: false` — a persistent gap cursor is visual noise in a minimal UI.
 - `trailingNode: false` — prevents an always-present empty paragraph at the end, which would otherwise be picked up as the note title.
 - `link: false` — StarterKit ships with a link module; it must be off in v1 (§1.2).
+- `underline: false` — TipTap 3's StarterKit also ships underline, bound to `Ctrl/Cmd+U`. It is not a §1.2 mark, so the Rust validator rejects a document carrying it, and every later save of that note failed with `DOC_INVALID`.
+- **`DepthGuard`** (`src/editor/depthGuard.ts`) drops any transaction that would put a node deeper than §1.3's 12 levels, counted the way the validator counts them (text nodes included). List nesting is the easy way there: text in a list nested *k* levels sits at depth 2*k*+2, so a sixth level of `Tab` made the note unsaveable. The guard checks only the ranges a transaction changed, so typing costs no full-document walk; a `Tab` at the limit does nothing.
 - `showOnlyCurrent: true` — the placeholder must not appear in every empty list item at once.
 - `undoRedo` — TipTap 3 renamed the history extension; `depth` and
   `newGroupDelay` are the §6 values. `newGroupOnInputRule` is `true` by
@@ -242,9 +247,9 @@ Paste is the single largest source of ugly content in a WYSIWYG editor. v1 treat
 2. Presentational attributes (`style`, `class`, `width`, `align`, `bgcolor`, `id`) are stripped unconditionally. No exceptions for "known-safe" values.
 3. Every `href` and `src` is rejected. v1 has no link mark and no image node, so there is nothing legitimate to keep.
 4. `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`, `<form>`, `<input>`, `<meta>`, `<link>` are removed with their subtree.
-5. Nesting deeper than 12 levels is unwrapped.
+5. HTML elements 11 or more levels deep are unwrapped, which leaves room for the paragraph and text node ProseMirror adds below them, so a paste stays within §1.3's 12 levels. Anything still too deep is dropped by `DepthGuard` (§2).
 6. Pasted block structure is preserved: lists stay lists, table cells are flattened to paragraphs in reading order.
-7. Pasted plain text is split on blank lines into paragraphs; single newlines become `hardBreak`. This is built as a ProseMirror `Slice` in `handlePaste`, not in `transformPastedText` — see §2.1 for why.
+7. Pasted plain text is split on blank lines into paragraphs; single newlines become `hardBreak`. Inside a code block it is inserted verbatim instead — line breaks, blank lines and indentation kept — because paragraphs there would split the block. This is built as a ProseMirror `Slice` in `handlePaste`, not in `transformPastedText` — see §2.1 for why.
 8. A paste that yields an empty document inserts nothing and leaves the selection untouched.
 
 ### 4.2 Sanitiser

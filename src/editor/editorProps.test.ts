@@ -169,4 +169,18 @@ describe('handlePaste', () => {
 
     expect(paste(null, view)).toBe(false);
   });
+
+  it('pastes plain text into a code block verbatim, keeping indentation and blank lines', () => {
+    const codeDoc = schema.node('doc', null, [schema.node('codeBlock')]);
+    const state = EditorState.create({ schema, doc: codeDoc });
+    const sent: Transaction[] = [];
+    const view = { state, dispatch: (tr: Transaction) => sent.push(tr) } as unknown as EditorView;
+
+    expect(paste(clipboard('', '  if (x) {\r\n\r\n    y()\r\n  }'), view)).toBe(true);
+
+    const doc = sent[0]?.doc;
+    expect(doc?.childCount).toBe(1);
+    expect(doc?.child(0).type.name).toBe('codeBlock');
+    expect(doc?.child(0).textContent).toBe('  if (x) {\n\n    y()\n  }');
+  });
 });

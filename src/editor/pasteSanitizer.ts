@@ -16,9 +16,17 @@ export function buildPasteProps(): EditorProps {
       if (html.length > 0) return !hasVisibleContent(sanitizeAndNormalize(html))
 
       const text = clipboard.getData('text/plain')
+      const { state } = view
+
+      if (state.selection.$from.parent.type.spec.code === true) {
+        const raw = text.replace(/\r\n?/g, '\n')
+        if (raw.length === 0) return true
+        view.dispatch(state.tr.insertText(raw).scrollIntoView())
+        return true
+      }
+
       if (text.trim().length === 0) return true
 
-      const { state } = view
       const marks = state.storedMarks ?? state.selection.$from.marks()
       const slice = sliceFromPlainText(state.schema, text, marks)
       if (slice === null) return true

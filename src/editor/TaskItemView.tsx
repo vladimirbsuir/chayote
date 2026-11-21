@@ -9,7 +9,7 @@ export function TaskItemView({ node, updateAttributes }: NodeViewProps) {
 
   return (
     <NodeViewWrapper as="li" className="note-task-item" data-checked={String(checked)}>
-      <label className="note-task-item__box">
+      <label className="note-task-item__box" contentEditable={false}>
         <input
           type="checkbox"
           checked={checked}
