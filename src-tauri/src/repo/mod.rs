@@ -260,6 +260,8 @@ pub(crate) fn folder_names(
     Ok(map)
 }
 
+const TAG_LOOKUP_CHUNK: usize = 500;
+
 pub(crate) fn tags_for(
     conn: &rusqlite::Connection,
     note_ids: &[Uuid],
@@ -269,32 +271,30 @@ pub(crate) fn tags_for(
         return Ok(map);
     }
 
-    let placeholders = vec!["?"; note_ids.len()].join(",");
-    let sql = format!(
-        "SELECT nt.note_id, t.id, t.name
-           FROM note_tags nt
-           JOIN tags t ON t.id = nt.tag_id
-          WHERE nt.note_id IN ({placeholders})
-            AND t.deleted_at IS NULL
-          ORDER BY t.name COLLATE NOCASE"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let refs: Vec<&dyn rusqlite::ToSql> = note_ids
-        .iter()
-        .map(|id| id as &dyn rusqlite::ToSql)
-        .collect();
-    let rows = stmt.query_map(refs.as_slice(), |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            TagRef {
-                id: row.get(1)?,
-                name: row.get(2)?,
-            },
-        ))
-    })?;
-    for row in rows {
-        let (note_id, tag) = row?;
-        map.entry(note_id).or_default().push(tag);
+    for chunk in note_ids.chunks(TAG_LOOKUP_CHUNK) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!(
+            "SELECT nt.note_id, t.id, t.name
+               FROM note_tags nt
+               JOIN tags t ON t.id = nt.tag_id
+              WHERE nt.note_id IN ({placeholders})
+                AND t.deleted_at IS NULL
+              ORDER BY t.name COLLATE NOCASE"
+        );
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                TagRef {
+                    id: row.get(1)?,
+                    name: row.get(2)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (note_id, tag) = row?;
+            map.entry(note_id).or_default().push(tag);
+        }
     }
     Ok(map)
 }

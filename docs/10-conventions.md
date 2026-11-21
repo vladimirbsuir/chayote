@@ -135,7 +135,8 @@ chayote/
     │   ├── 0004_sync.sql
     │   ├── 0005_sync_backoff.sql
     │   ├── 0006_note_title_field.sql
-    │   └── 0007_tags_live_unique.sql
+    │   ├── 0007_tags_live_unique.sql
+    │   └── 0008_fts_update_columns.sql
     └── src/
         ├── main.rs
         ├── lib.rs

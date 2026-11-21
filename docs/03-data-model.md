@@ -128,14 +128,15 @@ Column-by-column rationale:
 
 **Deliberately absent:** `position` (no manual note order in v1), `is_favorite` (folded into `is_pinned`), `html`, `markdown`, `tags` (as text), `attachments`. Tags live in a join table; content has exactly one serialised form.
 
-**Migration count.** There are seven migrations. `title_source` ships
+**Migration count.** There are eight migrations. `title_source` ships
 inside `0001_initial.sql` with the rest of the table; the earlier draft of this
 document listed a separate `0004_note_title_source.sql`, which would have been a
 no-op `ALTER TABLE ADD COLUMN` against the schema above. The real fourth is
 `0004_sync.sql` — the sync `conflicts` and `sync_state` tables — the fifth
 is `0005_sync_backoff.sql`, the outbox retry column, and the sixth is
 `0006_note_title_field.sql`, and the seventh is `0007_tags_live_unique.sql`, which drops
-the table-level `UNIQUE` on `tags.name` (§3.4).
+the table-level `UNIQUE` on `tags.name` (§3.4). The eighth, `0008_fts_update_columns.sql`,
+narrows the FTS update trigger to the indexed columns (§3.6).
 
 **`0006` has no DDL and carries a data pass instead** (ADR-023). The columns it needs
 have existed since `0001`, which is why it exists at all: notes written before the title
@@ -211,7 +212,7 @@ CREATE TRIGGER notes_fts_ad AFTER DELETE ON notes BEGIN
   VALUES ('delete', old.rowid, old.title, old.plain_text);
 END;
 
-CREATE TRIGGER notes_fts_au AFTER UPDATE ON notes BEGIN
+CREATE TRIGGER notes_fts_au AFTER UPDATE OF title, plain_text ON notes BEGIN
   INSERT INTO notes_fts(notes_fts, rowid, title, plain_text)
   VALUES ('delete', old.rowid, old.title, old.plain_text);
   INSERT INTO notes_fts(rowid, title, plain_text)
@@ -220,6 +221,8 @@ END;
 ```
 
 Triggers, not application-side index updates, because the index must never be able to drift from the table. A bug that skips an application code path cannot corrupt search.
+
+The update trigger fires only on `title` and `plain_text`, the two indexed columns. `0002_fts.sql` declared it on every update, so a pin, a move, a soft delete, each sync acknowledgement (`rev`, `dirty`) and every note unfiled by a folder delete deleted and re-inserted up to 200 000 characters of index text that had not changed. `0008_fts_update_columns.sql` recreates it with the column list.
 
 `tokenchars '_'` keeps `snake_case` identifiers and `#tag`-style words from being shredded. `remove_diacritics 2` makes `café` match `cafe`, which is what a user typing on a phone keyboard without accents expects.
 
@@ -257,24 +260,26 @@ const KEYWORDS: &[&str] = &["AND", "OR", "NOT", "NEAR", "NULL", "TRUE", "FALSE"]
 fn to_fts_match(input: &str) -> Option<String> {
     let tokens: Vec<String> = input
         .split_whitespace()
-        .filter_map(|t| {
-            let cleaned: String = t
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '_')
+        .filter_map(|token| {
+            let parts: Vec<&str> = token
+                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .filter(|part| !part.is_empty())
                 .collect();
-            if cleaned.is_empty() {
-                None
-            } else if KEYWORDS.contains(&cleaned.to_uppercase().as_str()) {
-                // A bare `AND` would be read as the operator, not the word.
-                Some(format!("\"{cleaned}\"*"))
-            } else {
-                Some(format!("{cleaned}*"))
+            match parts.as_slice() {
+                [] => None,
+                [word] if KEYWORDS.contains(&word.to_uppercase().as_str()) => {
+                    Some(format!("\"{word}\"*"))
+                }
+                [word] => Some(format!("{word}*")),
+                phrase => Some(format!("\"{}\"*", phrase.join(" "))),
             }
         })
         .collect();
     if tokens.is_empty() { None } else { Some(tokens.join(" AND ")) }
 }
 ```
+
+**Punctuation inside a word splits it into a phrase, not a glued word.** The `unicode61` tokenizer splits `e-mail` into `e` and `mail` at index time, so deleting the hyphen (`email*`, as this function once did) matched nothing; the same went for `don't`, `3.14` and `example.com`. The parts become a quoted phrase, `"e mail"*`, which matches the indexed tokens in order and keeps the prefix on the last one.
 
 Trailing `*` makes the last token a prefix match, so results appear while typing. If sanitisation yields nothing, the search falls back to `updated_at DESC` over the active filter rather than returning an error.
 
@@ -443,6 +448,7 @@ src-tauri/migrations/
   0005_sync_backoff.sql  -- outbox.next_retry_at + index
   0006_note_title_field.sql -- data pass: leading H1 into the title field
   0007_tags_live_unique.sql -- tags rebuilt without the table-level UNIQUE on name
+  0008_fts_update_columns.sql -- FTS update trigger fires on title/plain_text only
 ```
 
 Rules:
@@ -451,7 +457,7 @@ Rules:
 2. Every migration is idempotent where SQLite allows it: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `CREATE TRIGGER IF NOT EXISTS`. `ALTER TABLE ADD COLUMN` is not idempotent — guard it with a `PRAGMA table_info` check in Rust before running it.
 3. A migration that changes an indexed column must run `INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')` at the end.
 4. A migration must never rewrite the `notes` table with `DROP`/`CREATE`. The FTS triggers reference `notes` by name and `rowid`; recreating the table invalidates the external-content mapping and requires a full rebuild.
-5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: seven migrations, the fourth (`0004_sync.sql`) carrying the sync `conflicts` and `sync_state` tables, the fifth (`0005_sync_backoff.sql`) the outbox retry column, the sixth (`0006_note_title_field.sql`) the title data pass and the seventh (`0007_tags_live_unique.sql`) the tags rebuild.
+5. Migrations are embedded with `include_str!` and applied in order. `03-data-model.md` §6 and `10-conventions.md` §1 agree: eight migrations, the fourth (`0004_sync.sql`) carrying the sync `conflicts` and `sync_state` tables, the fifth (`0005_sync_backoff.sql`) the outbox retry column, the sixth (`0006_note_title_field.sql`) the title data pass, the seventh (`0007_tags_live_unique.sql`) the tags rebuild and the eighth (`0008_fts_update_columns.sql`) the narrowed FTS update trigger.
 
 ## 7. Migration path to Postgres
 
