@@ -38,6 +38,53 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 028 | The trash empties whether or not the note ever synced | Accepted |
 | 029 | One desktop instance, and a startup failure that says why | Accepted |
 | 030 | The app creates and upgrades the server schema itself | Accepted |
+| 031 | A green push to `main` with a new version releases itself | Accepted |
+
+---
+
+## ADR-031 - A green push to `main` with a new version releases itself
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Changes:** `06-platform.md` §3.8.5, `10-conventions.md` §11
+
+**Context.** A release was a manual step after the merge: open Actions, run
+`release.yml` by hand. The step was easy to forget, and a merged change with no
+release never reached an installed app, because the updater only offers what a
+GitHub Release announces. The version in `tauri.conf.json` already names what a
+release contains, and a release cannot be published twice under one version
+without breaking `latest.json` and `requireSignedVersion` (ADR-024).
+
+**Decision.**
+
+1. `release.yml` also runs on `workflow_run` of `CI`, for a completed run on a
+   push to `main` whose conclusion is `success`. A red or cancelled CI run
+   releases nothing.
+2. The `version` job reads the version from `tauri.conf.json` at the CI run's
+   `head_sha`. If tag `v<version>` already exists, it publishes nothing and
+   leaves a notice; otherwise the desktop and Android jobs build that commit and
+   `tauri-action` creates the tag on it (`releaseCommitish`).
+3. Therefore **every change merged to `main` that should reach users bumps the
+   version** in `tauri.conf.json`, `package.json` and `src-tauri/Cargo.toml`
+   in the same pull request (`10-conventions.md` §11).
+4. A pushed `v*` tag and a manual dispatch keep working as before.
+
+The user chose this over a bot that bumps the patch version on every merge on
+2026-11-21.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| A bot bumps the patch version and commits to `main` after every merge | Every merge becomes an update on every device, including docs-only ones, and the bot needs a way past the rule that nothing lands on `main` without a pull request. |
+| Release on `push` to `main` directly | Would build and publish a commit whose CI has not finished, or has failed. |
+| Overwrite the existing release when the version did not change | Installed apps compare versions: a rebuilt `0.4.0` is never offered to a device that already has `0.4.0`, and its signatures would replace ones devices already verified. |
+
+**Consequences.**
+
+- Releasing is bumping the version; there is no separate step to forget.
+- A merge that forgets the bump ships nothing, visibly: the `version` job's
+  notice says so, and the change waits for the next bump.
+- Two merges in quick succession queue on the release concurrency group; the
+  second sees the first one's tag and skips unless it bumped again.
 
 ---
 

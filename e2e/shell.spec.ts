@@ -846,6 +846,32 @@ test.describe('note list', () => {
     await expect(untitled).toBeVisible();
   });
 
+  test('leaves room for the slanted d of Untitled inside its clipping box', async ({ page }) => {
+    await open(page);
+
+    const title = page
+      .getByTestId('note-card')
+      .locator('span', { hasText: /^Untitled$/ })
+      .first();
+    await expect(title).toBeVisible();
+
+    const fit = await title.evaluate(async (el) => {
+      await document.fonts.ready;
+      const style = getComputedStyle(el);
+      const context = document.createElement('canvas').getContext('2d');
+      if (context === null) throw new Error('no 2d context');
+      context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const metrics = context.measureText(el.textContent);
+      return {
+        overhang: metrics.actualBoundingBoxRight - metrics.width,
+        padding: parseFloat(style.paddingRight),
+      };
+    });
+
+    expect(fit.overhang).toBeGreaterThan(0);
+    expect(fit.padding).toBeGreaterThanOrEqual(fit.overhang);
+  });
+
   test('carries no document body in a card', async ({ page }) => {
     await open(page);
 

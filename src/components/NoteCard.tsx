@@ -111,7 +111,7 @@ export const NoteCard = memo(function NoteCard({
         <span
           className={`overflow-hidden text-[14px] leading-[1.4] text-ellipsis whitespace-nowrap ${
             untitled
-              ? 'font-normal text-[var(--text-subtle)] italic'
+              ? 'pr-[0.2em] font-normal text-[var(--text-subtle)] italic'
               : 'font-medium text-[var(--text)]'
           }`}
         >
