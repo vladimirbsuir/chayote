@@ -211,9 +211,12 @@ Soft deletes propagate as tombstone writes. Tombstones are retained
 **indefinitely** — there is intentionally no GC: at personal scale a
 tombstone is a few dozen bytes, while deleting them reopens the one real
 hazard, a device offline past the retention window coming back and
-resurrecting what it never saw deleted. Permanent delete is refused while
+resurrecting what it never saw deleted. ~~Permanent delete is refused while
 `rev` has never been synced, so a never-pushed note cannot vanish from
-another device without ever existing there.
+another device without ever existing there.~~ Superseded by ADR-028: permanent
+delete and Empty trash remove any trashed note, synced or not, and queue its
+tombstone either way, so the deletion still reaches a server the device syncs
+with later.
 
 **A delete push compares `base_rev` like any other push.** The tombstone is
 written whatever the server holds, but when the server's row is newer than
@@ -289,7 +292,7 @@ background/retry/UI, server search) no longer describes the work: phases
 A–D and the status/conflict UI shipped as the MVP on `feat/sync-mvp`
 without Auth, RLS, or flags, and Phase E polish (retry with backoff, the
 open-editor guard with flush-then-sync and pull deferral, and the never-synced
-permanent-delete guard) followed on the same branch. What remains is §9's
+permanent-delete guard, since removed by ADR-028) followed on the same branch. What remains is §9's
 repairs, unwritten until drift shows in practice. The reason sync waited past v1 stands: an account gate
 in front of a notes app is a worse product than no sync at all — which is
 also why there is no account at all.

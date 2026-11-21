@@ -323,20 +323,6 @@ impl NotesRepo for SqliteNotesRepo {
     fn destroy(&self, id: &str) -> Result<(), AppError> {
         let note_id = id.to_owned();
         self.db.with_conn(move |conn| {
-            let rev: i64 = conn
-                .query_row("SELECT rev FROM notes WHERE id = ?1", [&note_id], |row| {
-                    row.get(0)
-                })
-                .map_err(|err| match err {
-                    rusqlite::Error::QueryReturnedNoRows => AppError::NotFound,
-                    other => AppError::from(other),
-                })?;
-            if rev == 0 {
-                return Err(AppError::Validation(
-                    "This note has not synced yet — sync first so the deletion reaches your other devices."
-                        .into(),
-                ));
-            }
             let base_rev = base_rev(conn, &note_id)?;
             let tx = conn.transaction()?;
             tx.execute("DELETE FROM notes WHERE id = ?1", [&note_id])?;
@@ -349,9 +335,8 @@ impl NotesRepo for SqliteNotesRepo {
     fn empty_trash(&self) -> Result<i64, AppError> {
         self.db.with_conn(|conn| {
             let trashed: Vec<(String, i64)> = {
-                let mut stmt = conn.prepare(
-                    "SELECT id, rev FROM notes WHERE deleted_at IS NOT NULL AND rev > 0",
-                )?;
+                let mut stmt =
+                    conn.prepare("SELECT id, rev FROM notes WHERE deleted_at IS NOT NULL")?;
                 let rows = stmt.query_map((), |row| Ok((row.get(0)?, row.get(1)?)))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             };
@@ -360,10 +345,7 @@ impl NotesRepo for SqliteNotesRepo {
             for (id, base_rev) in &trashed {
                 append_outbox(&tx, "note", id, "delete", None, *base_rev)?;
             }
-            let removed = tx.execute(
-                "DELETE FROM notes WHERE deleted_at IS NOT NULL AND rev > 0",
-                (),
-            )?;
+            let removed = tx.execute("DELETE FROM notes WHERE deleted_at IS NOT NULL", ())?;
             tx.commit()?;
             Ok(removed as i64)
         })

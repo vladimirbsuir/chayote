@@ -35,8 +35,44 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 025 | Android keeps the Tauri updater's check and download, and supplies its own install | Accepted |
 | 026 | The title is only what was typed in the title field | Accepted |
 | 027 | Sync merges the fields each device touched; the server's copy wins a tag-name or folder-cycle clash | Accepted |
+| 028 | The trash empties whether or not the note ever synced | Accepted |
 
 ---
+
+## ADR-028 - The trash empties whether or not the note ever synced
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Amends:** `07-sync-plan.md` §5.4, `02-architecture.md` §7
+
+**Context.** Sync Phase E refused a permanent delete while a note's `rev` was 0,
+and `notes_empty_trash` skipped such notes, so "a never-pushed note cannot vanish
+from another device without ever existing there". Without sync every note has
+`rev` 0, so a user who never configured sync could not delete anything
+permanently: the button answered "sync first", and Empty trash left every note
+where it was. `02-architecture.md` §7 had already named this outcome as the
+reason the rule waited for sync, and then it shipped anyway. The user reported
+it as wrong on 2026-11-21.
+
+**Decision.** `notes_destroy` and `notes_empty_trash` remove any trashed note,
+synced or not. Each removal still appends its `delete` outbox row in the same
+transaction (R5), with the note's current `rev` as its base. If sync is
+configured later, or the note already exists on a server this device switched
+to (whose `rev` the switch reset to 0), the drain pushes that tombstone and the
+note stays gone everywhere instead of coming back on the next pull.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Keep the guard only while sync is configured | A note that is not yet pushed exists on no other device, so there is nothing for the guard to protect; and a configured but failing server would lock the trash again. |
+| Drop the outbox row for a never-pushed note | Saves a tombstone write on first sync, but after a server switch `rev` 0 no longer means "never on a server", and a missing tombstone would let the pull resurrect it. |
+
+**Consequences.**
+
+- The "This note has not synced yet" `VALIDATION` error is gone; Empty trash's
+  count is every note it removed.
+- A first sync after deleting notes offline pushes tombstones for notes the
+  server never had. They are a few dozen bytes each (§5.4 keeps tombstones
+  indefinitely anyway) and are applied as no-ops by every other device.
 
 ## ADR-027 - Sync merges the fields each device touched; the server's copy wins a tag-name or folder-cycle clash
 

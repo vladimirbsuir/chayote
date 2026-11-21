@@ -145,7 +145,7 @@ Reason: device clocks are wrong; a monotonic local logical clock must decide ord
 
 ### R3 — Soft deletes only
 
-Every syncable table has `deleted_at`. "Delete" writes `deleted_at`. Only the trash's permanent delete sets it to a sentinel or purges the row after it has been synced at least once.
+Every syncable table has `deleted_at`. "Delete" writes `deleted_at`. Only the trash's permanent delete purges the row, and it queues a tombstone in the same transaction so a server learns of it whenever the device next syncs (ADR-028).
 
 Reason: a hard delete on device A cannot inform device B. Tombstones are the only way a deletion propagates.
 
@@ -288,13 +288,17 @@ notes only — which is what `05-ui-ux.md` §5 describes. The `deleted_at` colum
 remain on all three tables because R3 requires them and the sync phase needs
 them; `07-sync-plan.md` §5.2 and §5.4 say what changes when sync lands.
 
-**`notes_destroy`.** Permanent delete is refused while `rev` has never been
+**`notes_destroy`.** ~~Permanent delete is refused while `rev` has never been
 synced (`07-sync-plan.md` §5.4). That rule shipped with sync Phase E on
 `feat/sync-mvp`: in v1 nothing was ever pushed, so the check would have refused
 every deletion and the trash would have been unemptyable against `05-ui-ux.md`
 §6.2 and §8. `notes_empty_trash` applies the same rule per row — never-synced
 notes stay in the trash until they sync, and the returned count names only
-what actually left.
+what actually left.~~ Superseded by ADR-028. The guard did exactly what this
+paragraph warned of for anyone who never configured sync, so it is gone:
+`notes_destroy` and `notes_empty_trash` remove any trashed note and queue its
+tombstone in the same transaction, and Empty trash's count is every note it
+removed.
 
 ## 8. Performance budget
 
