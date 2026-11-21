@@ -148,6 +148,23 @@ async function buildChannel(
   return new Channel<DownloadEvent>(onEvent);
 }
 
+export function onWindowCloseRequested(flush: () => Promise<void>): () => void {
+  if (!isTauri) return () => {};
+  let unlisten: (() => void) | null = null;
+  let cancelled = false;
+  void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+    const stop = await getCurrentWindow().onCloseRequested(async () => {
+      await flush().catch(() => {});
+    });
+    if (cancelled) stop();
+    else unlisten = stop;
+  });
+  return () => {
+    cancelled = true;
+    unlisten?.();
+  };
+}
+
 type BackBridge = { __chayoteHandleBack__?: () => boolean };
 
 export function installBackHandler(handler: () => boolean): () => void {

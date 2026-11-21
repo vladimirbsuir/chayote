@@ -1,6 +1,14 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { foldersApi, installBackHandler, notesApi, syncApi, tagsApi, windowApi } from './lib/ipc';
+import {
+  foldersApi,
+  installBackHandler,
+  notesApi,
+  onWindowCloseRequested,
+  syncApi,
+  tagsApi,
+  windowApi,
+} from './lib/ipc';
 import { isInsideSubtree } from './components/folderRows';
 import { useNow, useNotes } from './hooks/useNotes';
 import { useSearch } from './hooks/useSearch';
@@ -37,6 +45,7 @@ import {
 import {
   applyAccent,
   flushSettings,
+  flushSettingsAsync,
   hydrateSettings,
   resolveTheme,
   useSettingsStore,
@@ -282,9 +291,14 @@ function Shell() {
 
     window.addEventListener('pagehide', flush);
     document.addEventListener('visibilitychange', onVisibility);
+    const stopClose = onWindowCloseRequested(async () => {
+      await flushEditorsForSync();
+      await flushSettingsAsync();
+    });
     return () => {
       window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', onVisibility);
+      stopClose();
     };
   }, []);
 

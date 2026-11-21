@@ -66,8 +66,12 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
     anchor: HTMLElement;
     placement: { top: number; left: number };
   } | null>(null);
+  const openIdRef = useRef(noteId);
+  useEffect(() => {
+    openIdRef.current = noteId;
+  }, [noteId]);
   const autosave = useAutosave((saved) => {
-    loadedDocRef.current = JSON.stringify(saved.doc);
+    if (saved.id === openIdRef.current) loadedDocRef.current = JSON.stringify(saved.doc);
     queryClient.setQueryData(qk.note(saved.id), saved);
     const patched = summaryOf(saved);
     for (const [key, existing] of queryClient.getQueriesData<NoteSummary[]>({
@@ -225,11 +229,14 @@ export function EditorPane({ noteId, selectionKey, onClose, onTrash }: EditorPan
   }, [autosave, selectionKey]);
 
   useEffect(() => {
-    registerSyncFlusher(() => autosave.flush());
+    registerSyncFlusher(() => {
+      flushTitle();
+      return autosave.flush();
+    });
     return () => {
       registerSyncFlusher(null);
     };
-  }, [autosave]);
+  }, [autosave, flushTitle]);
 
   const serverDocJson = note.data === undefined ? null : JSON.stringify(note.data.doc);
   useEffect(() => {

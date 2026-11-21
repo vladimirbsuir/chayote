@@ -108,10 +108,11 @@ export function useDailyUpdateCheck(): void {
   const { info } = useAppInfo();
   const lastCheckedAt = useSettingsStore((state) => state.lastUpdateCheckAt);
   const record = useSettingsStore((state) => state.setLastUpdateCheckAt);
+  const hydrated = useSettingsStore((state) => state.hydrated);
   const supported = info?.updatesSupported === true;
 
   useEffect(() => {
-    if (!supported || !isCheckDue(lastCheckedAt, Date.now())) return;
+    if (!hydrated || !supported || !isCheckDue(lastCheckedAt, Date.now())) return;
     void updatesApi
       .check()
       .catch(() => {
@@ -119,5 +120,5 @@ export function useDailyUpdateCheck(): void {
       .finally(() => {
         record(Date.now());
       });
-  }, [supported, lastCheckedAt, record]);
+  }, [hydrated, supported, lastCheckedAt, record]);
 }

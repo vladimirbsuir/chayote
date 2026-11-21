@@ -294,6 +294,45 @@ describe('createAutosave', () => {
     expect(save.mock.calls[1]?.[0]).toMatchObject({ id: NOTE, doc: doc('a1') });
   });
 
+  it('drops a pending write when an undo returns the note to its saved text', async () => {
+    const autosave = createAutosave(vi.fn());
+    autosave.setBaseline(base);
+
+    autosave.noteChanged({ ...base, doc: doc('typo') });
+    autosave.noteChanged({ ...base });
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    await settle();
+
+    expect(save).not.toHaveBeenCalled();
+    expect(useEditorStore.getState().saveState).toBe('saved');
+  });
+
+  it('still flushes other notes while one note waits on a retry', async () => {
+    const autosave = createAutosave(vi.fn());
+    autosave.setBaseline(base);
+    autosave.setBaseline({ ...base, id: OTHER, doc: doc('b0') });
+    save.mockRejectedValueOnce(new Error('database is locked'));
+
+    autosave.noteChanged({ ...base, doc: doc('a1') });
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    autosave.noteChanged({ ...base, id: OTHER, doc: doc('b1') });
+    await autosave.flush();
+
+    expect(save.mock.calls[1]?.[0]).toMatchObject({ id: OTHER, doc: doc('b1') });
+  });
+
+  it('does not report a background note as the open note', () => {
+    const autosave = createAutosave(vi.fn());
+    autosave.setBaseline({ ...base, id: OTHER, doc: doc('b0') });
+
+    autosave.noteChanged({ ...base, id: OTHER, doc: doc('b1') });
+
+    expect(useEditorStore.getState().subjectId).toBe(NOTE);
+    expect(useEditorStore.getState().saveState).toBe('saved');
+  });
+
   it('compares each note against its own last saved document', async () => {
     const autosave = createAutosave(vi.fn());
     autosave.setBaseline(base);

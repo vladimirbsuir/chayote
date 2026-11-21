@@ -27,6 +27,8 @@ export function openNote(noteId: Uuid | null): void {
 }
 
 function transition(noteId: Uuid | null, saveState: SaveState): void {
+  const open = useEditorStore.getState().noteId;
+  if (open !== null && open !== noteId) return;
   useEditorStore.setState({ noteId, saveState, subjectId: noteId });
 }
 
@@ -42,6 +44,7 @@ export function markSaving(noteId: Uuid | null): void {
 
 export function markSaved(noteId: Uuid | null): void {
   const state = useEditorStore.getState();
+  if (state.subjectId !== noteId) return;
   if (state.saveState === 'saving' || state.saveState === 'unsaved') transition(noteId, 'saved');
 }
 
