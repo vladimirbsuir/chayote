@@ -32,18 +32,18 @@ const SETTINGS_FILE: &str = "settings.json";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let built = with_pending_update(with_android_installer(with_updater(
+    let built = with_pending_update(with_android_installer(with_updater(with_single_instance(
         tauri::Builder::default(),
-    )))
+    ))))
     .plugin(tauri_plugin_store::Builder::new().build())
     .invoke_handler(commands::handler())
     .setup(|app| {
-        let dir = app.path().app_data_dir()?;
-        std::fs::create_dir_all(&dir).map_err(|err| {
-            error::AppError::internal(format!("could not create {}: {err}", dir.display()))
-        })?;
-        let db = Arc::new(db::Database::open(&dir)?);
-        app.manage(Services::new(db));
+        let dir = app.path().app_data_dir().unwrap_or_else(|err| {
+            fail_startup(&format!("Chayote could not find its data folder: {err}"))
+        });
+        let db =
+            open_database(&dir).unwrap_or_else(|err| fail_startup(&startup_message(&dir, &err)));
+        app.manage(Services::new(Arc::new(db)));
         disable_browser_accelerators(app);
         Ok(())
     })
@@ -51,11 +51,62 @@ pub fn run() {
 
     match built {
         Ok(app) => app.run(|_handle, _event| {}),
-        Err(err) => {
-            eprintln!("chayote: build failed: {err}");
-            std::process::exit(1);
-        }
+        Err(err) => fail_startup(&format!("Chayote could not start: {err}")),
     }
+}
+
+fn fail_startup(message: &str) -> ! {
+    eprintln!("chayote: {message}");
+    report_startup_failure(message);
+    std::process::exit(1);
+}
+
+fn open_database(dir: &std::path::Path) -> Result<db::Database, error::AppError> {
+    std::fs::create_dir_all(dir).map_err(|err| {
+        error::AppError::DbOpen(format!("could not create {}: {err}", dir.display()))
+    })?;
+    db::Database::open(dir)
+}
+
+fn startup_message(dir: &std::path::Path, err: &error::AppError) -> String {
+    let detail = err.details().unwrap_or_else(|| err.to_string());
+    format!(
+        "Chayote could not open your notes, so it has stopped before changing anything.\n\n\
+         Folder: {}\n\
+         Reason: {detail}\n\n\
+         Make sure no other program is using that folder and that the disk is not full, \
+         then start Chayote again.",
+        dir.display()
+    )
+}
+
+#[cfg(desktop)]
+fn report_startup_failure(message: &str) {
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("Chayote could not start")
+        .set_description(message)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
+#[cfg(not(desktop))]
+fn report_startup_failure(_message: &str) {}
+
+#[cfg(desktop)]
+fn with_single_instance(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window(commands::WINDOW_LABEL) {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }))
+}
+
+#[cfg(not(desktop))]
+fn with_single_instance(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
 }
 
 #[cfg(any(desktop, target_os = "android"))]

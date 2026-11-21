@@ -36,8 +36,52 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 026 | The title is only what was typed in the title field | Accepted |
 | 027 | Sync merges the fields each device touched; the server's copy wins a tag-name or folder-cycle clash | Accepted |
 | 028 | The trash empties whether or not the note ever synced | Accepted |
+| 029 | One desktop instance, and a startup failure that says why | Accepted |
 
 ---
+
+## ADR-029 - One desktop instance, and a startup failure that says why
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Implements:** `06-platform.md` §3.2
+
+**Context.** `06-platform.md` §3.2 required a second launch to focus the
+existing window, and nothing implemented it. Two processes each held their own
+connection and their own sync service over one database: whichever
+whole-document autosave landed last overwrote the other window's edit, and both
+sync engines drained one outbox at once. Separately, a database that could not
+be opened made the app vanish. Tauri 2.12 does not return an error from
+`setup` through `build()`; it panics ("Failed to setup app"), and the release
+profile's `panic = "abort"` with `windows_subsystem = "windows"` left no window,
+no console and no message.
+
+**Decision.**
+
+1. `tauri-plugin-single-instance` on desktop, registered first so a second
+   process stops before any other plugin or the database starts. The running
+   instance unminimizes, shows and focuses its window.
+2. A failure to find the data folder or open the database is handled inside
+   `setup`: the message goes to stderr and to a native error dialog naming the
+   folder and the reason, then the process exits with code 1. The dialog is
+   `rfd`, the crate `tauri-plugin-dialog` is built on, called directly.
+
+The user approved adding both dependencies on 2026-11-21.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| `tauri-plugin-dialog` for the error | It exists to give the webview a dialog API, which needs a capability and a JS binding nothing here uses; the failure happens before the webview has anything to say. Its blocking call is also documented to deadlock on the main thread, which is where `setup` runs. |
+| Return the error from `setup` and report it after `build()` | That branch is never reached: Tauri panics on a setup error instead of returning it. |
+| A lock file in the data folder instead of the plugin | Detects the second instance but cannot hand focus to the first, and a crash leaves a stale lock to explain. |
+
+**Consequences.**
+
+- The single-instance handshake is a local channel (`06-platform.md` §1 names
+  it per platform), the one exception to "no local socket". Nothing listens on
+  the network.
+- `AppError::DbOpen`, unused until now, carries the folder-creation failure.
+- Android is unchanged: one process per app is the platform's rule already, and
+  a startup failure there is reported to logcat only.
 
 ## ADR-028 - The trash empties whether or not the note ever synced
 
