@@ -1,21 +1,12 @@
 import { X } from 'lucide-react';
 import type { UndoToast as UndoToastModel } from './useUndoToast';
 
-/* The undo toast of `05-ui-ux.md` §6.2, rendered once by the shell.
-
-   **It announces itself politely and moves no focus.** The user is typing in the
-   editor when this appears, and an assertive announcement would interrupt whatever a
-   screen reader is reading — `01-product.md` §1 ranks "nothing in the writing path
-   steals focus" above everything else in the interface. The six seconds and the
-   `show`/`dismiss` logic live in `undoToast.ts`; this file is the box. */
-
 export function UndoToast({ toast }: { toast: UndoToastModel }): React.ReactElement {
   return (
     <div
       role="status"
       aria-live="polite"
       data-testid="undo-toast"
-      /* Toast text is chrome, not content: read, never copied. */
       className="pointer-events-auto flex items-center gap-3 rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] px-4 py-[10px] text-[13px] shadow-[var(--shadow-pop)] select-none"
     >
       <span className="truncate text-[var(--text-muted)]">“{toast.title}” moved to trash</span>

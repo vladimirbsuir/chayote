@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hasVisibleContent, sanitizeAndNormalize, sanitizeSnippet, textToParagraphs } from './sanitize';
 
-/* `04-editor.md` §4.1, rules 1–8. Required test 10 in `10-conventions.md` §10
-   is rules 1–3: pasted script tags, presentational attributes, and URLs do not
-   survive. The rest of the file covers the rules that are easy to regress. */
-
 describe('sanitizeAndNormalize', () => {
   it('removes script and style elements along with their subtree', () => {
     const html =
@@ -142,10 +138,6 @@ describe('hasVisibleContent', () => {
   });
 });
 
-/* A snippet is `plain_text` with the match wrapped in `mark`, and `plain_text` is
-   whatever the user typed. FTS5 escapes none of it, so a note containing a script
-   tag produces a snippet containing a script tag — and the snippet is the only
-   backend-supplied markup that reaches the DOM anywhere in the app. */
 describe('sanitizeSnippet', () => {
   it('keeps the highlight and the surrounding text', () => {
     expect(sanitizeSnippet('Blocked on the <mark>design review</mark> until Dana is back.')).toBe(

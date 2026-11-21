@@ -5,10 +5,6 @@ use crate::repo::{Note, NoteFilter, NoteSummary, SaveNoteInput};
 
 use super::Services;
 
-/// Managed state reaches a command only through a type it can prove is
-/// `Send + Sync + 'static`. Every repository is `Send + Sync` by trait bound,
-/// and `Database` is `Mutex<Connection>`, so `Services` is too.
-
 #[tauri::command]
 pub fn notes_list(
     services: State<'_, Services>,

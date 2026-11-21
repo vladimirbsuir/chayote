@@ -2,11 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { isCheckDue } from './useUpdates';
 import { useSettingsStore } from '../stores/settings';
 
-/* The daily silent check is the one piece of the updater that runs with nobody
-   watching, so its only interesting property is *when it stays quiet*. A check
-   that fires on every launch is a network request per launch; one that never
-   fires is not a daily check at all. `05-ui-ux.md` §6.6: it surfaces nothing. */
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW = 1_780_000_000_000;
 
@@ -27,8 +22,6 @@ describe('isCheckDue', () => {
   });
 
   it('is due again when the stored timestamp is in the future, not stuck', () => {
-    /* A clock that moved backwards, or a settings file hand-edited. Rationing
-       must not turn into "never check again". */
     expect(isCheckDue(NOW + DAY_MS, NOW)).toBe(true);
   });
 });

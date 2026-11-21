@@ -5,18 +5,8 @@ use crate::db::Database;
 use crate::error::AppError;
 use crate::services::derive;
 
-/// A migration's data pass: runs in the migration's own transaction, after its
-/// SQL and before its version is stamped.
 type DataPass = fn(&rusqlite::Transaction<'_>) -> Result<(), AppError>;
 
-/// Migrations are embedded rather than read from disk, so a shipped build
-/// always carries exactly the schema it was compiled against and cannot be
-/// pointed at a different file.
-///
-/// A migration may carry a data pass alongside its SQL, run in the same
-/// transaction before the version is stamped. That is what lets a change touch
-/// rows rather than only the schema while keeping R8's properties: forward-only,
-/// numbered, and all-or-nothing.
 struct Migration {
     name: &'static str,
     sql: &'static str,
@@ -61,11 +51,6 @@ const MIGRATIONS: &[Migration] = &[
     },
 ];
 
-/// Applies every migration not yet recorded in `schema_migrations`.
-///
-/// Forward-only, numbered, each in its own transaction (R8). A device that
-/// was offline across a release catches up by replaying the gaps. There is no
-/// down migration, by design.
 pub fn run(db: &Database) -> Result<(), AppError> {
     ensure_table(db)?;
     let applied = applied_versions(db)?;
@@ -127,9 +112,6 @@ fn pending(applied: Vec<i64>) -> Vec<Pending> {
         .collect()
 }
 
-/// Each migration is its own transaction: a failure leaves that version
-/// unrecorded and every earlier version committed, so the next launch retries
-/// from exactly where it stopped.
 fn apply_one(db: &Database, version: i64, step: &Pending) -> Result<(), AppError> {
     db.with_conn(|conn| apply_in_tx(conn, version, step))
 }
@@ -151,20 +133,6 @@ fn apply_in_tx(conn: &mut Connection, version: i64, step: &Pending) -> Result<()
 #[cfg(test)]
 pub use lift_leading_heading_into_title as lift_leading_heading_into_title_for_tests;
 
-/// ADR-023: notes written before the title became a field carry their title as
-/// the document's leading H1. This moves it into the field and off the first line
-/// of the body, so the two cannot both claim the same words.
-///
-/// Three things it deliberately does not do:
-///
-/// - It does not touch `updated_at`. A schema migration is not an edit, and a
-///   library that appeared to have been written on the day it upgraded would sort
-///   every note to the top of every list.
-/// - It does not overwrite a manual title. If one exists the note has already been
-///   through the new field, and its leading heading is a heading like any other.
-/// - It does not skip notes it cannot move. A document whose first block is a
-///   heading with no text in it keeps both, which is the same thing the app does
-///   when a user types a heading and then clears it.
 pub fn lift_leading_heading_into_title(tx: &rusqlite::Transaction<'_>) -> Result<(), AppError> {
     let candidates: Vec<(String, String, String, i64)> = {
         let mut stmt = tx.prepare(
@@ -199,9 +167,6 @@ pub fn lift_leading_heading_into_title(tx: &rusqlite::Transaction<'_>) -> Result
                 .and_then(Value::as_array_mut)
                 .ok_or_else(|| AppError::internal("stored document has no content array"))?;
             content.remove(0);
-            /* ProseMirror has no content model without a block: a note that was
-            only a title would come out of this with an empty document, which
-            the editor rejects and the validator refuses to save. */
             if content.is_empty() {
                 content.push(serde_json::json!({ "type": "paragraph" }));
             }
@@ -224,9 +189,6 @@ pub fn lift_leading_heading_into_title(tx: &rusqlite::Transaction<'_>) -> Result
                 derived.word_count,
             ],
         )?;
-        /* Queued like any other write, because that is what it is: a change to a
-        note's title that another device has not seen. Leaving it out would make
-        this migration a silent local divergence (R5). */
         crate::repo::append_outbox(tx, "note", &id, "upsert", None, rev)?;
     }
     Ok(())

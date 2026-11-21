@@ -10,9 +10,6 @@ if (container === null) {
   throw new Error('root element missing');
 }
 
-/* Before the first paint: the app is positioned against the visual viewport, and a
-   reader who opens the keyboard on a phone should not see the frame where it has
-   not been placed yet. */
 pinToVisualViewport();
 
 createRoot(container).render(

@@ -6,10 +6,6 @@ import { SettingsDialog } from './SettingsDialog';
 import type { SyncConflict, SyncStatus } from '../types/sync';
 import type { FolderNode } from '../types/folder';
 
-/* Sync tab: connection string, enable switch, manual trigger, status and
-   the conflict resolver. The secret is write-only — the UI never reads it
-   back — so the field is empty unless the user is typing. */
-
 const UNCONFIGURED: SyncStatus = {
   configured: false,
   enabled: false,
@@ -140,8 +136,6 @@ describe('SyncPane', () => {
 
   it('lists conflicts with a choice per note', async () => {
     const { onResolve } = pane({ status: CONFIGURED, conflicts: [CONFLICT] });
-    /* The list lives behind the resolver button so the settings dialog never
-       overflows: opening it reveals the per-note choice. */
     expect(screen.queryByTestId('sync-conflict')).toBeNull();
     fireEvent.click(screen.getByTestId('sync-resolve-open'));
     expect(screen.getByTestId('sync-conflict').textContent).toContain('Shopping');
@@ -259,9 +253,6 @@ describe('SettingsDialog tabs', () => {
   });
 });
 
-/* ADR-024: the Updates tab, and the tablist it made a tablist. With two tabs the
-   arrow handler was a pair-flip, which is why `Home`/`End` did nothing and
-   nothing noticed; three tabs is where that stops being invisible. */
 describe('the third Settings tab', () => {
   function updatesDialog(initialTab: 'general' | 'sync' | 'updates' = 'updates'): void {
     render(

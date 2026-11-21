@@ -190,7 +190,17 @@ without adding a boundary anything could enforce.
 
 Rust booleans are `is_*` / `has_*`. Database booleans are `is_*` / `has_*` and store 0/1.
 
-**No comments in code, with one narrow exception.** The specification is the documentation. A comment that restates the code is noise; a comment that explains a non-obvious constraint belongs in `docs/` and is referenced from the type or function name where possible. The exception is a brief trap warning at the exact site where the trap is: one or two lines naming the constraint and the document section that decides it (e.g. why a write bypasses the autosave comparison, per `04-editor.md` §9). Such a comment never carries the rationale itself — that lives once, in `docs/`. This is a deliberate rule, not a preference: comments drift out of date and the docs are reviewed.
+**No comments in code.** The specification is the documentation. A fact worth
+writing down belongs in `docs/`, or in a name; a comment that restates the code
+is noise, and a comment that explains a constraint drifts out of date while the
+documents are reviewed. The one exception is a warning at a trap site where the
+code would otherwise be silently wrong or destructive: one line, naming the
+constraint and the document section that decides it, and only when no name or
+type can carry it (a `// SAFETY:` note on an `unsafe` block is the model). Tool
+directives that are comments by syntax — `eslint-disable-next-line`,
+`/// <reference …>` — stay, because a tool consumes them. Rationale never lives
+in the comment: it lives once, in `docs/`. This is a deliberate rule, not a
+preference.
 
 ## 3. TypeScript
 
@@ -203,7 +213,7 @@ Rust booleans are `is_*` / `has_*`. Database booleans are `is_*` / `has_*` and s
 
 ## 4. Rust
 
-- `#![deny(clippy::all)]` and `#![warn(missing_docs)]` on public items in `repo/`, `services/`, and `doc/`. `missing_docs` is suppressed in `main.rs`, `lib.rs`, and `commands/`, which are self-describing dispatch layers.
+- `cargo clippy -- -D warnings` is the lint gate. There is no `missing_docs` lint: the code carries no doc comments by design (§2).
 - Error handling: `AppError` with `thiserror`. Never `unwrap()` outside tests and migration setup. Never `panic!` in a command. Never `.expect()` in `src/` at all.
 - `Mutex<Connection>` in Tauri state. No connection pool at this scale; a pool would imply concurrency we do not have.
 - Every SQL statement is a prepared statement with bound parameters. **No string interpolation into SQL, ever** — including for sort direction, which must be matched against an allowlist rather than interpolated.
@@ -362,7 +372,7 @@ are handled in `editor.spec.ts` rather than worked around:
 
 ## 12. Documentation rules
 
-- `docs/` is the single source of truth for rules and rationale. `prototype/index.html` is the single source of truth for appearance (ADR-016). README and code comments never contradict either.
+- `docs/` is the single source of truth for rules and rationale. `prototype/index.html` is the single source of truth for appearance (ADR-016). README and the few permitted in-code notes never contradict either.
 - Icons come from `lucide-react` and must already exist in the `05-ui-ux.md` §3.3 inventory. Adding a new icon to the UI means adding it there first. **Emoji are never used in the UI** (ADR-015).
 - Update the document in the same change as the code. A follow-up "fix the docs" commit never happens.
 - New decisions go into `09-decisions.md` as a new ADR. Existing ADRs are superseded, not edited.

@@ -18,6 +18,10 @@ Do this in order. Do not skip to writing code.
 ## While working
 
 - Follow `docs/10-conventions.md` for layout, naming, state, and errors.
+- Leave no comments in code (`docs/10-conventions.md` §2). Put the fact in
+  `docs/` or in a name. The only exceptions are tool directives a compiler or
+  linter consumes, and a one-line trap warning where the code would otherwise
+  be silently wrong.
 - Verify your work with `docs/11-verification.md`. Run the gate commands;
   report the real output. Never claim a check passed that was not run.
 - If a document and the code disagree, **the code is wrong.** Fix the code.

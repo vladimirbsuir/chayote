@@ -28,20 +28,6 @@
   --radius-pill: var(--r-pill);
 }
 
-/* Inside `@layer base`, and this must stay there.
-
-   Tailwind v4 emits its utilities into `@layer utilities`. An unlayered rule
-   beats a layered one whatever its specificity, so a bare `* { padding: 0 }` in
-   the stylesheet — not in a layer — silently overrides *every* padding and margin
-   utility in the app. The symptom is a layout that looks almost right: elements
-   are the right size and in the right place, but every `px-*`, `py-*`, and
-   `pt-*` computes to 0 px, so text touches the pane edges and the editor column
-   loses its 32 px measure entirely.
-
-   The editor's own `padding: 40px 32px 64px` from the prototype is written as
-   utilities on `EditorContent` for the same reason: a literal padding in
-   `editor.css` would win over the layer order and be inconsistent with the rest
-   of the spacing scale. */
 @layer base {
   * {
     margin: 0;
@@ -56,16 +42,6 @@ body,
   height: 100%;
 }
 
-/* The app is positioned and sized against the *visual* viewport, not the layout
-   one, so the on-screen keyboard cannot leave half of it off the screen.
-   `src/lib/pinToVisualViewport.ts` writes the two variables on every visual-viewport
-   `resize` and `scroll`; where the two viewports agree — every desktop, and any
-   phone with the keyboard closed — this is `inset: 0`, which is what it was before.
-
-   The measurements and the device this came from are in that file's comment. The
-   short version: the IME left `window.innerHeight` at 820 while the visible area
-   fell to 525, so the browser pinned the visible window 295 px down and the editor
-   header went above the fold with no way to scroll back to it. */
 #root {
   position: fixed;
   left: 0;
@@ -75,24 +51,6 @@ body,
   height: var(--app-viewport-height, 100%);
 }
 
-/* `06-platform.md` §4.3 and §4.4: the window is drawn edge to edge, so the app
-   must keep its own content clear of the system status bar and navigation bar.
-
-   M7 measured this on a device before it existed. Tauri's generated
-   `MainActivity` calls `enableEdgeToEdge()`, so the WebView fills the whole
-   window; with nothing consuming the insets, the mobile top bar was painted
-   *under* the status bar — the note title collided with the clock and the battery,
-   and the editor status bar sat behind the three-button navigation bar.
-
-   `viewport-fit=cover` in index.html is what makes `env()` report the insets at
-   all; without it both values are 0 on Android and this rule silently does
-   nothing. `max()` rather than a fixed value so a desktop browser, which reports 0,
-   is unaffected.
-
-   This is the CSS layer rather than a `WindowInsetsCompat` listener in
-   `MainActivity.kt` on purpose: `gen/android/` is generated code that a Tauri
-   version bump overwrites, and this is a layout concern the prototype already
-   describes. */
 :root {
   --inset-top: env(safe-area-inset-top, 0px);
   --inset-bottom: env(safe-area-inset-bottom, 0px);
@@ -116,38 +74,10 @@ body {
   outline-offset: 2px;
 }
 
-/* The search field is the one control in the app whose focusable element is not
-   the thing the user sees: the visible control is its container, drawn by the
-   `focus-within:` utilities in `TopBar.tsx`.
-
-   Two things follow, and neither can be fixed from the component. The bare input
-   picks up the `:focus-visible` rule above, so it draws a second ring inside the
-   container — and `outline-none` on that input cannot remove it, because the
-   rule above is unlayered and beats every utility in `@layer utilities`. That is
-   the same layer-order trap required test 14 in `10-conventions.md` §10 exists
-   for, and it needs a literal here rather than a class.
-
-   And `type="search"` draws Chromium's own cancel button beside the field's own
-   `x`, so an empty-looking field has two clear controls and a full one looks like
-   it has a second search icon. */
 input[type='search'] {
   outline: none;
 }
 
-/* The note title gets the same treatment, and for a different reason than the
-   search field does: that one hides a ring the container already draws, and this
-   one has no border to begin with. A 2px box floating 2px outside a field that
-   is otherwise invisible reads as an error state rather than as focus — the
-   editor's own caret already says where the text will go, so the ring is
-   redundant noise on the one control that is not chrome but content.
-
-   A literal rather than a class, for the same reason as the rule above: an
-   unlayered declaration beats every utility in `@layer utilities`, so
-   `outline-none` on the element cannot remove this.
-
-   The cost is that a keyboard user gets no focus indicator on this field. That
-   is the same trade the search field already makes and is deliberate there; it
-   is worth revisiting if this app grows keyboard-only flows. */
 textarea#note-title-input {
   outline: none;
 }
@@ -157,10 +87,6 @@ input[type='search']::-webkit-search-decoration {
   appearance: none;
 }
 
-/* One scrollbar everywhere: the platform default never appears — in the note
-   list, the editor, the trees, the dialogs or the popovers. A slim thumb in
-   the theme's own border colour on a transparent track, darkening on hover;
-   the Firefox pair below covers the engine Chromium's pseudo-elements do not. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -179,15 +105,9 @@ input[type='search']::-webkit-search-decoration {
   border: 3px solid transparent;
   background-clip: content-box;
 }
-/* Where a horizontal and a vertical bar meet (a dual-axis scroller), the
-   corner is transparent rather than the platform's white square. */
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
-/* A strip that scrolls by swipe, with no bars at all: once a horizontal bar
-   appears it eats vertical room and forces a pointless vertical bar beside
-   it — the formatting toolbar's mobile buttons are exactly tall enough for
-   that loop. */
 .no-scrollbar {
   scrollbar-width: none;
 }
@@ -199,8 +119,6 @@ input[type='search']::-webkit-search-decoration {
   scrollbar-color: var(--border-strong) transparent;
 }
 
-/* Icons: Lucide geometry, four fixed sizes, stroke steps down as size rises.
-   05-ui-ux.md §3.3. Never a hard-coded colour; never a free-form size. */
 .icon {
   display: inline-block;
   vertical-align: -0.125em;
@@ -245,8 +163,6 @@ input[type='search']::-webkit-search-decoration {
   }
 }
 
-/* Added and removed around a theme swap (`App`): every surface lands on the
-   new palette in the same frame instead of fading behind each other. */
 .theme-switch,
 .theme-switch *,
 .theme-switch *::before,

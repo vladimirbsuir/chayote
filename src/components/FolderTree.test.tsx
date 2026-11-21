@@ -3,11 +3,6 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { FolderTree } from './FolderTree';
 import type { FolderNode } from '../types/folder';
 
-/* The tree is one tab stop with a roving tabindex (`05-ui-ux.md` §10). These
-   tests are about the DOM contract the pattern requires — one `tabIndex={0}`,
-   `aria-level`, `aria-expanded`, and the keys acting on the right row — because
-   the traversal itself is covered in `folderRows.test.ts` as pure data. */
-
 const PROJECTS: FolderNode = {
   id: 'a1',
   name: 'Projects',
@@ -38,8 +33,6 @@ const PERSONAL: FolderNode = {
 };
 const TREE: FolderNode[] = [WORK, PERSONAL];
 
-/* Rows are addressed by their data attribute rather than by text, because a name
-   is not unique in general and the id is what every assertion is about. */
 function row(id: string): HTMLElement {
   const found = document.querySelector(`[data-testid="folder-row"][data-folder-id="${id}"]`);
   if (!(found instanceof HTMLElement)) throw new Error(`no row for folder ${id}`);
@@ -185,10 +178,6 @@ describe('FolderTree', () => {
     };
     const { rerender } = render(<FolderTree {...props} />);
 
-    /* Focus arriving from outside the tree — a click, or a screen reader moving
-       the caret — has to move the tab stop too, and there is no handler of ours
-       ahead of it. `act` because the roving tabindex is derived from state the
-       focus event updates. */
     act(() => {
       row('a1').focus();
     });
@@ -196,8 +185,6 @@ describe('FolderTree', () => {
 
     rerender(<FolderTree {...props} collapsed={['a']} />);
 
-    /* `a1` is no longer rendered, so it cannot hold the tab stop; `a` is the only
-       visible candidate. */
     expect(row('a').getAttribute('tabindex')).toBe('0');
   });
 
@@ -211,9 +198,6 @@ describe('FolderTree', () => {
   });
 
   it('swallows the release click after a hold that opened the menu', () => {
-    /* The release after a long-press synthesises a click on engines that do,
-       which would select the row under its own just-opened menu — measured on
-       the phone. The flag eats exactly that one; the next real click selects. */
     const onSelect = vi.fn();
     renderTree({ onSelect });
 
@@ -251,8 +235,6 @@ describe('FolderTree', () => {
   });
 
   it('renders rows unselectable so a hold reaches the menu, not a text selection', () => {
-    /* `05-ui-ux.md` §6.3: on the device the name selected instead and no menu
-       opened. Copying happens in the editor, not in the tree. */
     renderTree();
 
     expect(allRows().length).toBeGreaterThan(0);

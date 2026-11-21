@@ -8,14 +8,8 @@ import { EDITOR_EXTENSIONS } from './extensions';
 
 type Transaction = Parameters<EditorView['dispatch']>[0];
 
-/* `04-editor.md` §2.1. These are pure props, so they are asserted directly
-   rather than through a WebView — the WebView tests live in `e2e/`. */
-
 const props = buildEditorProps();
 
-/* ProseMirror's prop signatures carry arguments TipTap does not use. These two
-   helpers keep the call sites readable instead of padding every call with
-   `undefined`. */
 const attributes = (): Record<string, string> =>
   typeof props.attributes === 'function' ? props.attributes({} as never) : (props.attributes ?? {});
 
@@ -30,8 +24,6 @@ const paste = (data: DataTransfer | null, view: EditorView): boolean =>
 
 const schema = getSchema(EDITOR_EXTENSIONS);
 
-/* A minimal view: enough state for `handlePaste` to read, and a recorder for the
-   transaction it dispatches. */
 function stubView(): { view: EditorView; dispatched: () => Transaction[] } {
   const state = EditorState.create({ schema });
   const sent: Transaction[] = [];

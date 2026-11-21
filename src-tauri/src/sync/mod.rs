@@ -1,40 +1,3 @@
-//! Single-Postgres sync engine (`07-sync-plan.md`, MVP slice).
-//!
-//! One general implementation over the Postgres wire protocol: any server
-//! works (hosted Postgres or a local container) because nothing here is
-//! provider-specific — the connection string selects the server, exactly
-//! like it selects the database for every other Postgres tool.
-//!
-//! A cycle is push-then-pull (`§8` loop, minus the background timer, which
-//! the frontend owns with a 60 s interval in this slice):
-//!
-//! 1. **Push** — drain the outbox (written from day one, R5) in dependency
-//!    order tags → folders → notes, 50 distinct rows per batch. Server `rev`
-//!    comes from the global `sync_rev_seq` and is echoed back to the row
-//!    (R4); the row goes clean with `synced_at` set.
-//! 2. **Pull** — per-table `rev > watermark` fetch, applied with the §5
-//!    conflict policy. Watermarks live in `sync_state`.
-//!
-//! Conflict policy (never silently lose data, principle 4):
-//!
-//! - folders / tags — LWW per row on `updated_at`; delete beats a
-//!   concurrent rename (the row is tombstoned, §5.2/§5.4). A move that would
-//!   close a cycle loses to the first push, and pulled folders land parent
-//!   first (`tree.rs`). A tag name clashing by case folds into the server's
-//!   tag (`tag_merge.rs`).
-//! - notes — fields this device touched (read from its outbox payloads) stay
-//!   local, the rest come from the server (`merge.rs`); a both-sides-changed
-//!   `doc_json` is never auto-resolved: the local document stays live and the
-//!   remote one is parked in `conflicts` behind a non-modal badge (§5.1).
-//! - `note_tags` — set union on concurrent change (§5.3).
-//!
-//! Locking: one cycle at a time, guarded by an in-process lock (§8). A
-//! second caller gets `already_running` rather than queueing.
-//!
-//! The rusqlite `Mutex` is never held across an `.await`: every phase loads
-//! what it needs, releases the connection, talks to the server, then
-//! writes back.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -52,24 +15,11 @@ const BATCH_ROWS: usize = 50;
 const PULL_LIMIT: i64 = 200;
 const PULL_PAGES_PER_CYCLE: usize = 10;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// Every server round trip carries a deadline. Without one, a stalled
-/// pooled session hangs the cycle forever: the in-process lock never
-/// releases and every later cycle reports `already_running` while nothing
-/// moves — observed against a hosted pooler, where a blackholed query is
-/// a fact of life, not a theory.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BATCHES_PER_CYCLE: usize = 20;
-/// Per-row retry backoff (§8, Phase E). A failing row records `attempts` and
-/// the earliest epoch-ms it is due again (`outbox.next_retry_at`); the drain
-/// skips rows that are not due yet, so one dead row neither spins the queue
-/// at full speed nor blocks the rows behind it. Growth is ×4 from a 30 s
-/// base — 30 s, 2 min, 8 min — capped at 30 min so a long outage cannot
-/// stall the tab past the next launch.
 const RETRY_BASE_MS: i64 = 30_000;
 const RETRY_CAP_MS: i64 = 30 * 60_000;
 
-/// Exponential backoff for a row that has just failed `attempts` times
-/// (1-based: the first failure waits out the base delay).
 fn retry_delay_ms(attempts: i64) -> i64 {
     let mut delay = RETRY_BASE_MS;
     for _ in 1..attempts.max(1) {
@@ -88,7 +38,6 @@ const KEY_LAST_SYNCED: &str = "last_synced_at";
 const KEY_LAST_ATTEMPT: &str = "last_attempt_at";
 const KEY_LAST_ERROR: &str = "last_error";
 
-/// What `sync_get_status` reports. All timestamps are epoch ms (R2).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatus {
@@ -101,9 +50,6 @@ pub struct SyncStatus {
     pub last_error: Option<String>,
 }
 
-/// What one `sync_now` cycle did. `deferred` counts remote rows that were
-/// deliberately not applied this cycle: the open note's, while it is being
-/// edited (Phase-E open-editor guard). They are re-fetched next cycle.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSummary {
@@ -126,7 +72,6 @@ impl SyncSummary {
     }
 }
 
-/// One parked remote document, for the conflict badge and resolver.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncConflict {
@@ -141,8 +86,6 @@ pub struct SyncConflict {
 
 pub struct SyncService {
     db: Arc<Database>,
-    /// One cycle at a time (§8). A tokio mutex whose guard is `Send`, so it
-    /// can be held across the network awaits below — a std guard cannot.
     lock: tokio::sync::Mutex<()>,
 }
 
@@ -158,18 +101,6 @@ impl SyncService {
         status_of(&self.db)
     }
 
-    /// An empty string keeps the stored secret and only flips the switch,
-    /// so the frontend can save "enable" without ever reading the secret
-    /// back. A non-empty string must look like Postgres.
-    ///
-    /// Changing the server re-bootstraps (§6): revisions and watermarks are
-    /// meaningless against a database that has never seen this device, so
-    /// every local row is re-queued and the watermarks restart at zero.
-    /// Without this, rows marked clean against server A stay silent on
-    /// server B forever — observed exactly that way when a config was
-    /// swapped by hand underneath the engine. A missing stored endpoint
-    /// counts as changed, so upgrades and hand-edited databases converge
-    /// instead of diverging silently.
     pub fn set_config(&self, connection_string: &str, enabled: bool) -> Result<(), AppError> {
         let clean = connection_string.trim();
         self.db.with_conn(|conn| {
@@ -205,14 +136,6 @@ impl SyncService {
         })
     }
 
-    /// Re-queues every surviving row and restarts the pull watermarks (§6
-    /// recovery). Without this, a wiped server against clean rows and stale
-    /// watermarks is permanent divergence with no way out: a sync would push
-    /// nothing (empty outbox) and pull nothing (watermarks past every rev),
-    /// and re-saving the same connection string is deliberately a no-op.
-    /// Exposed as "Re-upload everything" in Settings → Sync; the next cycle
-    /// pushes the whole library and pulls since zero. Returns the queued
-    /// row count so the UI can name what happened.
     pub fn reupload_all(&self) -> Result<i64, AppError> {
         self.db.with_conn(|conn| {
             let tx = conn.transaction()?;
@@ -253,16 +176,6 @@ impl SyncService {
         })
     }
 
-    /// Keep-local drops the parked copy (the live document already won on
-    /// the next push). Use-remote applies the *parked* remote document from
-    /// the conflicts table — never the live server row. The push that parked
-    /// the conflict already overwrote the server with the local document
-    /// (§5.1: keep-local converges in one round), so the live row *is* the
-    /// local version and fetching it would behave exactly like keep-local.
-    /// The parked copy is what the UI showed as "Other version", and applying
-    /// it needs no network: filing, pin and tags stay as they are (tags were
-    /// already unioned at park time, §5.3), only the text is restored (R9),
-    /// then the row is re-queued so the next push converges the server.
     pub async fn resolve_conflict(&self, id: &str, keep_local: bool) -> Result<(), AppError> {
         let (note_id, remote_doc, remote_title) = self.db.with_conn(|conn| {
             conn.query_row(
@@ -298,11 +211,6 @@ impl SyncService {
                 serde_json::from_str(&remote_doc)
                     .map_err(|err| AppError::internal(format!("remote document is not valid JSON: {err}")))?;
             crate::doc::validate::validate(&doc)?;
-            /* The remote title is taken as it stands. This re-derived it from
-             * the incoming document whenever the local row was `auto`, which
-             * meant a peer's title was silently replaced by whatever the body
-             * happened to start with — the same leak the save path had, arriving
-             * from the other side and overwriting whatever this device had. */
             let title = remote_title.clone();
             let derived = crate::services::derive::derive(&doc);
             let now = crate::clock::now_ms();
@@ -349,24 +257,12 @@ impl SyncService {
         })
     }
 
-    /// One push-then-pull cycle. Bootstrap (§6) needs no special case: the
-    /// outbox has recorded every local write since day one, so draining it
-    /// in dependency order *is* the upload, and pull only starts after.
-    ///
-    /// `open_note_id` is the note on screen, if any (Phase-E open-editor
-    /// guard). The frontend flushes the autosave before calling, so SQLite
-    /// holds what the user typed; a remote change for that same note is then
-    /// deferred rather than applied under the cursor, and re-fetched next
-    /// cycle. Nothing is ever clobbered while it is being typed.
     pub async fn run_cycle(&self, open_note_id: Option<&str>) -> Result<SyncSummary, AppError> {
         let _guard = match self.lock.try_lock() {
             Ok(guard) => guard,
             Err(_) => return Ok(SyncSummary::busy()),
         };
 
-        // Heartbeat first: if the cycle below stalls, the next status read
-        // still shows a fresh attempt rather than a dead silence that looks
-        // identical to "never tried".
         let attempt_at = crate::clock::now_ms();
         self.db.with_conn(|conn| {
             put_state(conn, KEY_LAST_ATTEMPT, &attempt_at.to_string())?;
@@ -413,7 +309,6 @@ impl SyncService {
                     }
                     Err(err) => {
                         self.record_row_error(row.outbox_id, &err.log_line())?;
-                        // A dead row must not pin the queue: keep draining.
                     }
                 }
             }
@@ -436,9 +331,6 @@ impl SyncService {
                 .map_err(AppError::from)
         })?;
 
-        /* The cycle finished, but a row that failed inside it is still failing:
-        its error stays the status line's until it goes through (§8). Clearing
-        it unconditionally hid every per-row failure behind "last synced". */
         let now = crate::clock::now_ms();
         self.db.with_conn(|conn| {
             use rusqlite::OptionalExtension as _;
@@ -490,8 +382,6 @@ impl SyncService {
             ("tag", _) => self.push_tag(client, row).await,
             ("folder", _) => self.push_folder(client, row).await,
             ("note", _) => self.push_note(client, row).await,
-            // `note_tags` collapses into its note's row (replace_tags); a
-            // stray row is acknowledged, never retried forever.
             _ => {
                 self.db.with_conn(|conn| {
                     conn.execute(
@@ -505,8 +395,6 @@ impl SyncService {
         }
     }
 
-    // -- tags -----------------------------------------------------------
-
     async fn push_tag(&self, client: &Client, row: &OutboxRow) -> Result<PushOutcome, AppError> {
         let local = self
             .db
@@ -514,8 +402,6 @@ impl SyncService {
         let id = uid(&row.entity_id)?;
 
         if row.op == "delete" || local.is_none() {
-            // v1 hard-deletes locally; the server keeps a tombstone (§5.4)
-            // so a second device can observe the deletion on pull.
             let now = crate::clock::now_ms();
             client_execute(
                 client,
@@ -533,11 +419,6 @@ impl SyncService {
         let local = local.expect("checked above");
 
         let remote = query_remote_tag(client, &row.entity_id).await?;
-        /* Another live tag on the server already has this name in some case:
-        it wins and this one folds into it (`tag_merge.rs`). Pushed as is, the
-        insert or rename hit the server's unique index and the row retried for
-        ever. A server tombstone for this id is not a clash — the delete wins
-        below, as before. */
         if remote.as_ref().is_none_or(|r| r.deleted_at.is_none()) {
             if let Some(winner) = query_live_tag_named(client, &local.name, id).await? {
                 let known = remote.is_some();
@@ -571,7 +452,6 @@ impl SyncService {
                 Ok(PushOutcome::Pushed)
             }
             Some(remote) if remote.deleted_at.is_some() => {
-                // Delete wins over a concurrent rename (§5.2).
                 self.db.with_conn(|conn| {
                     let tx = conn.transaction()?;
                     tx.execute("DELETE FROM tags WHERE id = ?1", [&row.entity_id])?;
@@ -583,7 +463,6 @@ impl SyncService {
                 Ok(PushOutcome::Rebased)
             }
             Some(remote) if remote.rev > row.base_rev && remote.name != local.name => {
-                // Both sides renamed: LWW on updated_at, loser rebases.
                 if local.updated_at >= remote.updated_at {
                     let rev = query_rev(
                         client,
@@ -630,8 +509,6 @@ impl SyncService {
         }
     }
 
-    // -- folders --------------------------------------------------------
-
     async fn push_folder(&self, client: &Client, row: &OutboxRow) -> Result<PushOutcome, AppError> {
         let local = self
             .db
@@ -639,11 +516,6 @@ impl SyncService {
         let id = uid(&row.entity_id)?;
 
         if row.op == "delete" || local.is_none() {
-            // v1 hard-deletes the subtree locally; each tombstoned id keeps
-            // a server tombstone so pulls can propagate the deletion. The
-            // name is a placeholder that never surfaces: pulls skip
-            // tombstones for unknown ids, and the live-name CHECK below
-            // rejects an empty string.
             let now = crate::clock::now_ms();
             client_execute(
                 client,
@@ -682,7 +554,6 @@ impl SyncService {
                 Ok(PushOutcome::Pushed)
             }
             Some(remote) if remote.deleted_at.is_some() => {
-                // Delete wins over concurrent rename/move (§5.2).
                 self.db.with_conn(|conn| {
                     let tx = conn.transaction()?;
                     tx.execute("DELETE FROM folders WHERE id = ?1", [&row.entity_id])?;
@@ -696,12 +567,6 @@ impl SyncService {
                 })?;
                 Ok(PushOutcome::Rebased)
             }
-            /* The first push wins a cycle (§5.2): this move would file the
-            folder under its own descendant as the server holds the tree now,
-            because another device moved that descendant first. The move is
-            dropped and the row rebases onto the server's; LWW on `parent_id`
-            alone would hand the server a cycle, and every device a tree
-            whose walks never end. */
             Some(remote)
                 if local.parent_id.is_some()
                     && local.parent_id != remote.parent_id
@@ -761,9 +626,6 @@ impl SyncService {
         }
     }
 
-    /// The pushed folder lost to the server row: take the server's state,
-    /// through the same parent checks a pull uses (a parent this device does
-    /// not hold, or one that would close a cycle here, files it at the root).
     fn rebase_folder(&self, remote: &RemoteFolder, outbox_id: i64) -> Result<(), AppError> {
         self.db.with_conn(|conn| {
             let tx = conn.transaction()?;
@@ -774,8 +636,6 @@ impl SyncService {
         })
     }
 
-    // -- notes ----------------------------------------------------------
-
     async fn push_note(&self, client: &Client, row: &OutboxRow) -> Result<PushOutcome, AppError> {
         let local = self
             .db
@@ -783,9 +643,6 @@ impl SyncService {
         let id = uid(&row.entity_id)?;
 
         if row.op == "delete" || local.is_none() {
-            // Soft or hard local delete → server tombstone (§5.4). The id
-            // stays server-side so a second device observes the deletion
-            // instead of resurrecting the note.
             let now = crate::clock::now_ms();
             let tombstone_at = local
                 .as_ref()
@@ -825,18 +682,11 @@ impl SyncService {
                 self.accept_push("notes", &row.entity_id, rev, row.outbox_id)?;
                 Ok(PushOutcome::Pushed)
             }
-            /* A tombstone at or below `base_rev` is one this device already
-            knew — its own delete, pushed earlier — so a live local note is a
-            restore, and falls through to the plain update below, which clears
-            `deleted_at`. Only a tombstone newer than the base is a concurrent
-            delete that wins (§5.2); treating both alike put every restored
-            note back in the trash on the next sync. */
             Some(remote)
                 if remote.deleted_at.is_some()
                     && (local.deleted_at.is_some() || remote.rev > row.base_rev) =>
             {
                 if local.deleted_at.is_some() {
-                    // Both deleted: converge on the tombstone.
                     self.db.with_conn(|conn| {
                         conn.execute(
                             "UPDATE notes SET rev = ?2, dirty = 0 WHERE id = ?1",
@@ -847,9 +697,6 @@ impl SyncService {
                     self.mark_sent(row.outbox_id)?;
                     Ok(PushOutcome::Pushed)
                 } else {
-                    // Delete wins over concurrent edit (§5.2): apply the
-                    // tombstone locally. The parked-conflict path does not
-                    // apply — there is no remote content worth keeping.
                     self.db.with_conn(|conn| {
                         let tx = conn.transaction()?;
                         tx.execute(
@@ -868,9 +715,6 @@ impl SyncService {
                     .await
             }
             Some(_) => {
-                /* The server's real tag set, not an empty stand-in: with `have`
-                empty, a note whose last tag was removed compared equal and the
-                server kept the tag for ever. */
                 let remote_tags = query_remote_note_tags(client, &row.entity_id).await?;
                 let rev = update_remote_note(client, &row.entity_id, &local).await?;
                 self.push_note_tags(client, &row.entity_id, &local.tag_ids, &remote_tags)
@@ -881,10 +725,6 @@ impl SyncService {
         }
     }
 
-    /// Both sides changed since `base_rev`. Fields merge independently: the
-    /// ones this device's unsent writes touched stay local, every other one
-    /// is taken from the server (`merge.rs`). Only a document both sides
-    /// changed parks the remote copy and keeps local live (§5.1).
     async fn push_note_conflicted(
         &self,
         client: &Client,
@@ -902,9 +742,6 @@ impl SyncService {
         self.push_note_tags(client, &row.entity_id, &merged.note.tag_ids, &remote_tags)
             .await?;
 
-        /* One transaction for the park, the merged fields and the
-        acknowledgement: a crash between them used to leave a parked conflict
-        with the tag union half-written. */
         self.db.with_conn(|conn| {
             let newer = merge::local_touches(conn, &row.entity_id, Some(row.outbox_id))?;
             let tx = conn.transaction()?;
@@ -979,11 +816,6 @@ impl SyncService {
         })
     }
 
-    /// Older queued rows for the same entity are superseded by the state
-    /// just arbitrated: without this, a stale upsert queued before a delete
-    /// (or before a rebase) would re-push deleted content over the server
-    /// on a later cycle. The delete arms bypass `accept_push`, so this runs
-    /// centrally for every successful outcome instead.
     fn supersede(&self, entity_id: &str, outbox_id: i64) -> Result<(), AppError> {
         let now = crate::clock::now_ms();
         self.db.with_conn(|conn| {
@@ -1004,8 +836,6 @@ impl SyncService {
         })
     }
 
-    // -- pull -----------------------------------------------------------
-
     async fn pull_all(
         &self,
         client: &Client,
@@ -1019,12 +849,6 @@ impl SyncService {
         Ok((pulled, deferred))
     }
 
-    /// Folders are pulled whole before any is applied, then applied
-    /// parent-first (`tree.rs`). Applied page by page in `rev` order, a child
-    /// whose parent had been renamed or moved later arrived first, failed the
-    /// foreign key and failed the cycle — every cycle, on a fresh device.
-    /// There is no page cap here: a folder tree is hundreds of rows (03 §8),
-    /// and a cap would split a parent from its child across cycles again.
     async fn pull_folders(&self, client: &Client) -> Result<i64, AppError> {
         let watermark = watermark(&self.db, KEY_FOLDERS_REV)?;
         let mut cursor = watermark;
@@ -1084,16 +908,6 @@ impl SyncService {
         Ok(pulled)
     }
 
-    /// Pulls notes, deferring the open note's row while it is being edited
-    /// (Phase-E open-editor guard). A deferred row is left untouched and the
-    /// watermark is held below it, so the row is re-fetched next cycle rather
-    /// than skipped forever; re-applying the rows around it is idempotent
-    /// (`remote.rev <= local.rev` is a no-op). Returns `(applied, deferred)`.
-    ///
-    /// Paging and the persisted watermark are separate (`PullCursor`): pages
-    /// advance past a deferred row, only the watermark is held. They used to
-    /// be one value, so a deferral held the next page's query at the same
-    /// place and the same 200 rows were fetched up to ten times a cycle.
     async fn pull_notes(
         &self,
         client: &Client,
@@ -1115,7 +929,6 @@ impl SyncService {
             if rows.is_empty() {
                 break;
             }
-            // One query for the page's tag sets, not one per note.
             let mut tag_sets = query_remote_tag_sets(client, &rows).await?;
             for remote in &rows {
                 if note_pull_skipped(open_note_id, remote, &self.db)? {
@@ -1142,10 +955,6 @@ impl SyncService {
     }
 }
 
-/// Where the next notes page starts and what watermark to persist. A
-/// deferred row moves the page past it but holds the persisted watermark
-/// just below it, so the next *cycle* re-fetches it — the next *page* must
-/// not, or it re-reads the same rows.
 #[derive(Debug, Clone, Copy)]
 struct PullCursor {
     start: i64,
@@ -1183,34 +992,10 @@ impl PullCursor {
     }
 }
 
-// -- connection ----------------------------------------------------------
-
 fn network(detail: impl std::fmt::Display) -> AppError {
     AppError::Network(format!("Could not reach the sync server: {detail}"))
 }
 
-/// tokio-postgres `Display` says "db error" for every server rejection and
-/// drops the code and message — which live in the source chain. A sync log
-/// without them is undebuggable (this exact gap once hid a CHECK violation
-/// behind a bare "db error" for an hour), so server errors always travel
-/// with their chain.
-///
-/// Only a failure to talk to the server is `NETWORK`: that code means "defer,
-/// retry with backoff" (`10-conventions.md` §6), and the status line reads it
-/// as "could not reach the sync server". A server that answered and said no
-/// is something else, and calling it a network fault had the app waiting for
-/// a connection that was never the problem:
-///
-/// - credentials, a missing database, or a schema that was never applied
-///   (SQLSTATE classes 28 and 3D, and 42P01/42703 — `postgres/schema.sql`
-///   not run) are `VALIDATION`: the connection string needs the user, and
-///   no amount of retrying fixes it;
-/// - any other server rejection (a constraint, bad data) is `INTERNAL`: a
-///   bug in what was sent, kept in `details` and on the row.
-///
-/// Rows still keep their place and back off whatever the code (§8: a
-/// permanently failing row is never discarded); the code is what the user is
-/// told and what the frontend does about it.
 fn pg_error(err: tokio_postgres::Error) -> AppError {
     let mut detail = err.to_string();
     let mut cause = std::error::Error::source(&err);
@@ -1232,9 +1017,6 @@ fn classify_sqlstate(sqlstate: &str, detail: String) -> AppError {
             "The sync server refused the connection string or has no Chayote schema — check it under Settings → Sync ({detail})."
         ))
     } else if class == "08" || class == "53" || class == "57" {
-        // Connection exceptions, insufficient resources, operator
-        // intervention (shutdown, cancel): the server is there but not
-        // usable right now — a retry is the right answer.
         network(detail)
     } else {
         AppError::internal(format!("The sync server rejected a write: {detail}"))
@@ -1243,11 +1025,6 @@ fn classify_sqlstate(sqlstate: &str, detail: String) -> AppError {
 
 async fn connect(conn_str: &str) -> Result<Client, AppError> {
     let mode = ssl_mode(conn_str);
-    // tokio-postgres only accepts disable/prefer/require as `sslmode` — the
-    // verifying modes are ours, enforced by the connector below, so the
-    // parameter is rewritten to something it parses. Verification and the
-    // must-use-TLS decision are independent axes; conflating them is what
-    // made `verify-full` a config error instead of a policy.
     let effective = with_sslmode_param(
         conn_str,
         match mode {
@@ -1267,18 +1044,12 @@ async fn connect(conn_str: &str) -> Result<Client, AppError> {
             });
             Ok(client)
         } else {
-            // Bundled Mozilla roots, no OS store: identical behaviour on
-            // Windows, Linux and Android, where the system store is not
-            // reliably reachable from Rust.
             let mut roots = rustls::RootCertStore::empty();
             roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
             let mut config = rustls::ClientConfig::builder()
                 .with_root_certificates(roots)
                 .with_no_client_auth();
             if mode == SslMode::Require {
-                // `require` encrypts without authenticating the server — the
-                // libpq meaning, and the only mode hosted poolers with
-                // privately-rooted chains (see below) can speak.
                 config
                     .dangerous()
                     .set_certificate_verifier(std::sync::Arc::new(NoVerify));
@@ -1298,24 +1069,6 @@ async fn connect(conn_str: &str) -> Result<Client, AppError> {
         .map_err(|_| network("connection timed out after 15 s"))?
 }
 
-/// libpq-style `sslmode`, read off the connection string.
-///
-/// - `disable` — plaintext. Only sensible on loopback; the password itself
-///   is still SCRAM-protected, but everything else travels openly.
-/// - `require` (the default) — TLS, server not authenticated. This is what
-///   `psql` does out of the box, and the only thing that works against a
-///   pooler serving a privately-rooted chain: the observed Supabase pooler
-///   chain terminates at a "Supabase Intermediate 2021 CA" no public bundle
-///   contains, so verification is impossible there by construction, not by
-///   neglect. Encryption still defeats passive capture; active MITM is not
-///   defended — see `postgres/README.md`.
-/// - `verify-full` (and `verify-ca`, which behaves identically — rustls
-///   always checks the hostname, and no weaker option is offered) — TLS
-///   against the bundled Mozilla roots. Use it for servers with public
-///   certificates: direct `db.*` hosts, self-hosted with Let's Encrypt.
-/// - `prefer` / `allow` behave as `require`: unlike libpq there is no
-///   silent plaintext fallback — a sync that thinks it is encrypted must
-///   not quietly run open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SslMode {
     Disable,
@@ -1339,8 +1092,6 @@ fn ssl_mode(conn_str: &str) -> SslMode {
     mode
 }
 
-/// Accepts any server certificate: the `require` half of libpq semantics.
-/// The name is deliberately loud at every use site.
 #[derive(Debug)]
 struct NoVerify;
 
@@ -1375,9 +1126,6 @@ impl rustls::client::danger::ServerCertVerifier for NoVerify {
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        // Everything is accepted anyway; this only needs to cover what a
-        // server may offer so the handshake is never cut short for listing
-        // too little.
         vec![
             rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
             rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
@@ -1405,9 +1153,6 @@ async fn client_execute(
     sql: &str,
     params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
 ) -> Result<u64, AppError> {
-    // A Postgres rejection here is a logic error (bad FK, bad JSON), not a
-    // network fault — but it travels in `details`, where the status UI and
-    // the row's `last_error` show it verbatim.
     tokio::time::timeout(QUERY_TIMEOUT, client.execute(sql, params))
         .await
         .map_err(|_| network(query_timeout()))?
@@ -1445,11 +1190,6 @@ trait FromRow: Sized {
     fn from_row(row: &tokio_postgres::Row) -> Result<Self, AppError>;
 }
 
-/// Device ids are UUIDv7 strings (R1); the server columns are `uuid`.
-/// Parsing once per call keeps every parameter binary-typed: sending a
-/// `String` for a `uuid` column fails on both sides of the wire (no
-/// `uuid = text` operator server-side, no `String → uuid` serialisation
-/// client-side), so there is no stringly-typed shortcut here.
 fn uid(id: &str) -> Result<uuid::Uuid, AppError> {
     uuid::Uuid::parse_str(id)
         .map_err(|err| AppError::internal(format!("stored id is not a UUID: {err}")))
@@ -1458,8 +1198,6 @@ fn uid(id: &str) -> Result<uuid::Uuid, AppError> {
 fn uid_opt(id: Option<&str>) -> Result<Option<uuid::Uuid>, AppError> {
     id.map(uid).transpose()
 }
-
-// -- local state helpers ---------------------------------------------------
 
 fn get_state(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>, AppError> {
     use rusqlite::OptionalExtension;
@@ -1497,9 +1235,6 @@ fn status_of(db: &Database) -> Result<SyncStatus, AppError> {
     db.with_conn(|conn| {
         let conn_str = get_state(conn, KEY_CONNECTION)?.unwrap_or_default();
         let enabled = get_state(conn, KEY_ENABLED)?.as_deref() == Some("1");
-        // Distinct changed rows, not outbox rows: every write appends an
-        // event, so create-then-delete is two rows but one pending change
-        // (the drain collapses to the latest row per entity anyway).
         let pending: i64 = conn.query_row(
             "SELECT COUNT(*) FROM (SELECT DISTINCT entity, entity_id FROM outbox WHERE sent_at IS NULL)",
             (),
@@ -1522,8 +1257,6 @@ fn status_of(db: &Database) -> Result<SyncStatus, AppError> {
     })
 }
 
-/// Rewrites the `sslmode` query parameter to `value`, keeping every other
-/// parameter untouched. `tokio_postgres` parses only disable/prefer/require.
 fn with_sslmode_param(conn_str: &str, value: &str) -> String {
     let (base, query) = match conn_str.split_once('?') {
         Some((base, query)) => (base, query),
@@ -1540,10 +1273,6 @@ fn with_sslmode_param(conn_str: &str, value: &str) -> String {
     }
 }
 
-/// Identifies the server, not the credential: user, host, port and database.
-/// A password rotation must not re-upload the world, but a new server must.
-/// Compared as an opaque string; parsing is deliberately narrow (what the
-/// Settings tab accepts), not a general URL parser.
 fn endpoint_id(conn_str: &str) -> String {
     let after_scheme = conn_str
         .split_once("://")
@@ -1579,11 +1308,6 @@ fn endpoint_id(conn_str: &str) -> String {
     format!("{}@{}:{}/{}", user, host.to_lowercase(), port, dbname)
 }
 
-/// Re-queues every surviving row and restarts the watermarks: the first
-/// sync against a new server uploads everything (§6 bootstrap). Soft-deleted
-/// notes queue deletes so their tombstones propagate; hard-deleted folders
-/// and tags are already gone locally, so deletions predating the switch do
-/// not propagate — documented in `postgres/README.md`.
 fn rebootstrap_tx(tx: &rusqlite::Transaction<'_>) -> Result<(), AppError> {
     for (table, entity) in [("tags", "tag"), ("folders", "folder"), ("notes", "note")] {
         tx.execute(&format!("UPDATE {table} SET dirty = 1"), ())?;
@@ -1608,7 +1332,6 @@ fn rebootstrap_tx(tx: &rusqlite::Transaction<'_>) -> Result<(), AppError> {
     Ok(())
 }
 
-/// A queued resolution re-uses the normal path: mark dirty and append.
 fn ensure_outbox(
     tx: &rusqlite::Transaction<'_>,
     entity: &str,
@@ -1641,18 +1364,6 @@ fn ensure_outbox(
     Ok(())
 }
 
-/// Echoes the server rev onto the row and acknowledges the pushed outbox row
-/// and everything older for the entity.
-///
-/// A row queued *after* the one just pushed is an edit made while the push
-/// was on the wire: the entity stays dirty for it, and — when `rebase` — it
-/// is rebased onto the rev just assigned, because it was made on top of the
-/// state that rev now names. It used to be marked sent along with the older
-/// rows and the entity marked clean, so the last keystrokes before a sync
-/// never reached the server. `rebase` is false when the push adopted a field
-/// from the server that the newer row also touched: left on its old base,
-/// that row returns as a conflict and merges, instead of overwriting the
-/// other device's value as a plain update.
 fn accept_push_tx(
     tx: &rusqlite::Transaction<'_>,
     table: &str,
@@ -1685,8 +1396,6 @@ fn accept_push_tx(
         )?;
     }
     mark_sent_tx(tx, outbox_id)?;
-    // An older queued row for the same entity is superseded by the state
-    // just pushed: acknowledge it so it never re-pushes stale content.
     tx.execute(
         "UPDATE outbox SET sent_at = ?3 WHERE sent_at IS NULL AND entity_id = ?1 AND id < ?2",
         rusqlite::params![id, outbox_id, now],
@@ -1701,8 +1410,6 @@ fn mark_sent_tx(tx: &rusqlite::Transaction<'_>, outbox_id: i64) -> Result<(), ru
     )?;
     Ok(())
 }
-
-// -- outbox batch ------------------------------------------------------------
 
 #[derive(Debug)]
 struct OutboxRow {
@@ -1722,17 +1429,6 @@ fn entity_rank(entity: &str) -> i64 {
     }
 }
 
-/// Latest row per (entity, entity_id), in dependency order. Older rows for
-/// the same key are superseded: the push sends full current state, so they
-/// can never contribute anything the latest row does not already carry.
-///
-/// Backoff aware: the "latest" is computed over *all* pending rows first,
-/// and only then filtered by due time. Filtering before collapsing would
-/// promote an older due row past a newer not-due one, and a successful push
-/// of that stale state would supersede the newer row without ever sending
-/// it. A not-due latest row skips the whole entity this cycle.
-/// Collapsed outbox state per (entity, entity_id): latest row id, op,
-/// base_rev and backoff timestamp.
 type CollapsedOutbox = std::collections::HashMap<(String, String), (i64, String, i64, Option<i64>)>;
 
 fn pending_batch(conn: &mut rusqlite::Connection, now_ms: i64) -> Result<Vec<OutboxRow>, AppError> {
@@ -1789,8 +1485,6 @@ enum ApplyOutcome {
     Conflicted,
     Unchanged,
 }
-
-// -- row shapes ----------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 struct LocalTag {
@@ -1849,8 +1543,6 @@ async fn query_remote_tag(client: &Client, id: &str) -> Result<Option<RemoteTag>
     Ok(rows.into_iter().next())
 }
 
-/// The live server tag, other than `id`, whose name matches `name` ignoring
-/// case — what the server's `idx_tags_name_live` on `lower(name)` arbitrates.
 async fn query_live_tag_named(
     client: &Client,
     name: &str,
@@ -1939,10 +1631,6 @@ async fn query_remote_folder(client: &Client, id: &str) -> Result<Option<RemoteF
     Ok(rows.into_iter().next())
 }
 
-/// Whether filing `id` under `parent` would close a cycle on the server: is
-/// `id` among `parent`'s ancestors there? `UNION`, not `UNION ALL`, so a cycle
-/// already on the server (written before this check existed) ends the walk
-/// instead of recursing for ever.
 async fn server_would_cycle(
     client: &Client,
     id: uuid::Uuid,
@@ -2090,8 +1778,6 @@ async fn query_remote_note_tags(client: &Client, note_id: &str) -> Result<Vec<St
         .collect()
 }
 
-/// Tag sets for a page of pulled notes, keyed by note id, in one round trip.
-/// A note with no tags has no entry.
 async fn query_remote_tag_sets(
     client: &Client,
     notes: &[RemoteNote],
@@ -2123,8 +1809,6 @@ async fn query_remote_tag_sets(
 async fn insert_remote_note(client: &Client, id: &str, local: &LocalNote) -> Result<i64, AppError> {
     let id = uid(id)?;
     let folder = uid_opt(local.folder_id.as_deref())?;
-    // Typed JSONB, not text: the column is `jsonb` and a `String` cannot
-    // serialise into it, exactly like ids cannot stay strings (§7 mapping).
     let doc: serde_json::Value = serde_json::from_str(&local.doc_json)
         .map_err(|err| AppError::internal(format!("local document is not valid JSON: {err}")))?;
     query_rev(
@@ -2184,14 +1868,6 @@ async fn update_remote_note(client: &Client, id: &str, local: &LocalNote) -> Res
     .await
 }
 
-// -- pull apply ---------------------------------------------------------------
-
-/// Documents compare by parsed value, never by string. The server column is
-/// `jsonb`, and `jsonb::text` re-spaces (and reorders) keys on every read —
-/// so a round-tripped document is never string-equal to the compact text the
-/// device stored, even with zero content change. Comparing strings would park
-/// a conflict on every concurrent edit, however identical. Unparseable input
-/// compares unequal (park is the safe direction).
 fn docs_equal(local: &str, remote: &str) -> bool {
     if local == remote {
         return true;
@@ -2205,10 +1881,6 @@ fn docs_equal(local: &str, remote: &str) -> bool {
     }
 }
 
-/// Whether the open-editor guard defers this remote row. True only when the
-/// row *would* change the note on screen: the ids match and the remote rev is
-/// newer than the local one. Anything else — a different note, an already-seen
-/// rev, a note that no longer exists locally — flows through the normal path.
 fn note_pull_skipped(
     open_note_id: Option<&str>,
     remote: &RemoteNote,
@@ -2242,9 +1914,6 @@ fn apply_remote_tag(conn: &mut rusqlite::Connection, remote: &RemoteTag) -> Resu
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .ok();
-    /* A live local tag with the same name in another case, under another id:
-    the server's tag wins and absorbs it (`tag_merge.rs`). Inserting or
-    renaming over it failed the unique index and aborted every pull. */
     let skip = match local {
         None => remote.deleted_at.is_some(),
         Some((local_rev, dirty)) => remote.rev <= local_rev || dirty != 0,
@@ -2295,11 +1964,6 @@ fn apply_remote_tag(conn: &mut rusqlite::Connection, remote: &RemoteTag) -> Resu
     }
 }
 
-/// A pull that files a note into a folder this device does not hold
-/// (deleted here, never arrived) unfiles the note instead of violating the
-/// FK — the same `ON DELETE SET NULL` semantics a local folder delete gets.
-/// Crashing the cycle over a filing hint would block every row behind it;
-/// the next local edit re-sends the (null) filing and heals the server row.
 fn live_folder_id(
     conn: &rusqlite::Connection,
     folder_id: &Option<String>,
@@ -2360,19 +2024,9 @@ fn apply_remote_note(
                 |row| row.get(0),
             )?;
             if dirty != 0 {
-                // A remote tombstone against a local edit is the push's to
-                // arbitrate (delete wins, §5.2); nothing to show meanwhile.
                 if remote.deleted_at.is_some() {
                     return Ok(ApplyOutcome::Unchanged);
                 }
-                /* Both sides changed. The same field-wise merge the push runs:
-                fields this device did not touch take the server's values now,
-                and only a document both sides changed parks (§5.1). `rev` and
-                `dirty` stay as they are, so the push still sees a conflict
-                and converges the server onto the merge. The park, the fields
-                and the tag set go in one transaction — they used to be three
-                autocommits, so a crash between them parked a conflict whose
-                tag union was never written. */
                 let touched = merge::local_touches(conn, &remote.id, None)?;
                 let merged = merge::merge_note(&local, remote, remote_tags, touched);
                 let tx = conn.transaction()?;
@@ -2460,7 +2114,6 @@ fn park_conflict_in(
     remote_doc: &str,
     remote_title: &str,
 ) -> Result<(), AppError> {
-    // One parked copy per note; a newer remote supersedes the parked one.
     let id = uuid::Uuid::now_v7().to_string();
     conn.execute(
         "INSERT INTO conflicts (id, note_id, local_rev, remote_rev, remote_doc, remote_title, created_at)
@@ -2482,14 +2135,6 @@ fn park_conflict_in(
     Ok(())
 }
 
-/// Links are whole-set replaced to match the union (or the pulled set).
-/// SQLite does not apply `OR IGNORE` to foreign keys, so linking a tag whose
-/// row has not arrived yet aborts the write instead of skipping it. That is
-/// ordering, not corruption: the push runs before the pull in every cycle,
-/// so a cross-device union can reference a tag pulled moments later. The row
-/// waits out backoff and completes on retry — never filtered, because
-/// dropping the link locally would clobber the server union on the next
-/// push. See the heal leg in `live_two_devices_share_tag_union_and_lww`.
 fn replace_local_tags(
     conn: &rusqlite::Connection,
     note_id: &str,
@@ -2505,8 +2150,6 @@ fn replace_local_tags(
     Ok(())
 }
 
-/// Set union, sorted: removing a tag on one device while adding another
-/// elsewhere keeps both (§5.3).
 fn union_sets(local: &[String], remote: &[String]) -> Vec<String> {
     use std::collections::BTreeSet;
     local
@@ -2549,7 +2192,6 @@ mod tests {
             ssl_mode("postgresql://h/db?sslmode=verify-ca"),
             SslMode::VerifyFull
         );
-        // No silent plaintext fallback: prefer behaves as require.
         assert_eq!(
             ssl_mode("postgresql://h/db?sslmode=prefer"),
             SslMode::Require
@@ -2576,9 +2218,6 @@ mod tests {
 
     #[test]
     fn sslmode_param_is_rewritten_to_what_tokio_parses() {
-        // tokio-postgres accepts only disable/prefer/require; our verifying
-        // modes travel in the connector, so the parameter is normalised and
-        // every other parameter survives untouched.
         assert_eq!(
             with_sslmode_param("postgresql://h/db?sslmode=verify-full", "require"),
             "postgresql://h/db?sslmode=require"
@@ -2619,7 +2258,6 @@ mod tests {
             .expect("counts");
         assert!(queued >= 2, "create plus rebootstrap queue rows");
 
-        // Same server again: nothing new queued.
         sync.set_config("", true).expect("re-save keeps secret");
         let again: i64 = db
             .with_conn(|conn| {
@@ -2633,7 +2271,6 @@ mod tests {
             .expect("counts");
         assert_eq!(again, queued);
 
-        // New server: everything re-queued, watermarks zeroed.
         db.with_conn(|conn| put_state(conn, KEY_NOTES_REV, "99"))
             .expect("watermark");
         sync.set_config("postgresql://u:p@b:5432/db?sslmode=disable", true)
@@ -2666,9 +2303,6 @@ mod tests {
 
     #[test]
     fn reupload_requeues_everything_after_a_server_wipe() {
-        // Clean rows, empty outbox, stale watermarks: exactly what a wiped
-        // server leaves behind. Without re-queueing, the next sync would
-        // push nothing and pull nothing — permanent divergence.
         let db = Database::open_in_memory().expect("memory db");
         let sync = SyncService::new(Arc::new(db));
         let db = sync.db.clone();
@@ -2733,9 +2367,6 @@ mod tests {
 
     #[test]
     fn docs_compare_by_value_not_string() {
-        // What `jsonb::text` hands back after a round trip: re-spaced and
-        // reordered, zero content change. String comparison calls these
-        // different and parks a conflict on every concurrent edit.
         let compact = r#"{"type":"doc","content":[{"type":"paragraph"}]}"#;
         let spaced = r#"{ "type": "doc", "content": [ { "type": "paragraph" } ] }"#;
         let reordered = r#"{"content":[{"type":"paragraph"}],"type":"doc"}"#;
@@ -2746,7 +2377,6 @@ mod tests {
             compact,
             r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"changed"}]}]}"#
         ));
-        // Unparseable input parks (the safe direction), never matches.
         assert!(!docs_equal(compact, "not json"));
         assert!(!docs_equal("not json", "not json either"));
     }
@@ -2760,7 +2390,6 @@ mod tests {
         let tag = tags.create("Backoff").expect("tag creates");
 
         let now = crate::clock::now_ms();
-        // A failing row waits out its backoff; the batch is empty meanwhile.
         db.with_conn(|conn| {
             conn.execute(
                 "UPDATE outbox SET attempts = 1, next_retry_at = ?1 WHERE sent_at IS NULL",
@@ -2774,7 +2403,6 @@ mod tests {
             .expect("batch reads");
         assert!(batch.is_empty(), "not-due rows wait: {batch:?}");
 
-        // Due again once the timestamp passes.
         let batch = db
             .with_conn(|conn| pending_batch(conn, now + 600_001))
             .expect("batch reads");
@@ -2784,9 +2412,6 @@ mod tests {
 
     #[test]
     fn pending_batch_never_promotes_stale_state_past_a_waiting_latest() {
-        // Two queued rows for one entity, the latest still in backoff: the
-        // entity waits as a whole. Pushing the older row would supersede the
-        // newer one without ever sending it.
         let db = Database::open_in_memory().expect("memory db");
         let sync = SyncService::new(Arc::new(db));
         let db = sync.db.clone();
@@ -2847,9 +2472,7 @@ mod tests {
             updated_at: 0,
             deleted_at: None,
         };
-        // The open note with a newer remote rev defers.
         assert!(note_pull_skipped(Some(&id), &newer, &db).expect("reads"));
-        // Any other note, no open note, or an already-seen rev flows through.
         let other = RemoteNote {
             id: "other".into(),
             ..newer.clone()
@@ -2896,17 +2519,12 @@ mod tests {
         let sync = SyncService::new(Arc::new(db));
         let db = sync.db.clone();
         let tags = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db));
-        // Create-then-delete is two outbox rows but one pending change: the
-        // drain collapses to the latest row per entity.
         let tag = tags.create("Ephemeral").expect("tag creates");
         tags.delete(&tag.id).expect("tag deletes");
         let status = sync.status().expect("status");
         assert_eq!(status.pending_count, 1);
     }
 
-    /// A server that answered and refused is not a network fault: bad
-    /// credentials or a missing schema need the user, a rejected write is a
-    /// bug. Only the server being unreachable or unavailable is `NETWORK`.
     #[test]
     fn postgres_errors_are_classified_by_sqlstate() {
         let code = |state: &str| classify_sqlstate(state, "detail".into()).code();
@@ -2920,9 +2538,6 @@ mod tests {
         assert_eq!(code("53300"), "NETWORK", "too many connections");
     }
 
-    /// A deferral moves the next page past the deferred row but holds the
-    /// persisted watermark below it. It used to hold both, so the next page
-    /// re-read the same rows up to ten times a cycle.
     #[test]
     fn a_deferred_row_holds_the_watermark_but_not_the_page() {
         let mut cursor = PullCursor::new(100);
@@ -2949,9 +2564,6 @@ mod tests {
         assert_eq!(first.watermark(), 7, "never below where it started");
     }
 
-    /// An edit queued while a push was on the wire survives the push's
-    /// acknowledgement: it stays unsent, rebased onto the new rev, and the
-    /// note stays dirty. It used to be marked sent with the older rows.
     #[test]
     fn accepting_a_push_keeps_edits_queued_during_it() {
         let db = Database::open_in_memory().expect("memory db");
@@ -2973,7 +2585,6 @@ mod tests {
         };
         let pushed = rows(&db)[0].0;
 
-        // The edit that arrives while the push is in flight.
         tags.rename(&tag.id, "During").expect("tag renames");
         sync.accept_push("tags", &tag.id, 42, pushed)
             .expect("push accepted");
@@ -2994,11 +2605,6 @@ mod tests {
         assert_eq!(dirty, 1);
     }
 
-    /// Use-remote applies the *parked* document, not the live server row.
-    /// Regression test for "Use theirs behaves like Keep mine": the push
-    /// that parks a conflict overwrites the server with the local document
-    /// (§5.1), so a live fetch returns the local version. The parked copy
-    /// is the only true remote — and applying it needs no network.
     #[tokio::test]
     async fn use_remote_restores_parked_document_without_network() {
         let db = Database::open_in_memory().expect("memory db");
@@ -3024,8 +2630,6 @@ mod tests {
             })
             .expect("local edit");
 
-        // What the push parked before overwriting the server with local:
-        // the other device's document, which no longer exists server-side.
         let remote_doc = serde_json::json!({
             "type": "doc",
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": "DESKTOP WINS AGAIN"}]}]
@@ -3051,7 +2655,6 @@ mod tests {
         let conflicts = sync.list_conflicts().expect("lists");
         assert_eq!(conflicts.len(), 1);
 
-        // No connection configured on purpose: use-remote must not need one.
         sync.resolve_conflict(&conflicts[0].id, false)
             .await
             .expect("use-remote resolves");
@@ -3063,7 +2666,6 @@ mod tests {
             applied.summary.title
         );
 
-        // And keep-local still keeps the live document untouched.
         park_conflict(
             &db,
             &note_id,
@@ -3075,7 +2677,6 @@ mod tests {
         .expect("parks again");
         let conflicts = sync.list_conflicts().expect("lists");
         assert_eq!(conflicts.len(), 1);
-        // Restore the local text first so keep-local has something to keep.
         let local_doc2 = serde_json::json!({
             "type": "doc",
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": "PHONE WINS"}]}]
@@ -3100,13 +2701,6 @@ mod tests {
         );
     }
 
-    /// End-to-end against a real Postgres. Requires
-    /// `CHAYOTE_SYNC_TEST_URL` (e.g. a local container with
-    /// `?sslmode=disable`); without it the test passes trivially so CI
-    /// without a database stays green.
-    ///
-    /// The schema is applied from `postgres/schema.sql` and the server is
-    /// truncated first, so the test is self-contained and repeatable.
     #[tokio::test]
     async fn live_push_pull_and_conflict_cycle() {
         let url = match std::env::var("CHAYOTE_SYNC_TEST_URL") {
@@ -3141,7 +2735,6 @@ mod tests {
 
         sync.set_config(&url, true).expect("config saves");
 
-        // Local writes: one tag, one folder, one note carrying the tag.
         let tag = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db));
         let tag = tag.create("LiveTag").expect("tag creates");
         let folders = crate::repo::folders::SqliteFoldersRepo::new(Arc::clone(&db));
@@ -3162,12 +2755,9 @@ mod tests {
             })
             .expect("note saves");
 
-        // Device ids are UUIDv7 strings; the test's direct SQL binds them
-        // as binary UUIDs, like the engine does — never as text.
         let folder_uuid = uuid::Uuid::parse_str(&folder.id).expect("folder uuid");
         let note_uuid = uuid::Uuid::parse_str(&created.summary.id).expect("note uuid");
 
-        // First cycle pushes everything, then finds nothing to pull.
         let first = sync.run_cycle(None).await.expect("first cycle");
         assert!(first.pushed >= 3, "pushes tag, folder, note: {first:?}");
         assert_eq!(first.pulled, 0);
@@ -3193,11 +2783,9 @@ mod tests {
             .collect();
         assert_eq!(server_tags, vec![tag.id.clone()]);
 
-        // A quiet second cycle is a no-op in both directions.
         let second = sync.run_cycle(None).await.expect("second cycle");
         assert_eq!((second.pushed, second.pulled), (0, 0));
 
-        // Remote-only rename pulls cleanly.
         client
             .execute(
                 "UPDATE folders SET name = $2, rev = nextval('sync_rev_seq') WHERE id = $1::uuid",
@@ -3210,7 +2798,6 @@ mod tests {
         let tree = folders.list().expect("tree lists");
         assert_eq!(tree[0].name, "RenamedElsewhere");
 
-        // Both-sides-changed document parks the remote copy, keeps local.
         let local_doc = serde_json::json!({
             "type": "doc",
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": "local wins"}]}]
@@ -3250,18 +2837,11 @@ mod tests {
         let conflicts = sync.list_conflicts().expect("conflicts list");
         assert_eq!(conflicts.len(), 1);
 
-        // Keep-local resolves without touching the document.
         sync.resolve_conflict(&conflicts[0].id, true)
             .await
             .expect("keep-local resolves");
         assert_eq!(sync.list_conflicts().expect("lists").len(), 0);
 
-        // Use-remote resolves to the server document wholesale. For the parked
-        // copy to be a TRUE remote — rather than one the push just converged
-        // onto local — the local row sits out the push in backoff: then the
-        // pull, not the push, parks, the server still holds the remote
-        // content, and use-remote applies something visibly different from
-        // keep-local. (This also covers the backoff-skip → pull-park path.)
         let local_doc2 = serde_json::json!({
             "type": "doc",
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": "local v2"}]}]
@@ -3314,9 +2894,6 @@ mod tests {
             "remote document goes live: {:?}",
             applied2.summary.title
         );
-        // Release the backoff: the stale row pushes current (remote) state.
-        // Docs are equal by now, so the disjoint path converges without
-        // parking a second conflict.
         db.with_conn(|conn| {
             conn.execute(
                 "UPDATE outbox SET next_retry_at = NULL WHERE sent_at IS NULL",
@@ -3331,10 +2908,6 @@ mod tests {
             "equal docs converge without parking again: {quiet:?}"
         );
 
-        // A local hard delete becomes a server tombstone (never a silent
-        // row drop), and the queued older rows for the same folder collapse
-        // instead of lingering. The tombstone name satisfies the server
-        // CHECK that once rejected an empty placeholder here.
         folders.delete(&folder.id).expect("folder deletes");
         let fifth = sync.run_cycle(None).await.expect("fifth cycle");
         assert!(fifth.pushed >= 1, "tombstone pushes: {fifth:?}");
@@ -3356,9 +2929,6 @@ mod tests {
             "no stale rows linger after the delete"
         );
 
-        // The Phase-E open-editor guard: a pull that would change the note on
-        // screen defers it instead. The row is untouched, the watermark held,
-        // and the next cycle without the guard applies it.
         let guarded_doc: serde_json::Value = serde_json::json!({
             "type": "doc",
             "content": [{"type": "paragraph", "content": [{"type": "text", "text": "guarded change"}]}]
@@ -3392,14 +2962,6 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Two devices against one Postgres. Requires `CHAYOTE_SYNC_2DEV_URL` —
-    /// a throwaway database (the test truncates it first); without it the
-    /// test passes trivially so CI stays green.
-    ///
-    /// Exercises what one device cannot: a clean pull onto an empty device,
-    /// a both-sides-changed document (parked on the second pusher, applied
-    /// on the first), a tag-set union across devices, and folder LWW.
-    /// Both two-device tests truncate the same database; they take turns.
     static LIVE_2DEV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[tokio::test]
@@ -3449,7 +3011,6 @@ mod tests {
         let notes_a = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db_a));
         let notes_b = crate::repo::notes::SqliteNotesRepo::new(Arc::clone(&db_b));
 
-        // Device A writes the library; device B starts empty.
         let shared = tags_a.create("Shared").expect("tag creates");
         let folder = folders_a
             .create("SharedFolder", None)
@@ -3470,7 +3031,6 @@ mod tests {
         let first_a = sync_a.run_cycle(None).await.expect("A pushes");
         assert!(first_a.pushed >= 3, "A uploads everything: {first_a:?}");
 
-        // A clean pull onto an empty device.
         let first_b = sync_b.run_cycle(None).await.expect("B pulls");
         assert!(first_b.pulled >= 3, "B downloads everything: {first_b:?}");
         let b_live = notes_b.get(&created.summary.id).expect("B reads note");
@@ -3480,8 +3040,6 @@ mod tests {
             b_live.summary.title
         );
 
-        // Both sides change the document. A pushes first and wins the live
-        // copy; B parks the conflict and keeps typing.
         notes_a
             .save(&crate::repo::SaveNoteInput {
                 id: created.summary.id.clone(),
@@ -3516,7 +3074,6 @@ mod tests {
             "B keeps its live copy: {:?}",
             b_live.summary.title
         );
-        // A pulls B's push and converges onto it without a conflict of its own.
         let a_pull = sync_a.run_cycle(None).await.expect("A pulls");
         assert_eq!(a_pull.pulled, 1, "A applies B's push: {a_pull:?}");
         let a_live = notes_a.get(&created.summary.id).expect("A reads");
@@ -3526,8 +3083,6 @@ mod tests {
             a_live.summary.title
         );
 
-        // Tag sets union: each side adds a different tag to the same note.
-        // Documents are equal by now, so the disjoint path unions the sets.
         let tag2 = tags_a.create("ATag").expect("A tag creates");
         let tags_b = crate::repo::tags::SqliteTagsRepo::new(Arc::clone(&db_b));
         let tag3 = tags_b.create("BTag").expect("B tag creates");
@@ -3558,10 +3113,6 @@ mod tests {
         sync_a.run_cycle(None).await.expect("A pushes tags");
         let b_tags = sync_b.run_cycle(None).await.expect("B pushes tags");
         assert!(b_tags.pushed >= 1, "B uploads its tag set: {b_tags:?}");
-        // Still exactly the one parked row from the document leg: the equal
-        // docs take the union path and park nothing new (the table is one
-        // row per note, so a second park could not raise the count anyway —
-        // the server tag set below is what proves the union ran).
         assert_eq!(sync_b.list_conflicts().expect("lists").len(), 1);
         let note_uuid = uuid::Uuid::parse_str(&created.summary.id).expect("note uuid");
         let server_tags: Vec<String> = client
@@ -3580,7 +3131,6 @@ mod tests {
             "union keeps all three: {server_tags:?}"
         );
 
-        // Folder LWW: the later rename wins on both sides.
         folders_a.rename(&folder.id, "AName").expect("A renames");
         sync_a.run_cycle(None).await.expect("A pushes rename");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3588,9 +3138,6 @@ mod tests {
         folders_b.rename(&folder.id, "BName").expect("B renames");
         let b_rename = sync_b.run_cycle(None).await.expect("B pushes rename");
         assert!(b_rename.pushed >= 1, "B uploads its rename: {b_rename:?}");
-        // Unchanged: still exactly the one parked row from the document leg.
-        // (Folders resolve by LWW and never park; the server name below is
-        // what proves B's rename won.)
         assert_eq!(sync_b.list_conflicts().expect("lists").len(), 1);
         let folder_uuid = uuid::Uuid::parse_str(&folder.id).expect("folder uuid");
         let server_name: String = client
@@ -3611,12 +3158,6 @@ mod tests {
             0,
             "A drains clean"
         );
-        // The union push above raced tag-row arrival: B linked a tag it had
-        // not pulled yet, so the local link write aborted on the FK (SQLite
-        // does not apply OR IGNORE to foreign keys) *after* the server side
-        // had already applied the full union. Nothing is lost — the row waits
-        // out backoff and completes once the tag row arrives, exactly like a
-        // transient failure. Clear the wait to prove the heal deterministically.
         db_b.with_conn(|conn| {
             conn.execute(
                 "UPDATE outbox SET next_retry_at = NULL WHERE sent_at IS NULL",
@@ -3640,10 +3181,6 @@ mod tests {
         std::fs::remove_dir_all(&dir_b).ok();
     }
 
-    /// The cross-device defects only two devices can show, against a real
-    /// server (`CHAYOTE_SYNC_2DEV_URL`, skipped without it): a child folder
-    /// pulled before its parent, a tag created as "work" and "Work", a pin
-    /// racing a text edit, and two moves that would close a folder cycle.
     #[tokio::test]
     async fn live_two_devices_merge_disjoint_changes_tags_and_trees() {
         let _turn = LIVE_2DEV.lock().await;
@@ -3697,8 +3234,6 @@ mod tests {
             })
         };
 
-        // 1. A child whose parent was renamed later has the lower rev. A fresh
-        //    device pulls it first; it must still land under its parent.
         let parent = folders_a.create("Parent", None).expect("creates");
         let child = folders_a
             .create("Child", Some(&parent.id))
@@ -3726,7 +3261,6 @@ mod tests {
         );
         assert_eq!(parent_b.children[0].id, child.id);
 
-        // 2. "work" on A, "Work" on B: the server's tag wins and B folds into it.
         let work_a = tags_a.create("work").expect("creates");
         sync_a.run_cycle(None).await.expect("A pushes its tag");
         let work_b = tags_b.create("Work").expect("creates");
@@ -3757,8 +3291,6 @@ mod tests {
         assert_eq!(on_a.summary.tags.len(), 1);
         assert_eq!(on_a.summary.tags[0].id, work_a.id);
 
-        // 3. A pins the note while B edits its text: disjoint, so no conflict,
-        //    and neither change is lost on either device.
         sync_b.run_cycle(None).await.expect("B is current");
         notes_a.set_pinned(&tagged, true).expect("A pins");
         notes_b
@@ -3791,8 +3323,6 @@ mod tests {
         let on_b = notes_b.get(&tagged).expect("reads");
         assert!(on_b.summary.is_pinned && on_b.summary.excerpt.contains("edited on B"));
 
-        // 4. A files Other under Parent while B files Parent under Other. A
-        //    pushes first and wins; B's move would close a cycle and rebases.
         folders_a
             .move_to(&other.id, Some(&parent.id), 0)
             .expect("A moves Other under Parent");
@@ -3822,7 +3352,6 @@ mod tests {
                 root.children.iter().any(|node| node.id == other.id),
                 "{who}: Other is under Parent: {tree:?}"
             );
-            // A walk of the subtree terminates.
             assert!(repo.move_to(&child.id, Some(&parent.id), 0).is_ok());
         }
 

@@ -86,13 +86,6 @@ export const CONTENT_SAMPLES: JsonDoc[] = [
           },
         ],
       },
-      /* An H1 *inside* the body. Migration 0006 lifts only a note's leading one
-         into the title field, so without this the fixture would stop exercising
-         the H1 node altogether — and `editor.spec.ts` asserts every block in the
-         schema renders. A top-level section in a long note is ordinary, which is
-         the point: headings below the first are content, not a title. It goes
-         above the divider so the document still ends on the same paragraph, which
-         is where several tests put their caret. */
       { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Apologies' }] },
       {
         type: 'paragraph',
@@ -150,10 +143,6 @@ export type Fixture = {
 
 export const FIXTURE_NOW = Date.UTC(2026, 9, 7, 12, 0, 0);
 
-/* Folder and tag ids must be the ones `generate.ts` mints from the same seeds.
-   Writing the literal `'f-work'` here instead produced notes whose `folder_id`
-   matched no row in the tree, so every folder selection came back empty — a
-   mock that silently disagreed with itself rather than failing. */
 const F_WORK = uuidFrom('f-work');
 const F_PROJECTS = uuidFrom('f-projects');
 const F_MEETINGS = uuidFrom('f-meetings');
@@ -179,17 +168,6 @@ export const EMPTY_NOTE: Fixture = {
   tagIds: [],
 };
 
-/** ADR-023: what migration `0006_note_title_field.sql` does to a note, expressed
-    for seeded data. A note whose title used to be its leading H1 has that heading
-    moved into the field and out of the body, because both claiming the same words
-    is the duplication the field exists to remove — and the fixtures have to come
-    out the way a real database does after the upgrade, or the editor shows the
-    note's name twice and the tests assert a state nothing will ever be in again.
-
-    The rules are the Rust pass's, deliberately: only a *leading* heading moves, a
-    heading with no text is left where it is, and a note that was nothing but a
-    heading keeps an empty paragraph, because ProseMirror has no content model
-    without a block. */
 export function liftLeadingHeading(fixture: Fixture): MockNote {
   const blocks = Array.isArray(fixture.doc.content) ? [...fixture.doc.content] : [];
   const first = blocks[0];

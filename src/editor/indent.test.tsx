@@ -45,11 +45,6 @@ async function ready(): Promise<void> {
   });
 }
 
-/* `editor` is assigned from inside a render callback, so TypeScript keeps its
-   `= null` narrowing at every direct read in the test body. Every touch of it
-   therefore happens inside a closure (where the narrowing resets) and hands
-   plain values back out — the same reason the neighbouring toolbar tests only
-   read `editor?.getHTML()` from inside `waitFor`. */
 function htmlOf(current: Editor | null): string {
   let html = '';
   act(() => {
@@ -219,7 +214,6 @@ describe('indent extension', () => {
       expect(htmlOf(editor)).toContain('<blockquote');
       expect(htmlOf(editor)).toContain('margin-left: 24px');
     });
-    /* The margin sits on the quote element; the inner paragraph stays flat. */
     const inner = htmlOf(editor).match(/<p[^>]*>quoted<\/p>/)?.[0] ?? '';
     expect(inner).not.toContain('margin-left');
   });
@@ -251,7 +245,6 @@ describe('indent extension', () => {
     );
     await ready();
 
-    /* Caret at the end of the second item, then indent: sink nests it. */
     caretAtEnd(editor);
     runIndent(editor);
     await waitFor(() => {
@@ -299,7 +292,6 @@ describe('indent extension', () => {
     await waitFor(() => {
       expect((htmlOf(editor).match(/<ol>/g) ?? []).length).toBe(2);
     });
-    /* The nested list carries no explicit start: it counts from one. */
     expect(htmlOf(editor)).toContain('Jehe');
     expect(htmlOf(editor)).not.toContain('margin-left');
   });
@@ -337,8 +329,6 @@ describe('indent extension', () => {
     await waitFor(() => {
       expect(indentButton('Increase indent').disabled).toBe(false);
     });
-    /* At zero there is nothing to outdent: in a list the lift path applies,
-       in prose the button correctly disables. */
     expect(indentButton('Decrease indent').disabled).toBe(true);
   });
 });

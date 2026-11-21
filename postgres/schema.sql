@@ -1,23 +1,3 @@
--- chayote postgres/schema.sql — server-side schema for sync (07-sync-plan.md).
---
--- SINGLE-USER, single Postgres implementation. No `user_id`, no RLS, no Auth:
--- the connection string itself is the credential (it uses the postgres /
--- pooler password).
---
--- Run this ONCE on the server: paste it into your provider's SQL editor
--- (or `psql`) and run. It is idempotent (`IF NOT EXISTS`), so re-running
--- is safe.
---
--- Timestamps are BIGINT epoch milliseconds, exactly like the device SQLite
--- (03-data-model.md §7 recommends epoch ms over timestamptz to avoid
--- timezone bugs entirely). Booleans are BOOLEAN; the device maps 0/1.
---
--- `rev` comes from ONE global sequence (`sync_rev_seq`), assigned by the
--- server on every accepted write and echoed back to the device (02 R4).
--- A global sequence gives a total order across tables, so the device pull
--- watermark (`max(rev)` per table, 07 §8) never misses a row — two rows
--- pushed together still get distinct revs. The device never sends rev.
-
 CREATE SEQUENCE IF NOT EXISTS sync_rev_seq;
 
 CREATE TABLE IF NOT EXISTS folders (
@@ -42,9 +22,6 @@ CREATE TABLE IF NOT EXISTS tags (
   deleted_at BIGINT
 );
 
--- Case-insensitive uniqueness among live tags, mirroring the device partial
--- index (03 §3.4). `lower(name)` agrees with SQLite `COLLATE NOCASE` for the
--- ASCII names this index arbitrates; non-ASCII edge cases defer to LWW.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_live
   ON tags(lower(name)) WHERE deleted_at IS NULL;
 
@@ -77,8 +54,3 @@ CREATE TABLE IF NOT EXISTS note_tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag_id);
-
--- No server-side search: search stays local-only on FTS5 (`07-sync-plan.md`
--- Phase F, dropped). If this file is re-applied to a database created from
--- an earlier revision, a leftover `search` tsvector column and
--- `idx_notes_search` index may remain; both are unused and harmless.

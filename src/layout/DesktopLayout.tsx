@@ -1,14 +1,6 @@
 import type { ReactNode } from 'react';
 import { SIDEBAR_MAX, SIDEBAR_MIN, SIDEBAR_WIDE, clampSidebarWidth } from './breakpoints';
 
-/* `05-ui-ux.md` §9. Two panes above 1024 px, an overlay drawer at 768–1023 px
-   where the editor takes the full width, and a single pane with a view stack
-   below 768 px (ADR-006).
-
-   The breakpoint lives in JS rather than in a media query because it decides
-   which components mount, not how they are styled: the drawer and the two-pane
-   layout are different component trees, and CSS alone cannot unmount one. */
-
 type DesktopLayoutProps = {
   sidebar: ReactNode;
   editor: ReactNode;
@@ -26,9 +18,6 @@ export function DesktopLayout({ sidebar, editor, sidebarWidth, onResize }: Deskt
   );
 }
 
-/* §9: resizable between 240 and 480 px, and keyboard-operable because every
-   action is reachable by keyboard (§10). The separator carries the ARIA values
-   so the current width is announced rather than only seen. */
 function ResizeHandle({
   width,
   onResize,
@@ -69,16 +58,6 @@ function ResizeHandle({
           onResize(clampSidebarWidth(width + 16));
         }
       }}
-      /* Visually 1 px, but 9 px of hit area centred on it.
-
-         A 1 px target is correct to look at and wrong to use: on every keystroke
-         the resize moves the handle, and if the pointer or the caret follows the
-         element rather than the page, focus leaves for whatever is under it. The
-         negative margins keep the painted border where §9 puts it while the
-         clickable and focusable region is the 9 px a control is expected to have
-         (`05-ui-ux.md` §3.3 gives 32 px to icon buttons; a separator this narrow
-         is the one place a smaller target is acceptable, and 9 px is where the
-         drag starts feeling accidental rather than deliberate). */
       className="relative z-10 -mr-1 w-[9px] flex-none cursor-col-resize bg-transparent outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-[var(--border)] before:transition-colors hover:before:bg-[var(--accent)] focus-visible:before:bg-[var(--accent)] focus-visible:before:w-[3px]"
     />
   );
@@ -91,9 +70,6 @@ type TabletLayoutProps = {
   onDrawerOpenChange: (open: boolean) => void;
 };
 
-/* §2.3: the sidebar overlays the editor as a 320 px drawer with a scrim. The
-   editor stays mounted underneath, so opening and closing the drawer costs no
-   editor rebuild and no lost editor state. */
 export function TabletLayout({
   sidebar,
   editor,
@@ -131,14 +107,9 @@ export function TabletLayout({
 type MobileLayoutProps = {
   editor: ReactNode;
   list: ReactNode;
-  /** Which of the two panes is visible. One at a time (§2.4). */
   view: 'list' | 'editor';
 };
 
-/* §2.4: one view at a time, the list → editor transition a horizontal slide.
-   `06-platform.md` §4.3: never size a fixed element with `vh` here — the
-   on-screen keyboard changes the visible height — so the layout is flex and
-   fills whatever the WebView gives it. */
 export function MobileLayout({ editor, list, view }: MobileLayoutProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--surface)]" data-view={view}>

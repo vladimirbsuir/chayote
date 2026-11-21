@@ -1,7 +1,3 @@
--- 0003_outbox.sql — sync write-ahead log and trash snapshots
--- `03-data-model.md` §3.7–§3.8. Written from day one, drained by nothing
--- until the sync phase (ADR-005).
-
 CREATE TABLE IF NOT EXISTS outbox (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   entity     TEXT    NOT NULL CHECK (entity IN ('note','folder','tag','note_tags')),

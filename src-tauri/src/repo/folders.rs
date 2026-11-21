@@ -7,8 +7,6 @@ use crate::db::Database;
 use crate::error::AppError;
 use crate::repo::{append_outbox, base_rev_of, FolderNode, FoldersRepo};
 
-/// `03-data-model.md` §3.2. Folders keep `position` because a tree needs
-/// explicit order, and the drag gesture already exists for re-parenting.
 pub struct SqliteFoldersRepo {
     db: Arc<Database>,
 }
@@ -54,9 +52,6 @@ impl SqliteFoldersRepo {
 }
 
 impl FoldersRepo for SqliteFoldersRepo {
-    /// The tree is assembled in Rust from a flat ordered read. A recursive CTE
-    /// buys nothing at the expected size and produces a shape that is awkward
-    /// to map back to the UI (`03-data-model.md` §5).
     fn list(&self) -> Result<Vec<FolderNode>, AppError> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare(
@@ -147,9 +142,6 @@ impl FoldersRepo for SqliteFoldersRepo {
         self.node(id)
     }
 
-    /// `position` is sibling-local and densified in one transaction: moves are
-    /// user-initiated and infrequent, so renumbering is cheap and avoids the
-    /// drift that gap-based ordering accumulates.
     fn move_to(
         &self,
         id: &str,
@@ -167,7 +159,6 @@ impl FoldersRepo for SqliteFoldersRepo {
                 if !folder_is_live(conn, pid)? {
                     return Err(AppError::NotFound);
                 }
-                // A folder cannot be moved inside itself or its own descendant.
                 if subtree_ids(conn, &folder_id)?.iter().any(|id| id == pid) {
                     return Err(AppError::CycleDetected);
                 }
@@ -197,9 +188,6 @@ impl FoldersRepo for SqliteFoldersRepo {
         self.node(id)
     }
 
-    /// Permanent in v1. `ON DELETE CASCADE` on `folders.parent_id` takes the
-    /// subtree; `notes.folder_id` is `ON DELETE SET NULL`, so the notes survive
-    /// as unfiled.
     fn delete(&self, id: &str) -> Result<(), AppError> {
         let folder_id = id.to_owned();
         self.db.with_conn(move |conn| {
@@ -224,8 +212,6 @@ fn folder_is_live(conn: &rusqlite::Connection, id: &str) -> Result<bool, AppErro
         .is_some())
 }
 
-/// `parent_id IS ?1` matches both NULL and the value, which is what lets one
-/// statement handle the root case.
 fn next_position(conn: &rusqlite::Connection, parent_id: Option<&str>) -> Result<i64, AppError> {
     let sql = "SELECT COALESCE(MAX(position), -1) + 1 FROM folders WHERE parent_id IS ?1";
     Ok(conn.query_row(sql, [parent_id], |row| row.get(0))?)
@@ -236,16 +222,6 @@ fn sibling_count(conn: &rusqlite::Connection, parent_id: Option<&str>) -> Result
     Ok(conn.query_row(sql, [parent_id], |row| row.get(0))?)
 }
 
-/// Renumbers the destination siblings to `0..n` with `moving_id` inserted at
-/// `target`, in one transaction.
-///
-/// A sibling whose position actually changes is a write like any other: it is
-/// marked dirty and queued (R5). It used to be renumbered silently, so the
-/// moved folder reached other devices with its new position and its siblings
-/// kept their old ones there — two folders at one position, and an order
-/// that differed per device. `updated_at` is left alone: the renumbering is a
-/// side effect, and bumping it would let it win LWW (§5.2) over a rename of
-/// that sibling made elsewhere.
 fn densify(
     tx: &rusqlite::Transaction<'_>,
     parent_id: Option<&str>,
@@ -271,7 +247,7 @@ fn densify(
     for (position, sibling) in ordered.iter().enumerate() {
         let position = position as i64;
         let Some((id, old_position, rev)) = sibling else {
-            continue; // the moving folder: `move_to` writes and queues it
+            continue;
         };
         if *old_position == position {
             continue;
@@ -286,11 +262,6 @@ fn densify(
     Ok(())
 }
 
-/// The folder and every descendant. The visited set is what makes this
-/// terminate on a parent cycle: two devices moving X under Y and Y under X
-/// can each hand the server half of one, and before the sync engine broke
-/// them on pull (`sync/tree.rs`) this loop never ended on such a tree — a
-/// hung delete or move, on an already-affected database, for ever.
 fn subtree_ids(conn: &rusqlite::Connection, root: &str) -> Result<Vec<String>, AppError> {
     let mut found = vec![root.to_owned()];
     let mut seen: std::collections::HashSet<String> = found.iter().cloned().collect();
@@ -311,11 +282,6 @@ fn subtree_ids(conn: &rusqlite::Connection, root: &str) -> Result<Vec<String>, A
     Ok(found)
 }
 
-/// Builds the tree from a flat list.
-///
-/// A root is a row with no parent, or whose parent is not itself in the live
-/// set — which is also what keeps an orphan whose parent was hard-deleted
-/// visible at the top level instead of silently vanishing.
 fn assemble(rows: Vec<Row>) -> Vec<FolderNode> {
     let known: std::collections::HashSet<String> = rows.iter().map(|row| row.id.clone()).collect();
 
@@ -343,7 +309,6 @@ fn assemble(rows: Vec<Row>) -> Vec<FolderNode> {
         .map(|row| (row.id, row.name, row.parent_id, row.position))
         .collect();
 
-    // A root is a row whose parent is absent from the live set, or no parent.
     let roots: Vec<FolderNode> = flat
         .iter()
         .filter(|(_, _, parent, _)| match parent {
@@ -384,8 +349,6 @@ mod tests {
         .expect("reads")
     }
 
-    /// Siblings renumbered by a move are queued, so their new positions
-    /// reach other devices along with the moved folder's.
     #[test]
     fn renumbered_siblings_are_queued_for_sync() {
         let db = Arc::new(Database::open_in_memory().expect("memory db"));
@@ -408,13 +371,10 @@ mod tests {
         assert_eq!(queued(&db, &b.id), (1, 1), "B moved to 2 and is queued");
         assert_eq!(queued(&db, &c.id), (1, 1), "the moved folder, once");
 
-        // A move that changes no sibling's position queues nothing extra.
         repo.move_to(&c.id, None, 0).expect("moves C in place");
         assert_eq!(queued(&db, &a.id), (1, 1));
     }
 
-    /// A parent cycle on disk (an older build's sync could write one) no
-    /// longer hangs a delete.
     #[test]
     fn subtree_walk_terminates_on_a_cycle() {
         let db = Arc::new(Database::open_in_memory().expect("memory db"));

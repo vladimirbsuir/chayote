@@ -6,10 +6,6 @@ import { buildMockDatabase, createMockBackend } from './adapter';
 const all: NoteFilter = { kind: 'all' };
 
 describe('mock adapter against the real command surface', () => {
-  /* `10-conventions.md` §10 test 11: the mock returns the same shape as the
-     real IPC for every command in `02-architecture.md` §7. The shapes here
-     are the ones `src/types/ipc.ts` declares, which `src-tauri/src/tests.rs`
-     asserts against the Rust side. */
 
   it('answers notes_list with summaries that carry no document body', async () => {
     const backend = createMockBackend(buildMockDatabase());
@@ -52,7 +48,6 @@ describe('mock adapter against the real command surface', () => {
     const backend = createMockBackend(buildMockDatabase());
 
     const created = await backend.invoke('notes_create', { folderId: null });
-    /* ADR-026: empty, as the Rust `create` stores it. */
     expect(created.title).toBe('');
     expect(created.doc.type).toBe('doc');
 
@@ -69,9 +64,7 @@ describe('mock adapter against the real command surface', () => {
       isPinned: true,
     };
     const saved = await backend.invoke('notes_save', { input });
-    /* ADR-026: the heading is text, not a name — a save leaves the title empty. */
     expect(saved.title).toBe('');
-    /* The pin is `notes_set_pinned`'s; a save carrying one does not move it. */
     expect(saved.isPinned).toBe(false);
 
     await backend.invoke('notes_soft_delete', { id: created.id });
@@ -85,18 +78,11 @@ describe('mock adapter against the real command surface', () => {
   });
 
   it('types a title that a save cannot take back, and clearing it leaves it empty', async () => {
-    /* ADR-023, asserted against the browser backend because that is what the
-       Playwright suite drives: a typed title survives a later document save, which
-       is the half that silently broke before the Rust side read the stored
-       column, and clearing it hands the title back to derivation rather than
-       leaving the note nameless. */
     const backend = createMockBackend(buildMockDatabase());
     const created = await backend.invoke('notes_create', { folderId: null });
 
     const titled = await backend.invoke('notes_set_title', { id: created.id, title: '  Plan  ' });
     expect(titled.title).toBe('Plan');
-    /* The body is untouched: the command writes the title without loading or
-       rewriting a document. */
     expect(titled.doc).toEqual(created.doc);
 
     const saved = await backend.invoke('notes_save', {
@@ -113,7 +99,6 @@ describe('mock adapter against the real command surface', () => {
     });
     expect(saved.title).toBe('Plan');
 
-    /* ADR-026: cleared is empty, not re-derived from the first line. */
     const cleared = await backend.invoke('notes_set_title', { id: created.id, title: '   ' });
     expect(cleared.title).toBe('');
 
@@ -155,7 +140,6 @@ describe('mock adapter against the real command surface', () => {
     const roots = await backend.invoke('folders_list', {});
     const folder = await backend.invoke('folders_create', { name: 'Scratch', parentId: null });
     expect(folder.name).toBe('Scratch');
-    // A new root folder lands after the existing ones.
     expect(folder.position).toBe(roots.length);
 
     const renamed = await backend.invoke('folders_rename', { id: folder.id, name: 'Studio' });
@@ -182,12 +166,10 @@ describe('mock adapter against the real command surface', () => {
     const renamed = await backend.invoke('tags_rename', { id: tag.id, name: 'critical' });
     expect(renamed.name).toBe('critical');
 
-    // Renaming onto another tag's name, in any case, is VALIDATION — as in Rust.
     const other = await backend.invoke('tags_create', { name: 'later' });
     await expect(
       backend.invoke('tags_rename', { id: other.id, name: 'Critical' }),
     ).rejects.toMatchObject({ code: 'VALIDATION' });
-    // A new spelling of its own name is not a clash.
     const respelled = await backend.invoke('tags_rename', { id: tag.id, name: 'Critical' });
     expect(respelled.name).toBe('Critical');
 
@@ -235,8 +217,6 @@ describe('mock adapter against the real command surface', () => {
     await expect(backend.invoke('window_ready', {})).resolves.toBeUndefined();
   });
 
-  /* ADR-024. `app_info` is the one updater command that exists on every
-     platform, so its shape is the one a browser test and a device share. */
   it('answers app_info with the three fields the Updates tab renders from', async () => {
     const backend = createMockBackend(buildMockDatabase());
     const info = await backend.invoke('app_info', {});
@@ -254,7 +234,6 @@ describe('mock adapter against the real command surface', () => {
     const seeded = createMockBackend(buildMockDatabase(), { updateFeed: 'available' });
     const found = await seeded.invoke('updates_check', {});
     expect(found).not.toBeNull();
-    /* No `notes`: the tab does not show release notes (`05-ui-ux.md`). */
     expect(Object.keys(found ?? {}).sort()).toEqual(['date', 'version']);
     expect(typeof found?.version).toBe('string');
   });
@@ -266,17 +245,11 @@ describe('mock adapter against the real command surface', () => {
     expect(info.os).toBe('macOS');
   });
 
-  /* The install resolves rather than replacing a process — there is nothing to
-     restart in a browser — but it must resolve, or the tab's installed state
-     would be unreachable outside Tauri. */
   it('resolves an install without a channel, matching the real command', async () => {
     const backend = createMockBackend(buildMockDatabase(), { updateFeed: 'available' });
     await expect(backend.invoke('updates_install', { onEvent: undefined })).resolves.toBeUndefined();
   });
 
-  /* ADR-025: Android's grant is refused with a code of its own, because the tab
-     words it as something to do rather than as a failure. A mock that reused
-     `NETWORK` here would make that branch unreachable in a browser. */
   it('reports Android’s outstanding grant with its own code', async () => {
     const backend = createMockBackend(buildMockDatabase(), { updateFeed: 'needs-permission' });
     const info = await backend.invoke('app_info', {});

@@ -8,15 +8,12 @@ use crate::repo::{
     attach, SearchHit, SearchInput, SearchPage, Selection, SummaryRow, SUMMARY_COLUMNS,
 };
 
-/// A summary row plus the two search-only columns.
 struct HitRow {
     summary: SummaryRow,
     rank: f64,
     snippet: String,
 }
 
-/// `03-data-model.md` §3.6. FTS5 + `bm25` locally; `tsvector` remotely
-/// (ADR-004). The asymmetry is intentional and documented in §7.
 pub struct SearchService {
     db: Arc<Database>,
 }
@@ -26,16 +23,7 @@ impl SearchService {
         Self { db }
     }
 
-    /// `MATCH` takes a query expression, not a string, so every user token is
-    /// wrapped before it reaches the index. A trailing `*` makes the last token
-    /// a prefix match, so results appear while typing.
-    ///
-    /// Sanitisation is mandatory, not defensive: a query containing `NEAR(`,
-    /// `^` or `-` is otherwise either an error or valid syntax meaning
-    /// something the user did not type.
     pub fn to_fts_match(input: &str) -> Option<String> {
-        // FTS5 keywords are quoted too, or `AND` becomes the operator instead of the
-        // word the user typed.
         const KEYWORDS: &[&str] = &["AND", "OR", "NOT", "NEAR", "NULL", "TRUE", "FALSE"];
 
         let tokens: Vec<String> = input
@@ -67,8 +55,6 @@ impl SearchService {
             let limit = input.limit.clamp(0, 500);
             let offset = input.offset.max(0);
 
-            // Bindings are positional. The MATCH expression, when there is one,
-            // is always ?1; the scope id follows it only if a filter needs it.
             let mut bindings: Vec<SqlValue> = Vec::new();
             let mut scope_clauses: Vec<String> = Vec::new();
 
@@ -84,8 +70,6 @@ impl SearchService {
                 bindings.push(SqlValue::Text(expression));
             }
 
-            // The scope id is bound last among the non-paging values, so its
-            // position is known only here — after the match and the id are in.
             let scope_clause: Option<String> = match selection {
                 Selection::Pinned => Some("n.is_pinned = 1".to_owned()),
                 Selection::Folder { id } => {
@@ -108,8 +92,6 @@ impl SearchService {
             }
 
             let scope = scope_clauses.join(" AND ");
-            // The count statement references exactly these bindings and no
-            // paging, so this is where its binding list ends.
             let count_len = bindings.len();
 
             if use_fts {
@@ -138,7 +120,6 @@ impl SearchService {
                 let page_bindings = bindings.clone();
                 let hits = collect(conn, &sql, &page_bindings)?;
 
-                // The count needs the match and the scope, but no paging.
                 let mut count_bindings = page_bindings;
                 count_bindings.truncate(count_len);
                 let total = query_count(conn, &count_sql, &count_bindings)?;
@@ -146,8 +127,6 @@ impl SearchService {
                 return finish(conn, hits, total, limit, offset);
             }
 
-            // Sanitisation yielding nothing is not an error: fall back to the
-            // active filter ordered by recency.
             let limit_position = bindings.len() + 1;
             let offset_position = bindings.len() + 2;
             bindings.push(SqlValue::Integer(limit));
@@ -175,8 +154,6 @@ impl SearchService {
     }
 }
 
-/// Rows must be collected before the statement drops, so the `Row` borrows
-/// never escape it.
 fn collect(
     conn: &rusqlite::Connection,
     sql: &str,

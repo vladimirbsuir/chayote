@@ -21,44 +21,10 @@ import type { SyncConflict, SyncStatus, SyncSummary } from '../types/sync';
 import type { FolderNode } from '../types/folder';
 import type { Uuid } from '../types/note';
 
-/* `05-ui-ux.md` §6.6: theme, accent, default folder, reset. Four fields, and the
-   dialog is the only place in the app where the user configures anything, which
-   is why it can afford to be a dialog rather than a drawer or a page.
-
-   Two things here are decisions rather than transcriptions of the prototype.
-
-   **The accent readout.** ADR-019 resolves a preset through the cascade but takes
-   a custom colour verbatim, in both themes. The readout names the preset in use
-   so the swatch ring is not carrying the meaning alone; a custom colour shows
-   no readout at all.
-
-     **The default folder uses the shared `FolderPicker`, not a native select.**
-     An earlier revision used a native `<select>` here on the grounds that a form
-     field needs nothing custom. On Android that opens the platform's own
-     radio-list popup — a second visual language for "choose a value" beside the
-     popover the status bar already uses — which the user reported on a phone.
-     This is the same component with the same options (flattened depth-first,
-     indented by depth, "None" included), so the two pickers cannot drift apart.
-     The prototype draws this row as static text rather than a control at all.
-
-    **The custom accent uses an in-app editor, not a native colour input.**
-    An earlier revision used `<input type="color">` here. On Android the WebView
-    hands that to the platform's own palette plus its Hue/Saturation/Value sheet —
-    two system windows in a second visual language — which the user reported on a
-    phone. The replacement is a hex field plus Hue/Saturation/Lightness sliders
-    built from text and range inputs, so no system dialog can open. Range inputs
-    stay in the DOM where the dialog trap already reaches them. */
-
 type SettingsDialogProps = {
   theme: Theme;
-  /** The theme in effect, which for `system` is what the OS asked for. The
-      swatches and the ratio readout describe what is on screen, not what is
-      stored — otherwise a system-dark user would be shown light values. */
   effective: 'light' | 'dark';
-  /** `null` is the first preset, the theme's own default. */
   accent: AccentChoice;
-  /** The last custom colour picked, whatever the accent is now: the palette
-      restores it instead of forgetting it behind a preset. */
   lastCustomHex: string;
   defaultFolderId: Uuid | null;
   folders: FolderNode[];
@@ -66,30 +32,16 @@ type SettingsDialogProps = {
   onAccentChange: (accent: AccentChoice) => void;
   onDefaultFolderChange: (folderId: Uuid | null) => void;
   onClose: () => void;
-  /** Rendered above the dialog; `App` owns the confirmation so only one
-       destructive confirmation can exist at a time (`05-ui-ux.md` §6.2). */
   confirmReset: React.ReactNode;
-  /** Which tab opens. The sidebar conflict badge opens `sync` directly. */
   initialTab?: SettingsTab;
-  /* One object, optional so the general tab stays usable wherever sync is
-     not wired (tests, prototype). `App` always provides it. */
   sync?: SyncTabState;
-  /* Likewise for the updater, and for the same reason: the tab has to render
-     without the platform behind it so the rest of the dialog stays drivable in a
-     plain browser (ADR-018). */
   updates?: UpdatesTabState;
 };
 
 export type SettingsTab = 'general' | 'sync' | 'updates';
 
-/** In tab order, so the arrow-key handler below can move between neighbours
-    rather than hard-coding a pair. `05-ui-ux.md` §6.6: the order is what the
-    user reads most often first — look after your writing, then sync, then the
-    once-a-month chore. */
 const TABS: readonly SettingsTab[] = ['general', 'sync', 'updates'];
 
-/** The label each tab shows. Derived from the id rather than `capitalize`d from
-    it, so `updates` does not depend on a CSS transform to read as a word. */
 const TAB_LABELS: Record<SettingsTab, string> = {
   general: 'General',
   sync: 'Sync',
@@ -112,9 +64,6 @@ export type SyncTabState = {
   onResolve: (id: string, keepLocal: boolean) => Promise<void>;
 };
 
-/** ADR-024. `lastCheckedAt` comes from the settings store rather than from the
-    check itself, so the line survives the app being closed and reopened: it
-    answers "when did this app last look", not "when did this session look". */
 export type UpdatesTabState = UpdatePaneProps;
 
 export function SettingsDialog({
@@ -134,9 +83,6 @@ export function SettingsDialog({
   updates,
 }: SettingsDialogProps) {
   const { panelRef, onKeyDown: trapKeyDown } = useDialogFocus(onClose);
-  /* Two tabs — general settings and sync — so the connection string, status
-     and conflicts do not crowd the theme and folder rows. The dialog mounts
-     fresh on every open, so the initial tab needs no syncing afterwards. */
   const [tab, setTab] = useState<SettingsTab>(initialTab ?? 'general');
   const [custom, setCustom] = useState<string>(() =>
     accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex,
@@ -144,15 +90,8 @@ export function SettingsDialog({
   const [draft, setDraft] = useState<string>(() =>
     accent !== null && accent.kind === 'custom' ? accent.hex : lastCustomHex,
   );
-  /* The custom editor opens from the palette swatch alone: with six presets on
-     show, an always-visible panel of sliders is clutter for anyone who never
-     picks a colour of their own. */
   const [customOpen, setCustomOpen] = useState(accent !== null && accent.kind === 'custom');
   const [confirming, setConfirming] = useState(false);
-  /* The folder picker portals to the body, outside the panel's DOM. The trap
-     and the Esc handling only apply to keys from inside the panel — otherwise
-     Esc in the picker would close the dialog behind it, and Tab there would be
-     yanked back into the panel mid-choice. */
   const [picker, setPicker] = useState<{
     anchor: HTMLElement;
     placement: { top: number; left: number };
@@ -165,17 +104,11 @@ export function SettingsDialog({
 
   const options = useMemo(() => flattenFolders(folders), [folders]);
 
-  /* A deleted folder leaves a stale id behind; the button falls back to the
-     None copy rather than showing a blank, and the id itself is replaced on
-     the next pick. */
   const currentName = useMemo(() => {
     if (defaultFolderId === null) return null;
     return options.find((option) => option.id === defaultFolderId)?.name ?? null;
   }, [options, defaultFolderId]);
 
-  /* §10: colour is never the only signal. The ring on the swatch is the
-     selected state, and this says which preset is in use so the ring is not
-     carrying the meaning alone. A custom colour shows no readout at all. */
   const accentReadout = useMemo(() => {
     if (accent === null) {
       return `Default accent for the ${effective === 'dark' ? 'dark' : 'light'} theme`;
@@ -198,13 +131,6 @@ export function SettingsDialog({
     onAccentChange({ kind: 'custom', hex: next });
   };
 
-  /* Hydration — or a reset — can land after the dialog mounts, leaving the
-     editor on the fallbacks rather than the stored values. Re-sync from props
-     when they change: edits made inside the editor already write through
-     `onAccentChange`, so an outside change is the only thing that reaches
-     here, and the in-editor paths set the same values back. Adjusted during
-     render rather than in an effect, where it would be a cascading render
-     (`10-conventions.md` §8). */
   const [prevExternal, setPrevExternal] = useState({ accent, lastCustomHex });
   if (prevExternal.accent !== accent || prevExternal.lastCustomHex !== lastCustomHex) {
     setPrevExternal({ accent, lastCustomHex });
@@ -216,15 +142,8 @@ export function SettingsDialog({
 
   return (
     <div
-      /* `pb` clears the Android navigation bar (`--inset-bottom` in
-         `styles/base.css`): the dialog is `fixed`, so `#root`'s own padding
-         does not move it, and without this the panel ends behind the system
-         buttons on a phone. */
       className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_srgb,var(--surface-sunken)_70%,transparent)] p-6 pb-[max(1.5rem,var(--inset-bottom))]"
       onMouseDown={(event) => {
-        /* A click on the scrim dismisses; a click inside the panel must not.
-           Dismissal loses nothing, because every setting here is applied as it
-           is changed rather than on a submit — see the footer. */
         if (event.target === event.currentTarget) onClose();
       }}
     >
@@ -235,8 +154,6 @@ export function SettingsDialog({
         aria-labelledby="settings-dialog-title"
         data-testid="settings-dialog"
         onKeyDown={onPanelKeyDown}
-        /* Dialog copy is chrome, not content: read, never copied. The colour
-           input below is a picker, not a text field, so nothing opts back in. */
         className="flex max-h-[calc(100dvh-3rem-var(--inset-bottom))] w-full max-w-[420px] flex-col overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
       >
         <div className="flex flex-none items-center gap-2 px-5 pt-[18px]">
@@ -253,9 +170,6 @@ export function SettingsDialog({
           aria-label="Settings sections"
           data-testid="settings-tabs"
           onKeyDown={(event) => {
-            /* Arrows move between neighbours and wrap, which is what a tablist
-               does; `Home`/`End` jump to the ends. With two tabs this was a
-               pair-flip, which is why neither key worked and nothing noticed. */
             const at = TABS.indexOf(tab);
             let next: number | null = null;
             if (event.key === 'ArrowRight') {
@@ -332,10 +246,6 @@ export function SettingsDialog({
                 {ACCENT_PRESETS.map((preset, offset) => {
                   const value = presetValue(preset, effective === 'dark');
                   const index = offset + 1;
-                  /* `null` is the *first* preset, the theme's own default — not "no choice". With
-                   it excluded, no swatch carried the ring while the readout said
-                   "Default accent", and §10 is explicit that the ring must not be
-                   the only signal for a state that is in fact selected. */
                   const selected =
                     accent === null
                       ? index === 1
@@ -348,9 +258,6 @@ export function SettingsDialog({
                       aria-checked={selected}
                       aria-label={preset.name}
                       title={preset.name}
-                      /* One tab stop across the seven radios, so the picker costs one `Tab` rather
-                   than seven — the same reasoning §10.1 records for the folder
-                   tree. The first swatch carries it when the default is in use. */
                       tabIndex={selected ? 0 : accent === null && index === 1 ? 0 : -1}
                       onClick={() => {
                         setCustomOpen(false);
@@ -364,8 +271,6 @@ export function SettingsDialog({
                   );
                 })}
 
-                {/* The custom swatch is `palette`, one of the three inventory
-                  icons §6.6 assigns to the custom colour. */}
                 <button
                   type="button"
                   role="radio"
@@ -532,15 +437,10 @@ export function SettingsDialog({
                 aria-haspopup="listbox"
                 aria-expanded={picker !== null}
                 onClick={(event) => {
-                  /* A toggle, not just an opener: the panel never covers this
-                   button, so pressing it again is always the fastest way to
-                   dismiss the list. */
                   if (picker !== null) {
                     setPicker(null);
                     return;
                   }
-                  /* Geometry is in hand at the click; measuring later is a second
-                   render for a value already known. */
                   setPicker({
                     anchor: event.currentTarget,
                     placement: popoverPlacement(event.currentTarget),
@@ -555,8 +455,6 @@ export function SettingsDialog({
                   aria-hidden="true"
                 />
               </button>
-              {/* ADR-014: nothing is pre-created, so "None" is the default and a
-                note filed into it is unfiled rather than lost. */}
               {options.length === 0 ? (
                 <p className="mt-1.5 text-[12px] text-[var(--text-subtle)]">
                   No folders yet. New notes stay unfiled until you make one.
@@ -625,13 +523,6 @@ export function SettingsDialog({
 
           <div className="flex-1" />
 
-          {/* No Cancel. Every field here applies the moment it changes, exactly
-             as the top-bar theme button has always done, so there is no
-             unsubmitted state for Cancel to discard — it would be a button that
-             closes the dialog without doing anything, which §9 rejects for the
-             sidebar toggle in the same terms. Done closes, and that is all it
-             promises. The prototype drew Cancel and Done; Done is what survives
-             that reasoning, and the prototype was changed to match. */}
           <button
             type="button"
             data-testid="settings-done"
@@ -643,13 +534,7 @@ export function SettingsDialog({
           </button>
         </div>
 
-        {/* Reset is destructive and needs confirming (`05-ui-ux.md` §6.6), and
-            the confirmation is a sibling rather than a child: a dialog inside a
-            dialog would give the inner one a focus trap inside the outer one's,
-            and `Esc` would reach the wrong one. */}
         {confirming ? confirmReset : null}
-        {/* The picker portals to the body but is a React child of the panel, so
-            `onPanelKeyDown` above is what keeps the trap out of it. */}
         {picker !== null ? (
           <FolderPicker
             anchor={picker.anchor}

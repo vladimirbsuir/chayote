@@ -2,18 +2,8 @@ import type { ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useDialogFocus } from './useDialogFocus';
 
-/* Destructive confirmation only — permanent delete, empty trash, deleting a
-   folder that has children (`05-ui-ux.md` §4). Never for save or navigation:
-   those must not stop to ask a question the user did not initiate.
-
-   The three focus obligations of `05-ui-ux.md` §10 live in `useDialogFocus`,
-   shared with `SettingsDialog`. Two copies of a focus trap is how one of them
-   ends up missing its `Esc`, and §6.3 records the same shape of mistake for the
-   folder delete. */
-
 type ConfirmDialogProps = {
   title: string;
-  /** States the consequence and, where there is one, the count. */
   body: string;
   confirmLabel: string;
   cancelLabel?: string;
@@ -41,9 +31,6 @@ export function ConfirmDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_srgb,var(--surface-sunken)_70%,transparent)] p-6"
       onMouseDown={(event) => {
-        /* A click on the scrim dismisses; a click *inside* the panel must not,
-           and `mousedown` is the only event that can tell them apart before the
-           panel has handled its own. */
         if (event.target === event.currentTarget) onCancel();
       }}
     >
@@ -54,13 +41,8 @@ export function ConfirmDialog({
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-body"
         onKeyDown={onKeyDown}
-        /* Dialog copy is chrome, not content: read, never copied. */
         className="w-full max-w-[420px] overflow-hidden rounded-[var(--r-card)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
       >
-        {/* No close button: `Esc` and a scrim click both dismiss, and the two
-            buttons at the foot are the whole of the decision. The prototype's
-            dialog has no close affordance either, and adding a third way out is
-            a control that changes nothing. */}
         <div className="flex items-center gap-2 px-5 pt-[18px]">
           <span className={`flex ${accent}`}>
             <AlertCircle className="icon i-20" aria-hidden="true" />

@@ -14,8 +14,6 @@ export type MockTag = { id: Uuid; name: string };
 export type MockNote = {
   id: Uuid;
   doc: JsonDoc;
-  /** ADR-023: a title the user typed. Empty, and therefore ignored, unless
-      `titleSource` says otherwise — which is how `notes` works in SQLite. */
   title: string;
   titleSource: 'auto' | 'manual';
   folderId: Uuid | null;
@@ -70,13 +68,9 @@ export function firstNonEmptyText(doc: JsonDoc): string {
   return '';
 }
 
-/** The same cap `deriveTitle` applies, shared so a typed title and a derived one
-    cannot end up different sizes. `03-data-model.md` §4.1. */
 const MAX_TITLE = 120;
 
 export function capTitle(text: string): string {
-  /* Code points, not UTF-16 units, so the cap cannot land in the middle of a
-     character — the same reason the Rust side caps with `chars().take`. */
   const characters = Array.from(text);
   if (characters.length <= MAX_TITLE) return text;
   const clipped = characters.slice(0, MAX_TITLE).join('');
@@ -90,11 +84,6 @@ export function deriveTitle(doc: JsonDoc): string {
   return capTitle(raw);
 }
 
-/** ADR-026 as the browser backend implements it: the title is what was typed,
-    and an empty one stays empty — the "Untitled" a list shows is a rendering
-    decision, never data. This still derived from the document, so a new note
-    arrived titled "Untitled" in the browser while the Rust backend stored "",
-    and the title field loaded the word as text. */
 export function titleOf(note: MockNote): string {
   return note.title;
 }

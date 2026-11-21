@@ -7,14 +7,6 @@ import { openNote, useEditorStore } from '../stores/editor';
 import type { Note } from '../types/ipc';
 import type { JsonDoc, Uuid } from '../types/note';
 
-/* The editor must show what the list already shows, and never the old text
-   first. The pane keys the TipTap instance by note id, so a saved document
-   that changed underneath it — a sync pull that landed after the note opened
-   from a stale cache entry, or a conflict resolution — either never reached
-   the screen, or flashed the old text until the refetch landed. Found on a
-   phone; the pane now waits for fresh data before the first paint and
-   remounts on an external doc change made while clean. */
-
 const NOTE_ID = '01980000-0000-7000-8000-0000000000aa' as Uuid;
 
 function docOf(text: string): JsonDoc {
@@ -87,8 +79,6 @@ describe('EditorPane external document change', () => {
   }
 
   it('never paints a stale cached document while the fresh read is in flight', async () => {
-    /* Stale cache entry, fresh read held back: the only paint allowed before
-       it lands is the placeholder — never the old text. */
     queryClient.setQueryData(qk.note(NOTE_ID), asNote(docOf('old text')));
     let release!: (note: Note) => void;
     mocks.getNote.mockImplementation(
@@ -103,8 +93,6 @@ describe('EditorPane external document change', () => {
     act(() => {
       release(asNote(docOf('new text')));
     });
-    /* Generous timeout: under a full-suite run the TipTap first paint this
-       performs can take longer than the 1 s default. */
     await waitFor(
       () => {
         expect(editorText()).toBe('new text');
@@ -119,12 +107,9 @@ describe('EditorPane external document change', () => {
       expect(editorText()).toBe('old text');
     });
 
-    /* A sync pull (or Use-theirs) writes a new saved document; the refetch
-       lands in the same query the list already read. */
     mocks.currentDoc = docOf('new text');
     await queryClient.invalidateQueries({ queryKey: qk.note(NOTE_ID) });
 
-    /* Generous timeout, as above: this remounts TipTap. */
     await waitFor(
       () => {
         expect(editorText()).toBe('new text');

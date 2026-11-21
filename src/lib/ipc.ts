@@ -18,10 +18,6 @@ import type { MockDatabase } from '../mock/derive';
 
 export { cycleDetected, MockBackendError, notFound } from '../mock/errors';
 
-/* ADR-018: one module owns IPC. Components never import `@tauri-apps/api`
-   directly, so the frontend can run in a plain browser and Playwright can
-   drive the real component tree. R6 is enforced structurally by this file. */
-
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 function tauriBackend(): Backend {
@@ -38,16 +34,6 @@ function tauriBackend(): Backend {
 
 let active: Backend | null = null;
 
-/** `?seed=` selects a starting state for the browser fallback, which is how a
-    test reaches a screen that is otherwise hard to get to. It is read here, in
-    the one module that owns the adapter choice, so a test reaches it by URL
-    rather than by importing the mock into a component — which
-    `10-conventions.md` §5 forbids.
-
-    - `empty` — the ADR-014 first-launch state: no folders, no tags, no notes.
-    - `update` — an update is waiting, so the install path is drivable.
-    - `no-updates` — a platform that cannot update, as on macOS and Android.
-    - `offline` — the endpoint cannot be reached, so the failure path is. */
 function mockSeedFromUrl(): string | null {
   return new URLSearchParams(window.location.search).get('seed');
 }
@@ -102,9 +88,6 @@ export const notesApi = {
   move: (id: Uuid, folderId: Uuid | null): Promise<Note> => invoke('notes_move', { id, folderId }),
   setPinned: (id: Uuid, isPinned: boolean): Promise<Note> =>
     invoke('notes_set_pinned', { id, isPinned }),
-  /** ADR-023. Its own command rather than a field on `notes_save`, for the reason
-      the pin has one: the autosave judges a write by the serialised document, so a
-      title carried in the save input would be judged unchanged and never written. */
   setTitle: (id: Uuid, title: string): Promise<Note> => invoke('notes_set_title', { id, title }),
   softDelete: (id: Uuid): Promise<void> => invoke('notes_soft_delete', { id }),
   restore: (id: Uuid): Promise<void> => invoke('notes_restore', { id }),
@@ -148,15 +131,9 @@ export const windowApi = {
   ready: (): Promise<void> => invoke('window_ready', {}),
 };
 
-/** ADR-024. The updater runs entirely in Rust; nothing here imports
-    `@tauri-apps/plugin-updater`, which keeps R6 to one import site and lets the
-    browser fallback answer the same three calls. */
 export const updatesApi = {
   info: (): Promise<AppInfo> => invoke('app_info', {}),
   check: (): Promise<UpdateSummary | null> => invoke('updates_check', {}),
-  /** `onEvent` is only a real channel under Tauri. Outside it there is no
-      `Channel` to construct, so the browser path passes the callback through
-      untouched and the mock ignores it. */
   install: async (onEvent: (event: DownloadEvent) => void): Promise<void> => {
     await invoke('updates_install', {
       onEvent: isTauri ? await buildChannel(onEvent) : onEvent,
@@ -171,28 +148,8 @@ async function buildChannel(
   return new Channel<DownloadEvent>(onEvent);
 }
 
-/** The global the Android activity calls. It lives here rather than in a component
-    because R6 makes this file the only place that talks to the platform, and a
-    `window` property assigned anywhere else would be a second path to it. */
 type BackBridge = { __chayoteHandleBack__?: () => boolean };
 
-/** Install the handler the Android back button asks, returning whether it consumed
-    the press.
-
-    `06-platform.md` §4.4: back walks the view stack and at the root it is the
-    platform's job. Returning `false` at the root is what lets `MainActivity.kt`
-    hand the press back to Tauri, whose default backgrounds or finishes the task —
-    the app never decides when to exit.
-
-    Why Kotlin and not an event: Tauri 2.12 has no JavaScript-reachable back
-    button. `AppPlugin.hasListener` reads a Java-only map that `listen()` from JS
-    never populates, `Plugin.trigger` sends only to Java channels, and
-    `WryActivity.handleBackNavigation` installs `goBack`-or-finish rather than
-    reaching the web layer. §4.4 records the evidence.
-
-    Rejects a handler that throws rather than letting a broken one eat the back
-    button: the press would then do nothing at all, which is the failure this
-    whole path exists to remove. */
 export function installBackHandler(handler: () => boolean): () => void {
   if (!isTauri) return () => {};
   const bridge = window as Window & BackBridge;

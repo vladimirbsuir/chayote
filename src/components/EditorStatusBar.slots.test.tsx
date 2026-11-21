@@ -3,15 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorStatusBar } from './EditorStatusBar';
 import { useSelectionStore } from '../stores/selection';
 
-/* `04-editor.md` §9: the status bar is five elements in one 28 px row — title, folder,
-   tags, word count, save state — and the folder and tags slots are "click to change".
-
-   These tests cover the slots themselves. The editors behind them are in
-   `StatusPopovers.test.tsx`, and the path from a click through to the database is in
-   `e2e/shell.spec.ts`; what is left is the row, which has two ways of being wrong
-   that neither of those would catch: a slot that looks interactive and is not, and a
-   slot that names its value but not its action. */
-
 function bar(
   overrides: Partial<React.ComponentProps<typeof EditorStatusBar>> = {},
 ): React.ReactElement {
@@ -50,15 +41,12 @@ describe('EditorStatusBar folder and tag slots', () => {
   it('says so when a note has no folder, rather than showing an empty slot', () => {
     render(bar({ folderName: null }));
 
-    /* ADR-014: everything starts unfiled, so this is the state a new note is in and
-       it has to read as a choice rather than as missing data. */
     expect(screen.getByTestId('status-folder').textContent).toBe('No folder');
   });
 
   it('names the action on the folder slot, not just its value', () => {
     render(bar({ folderName: 'Work' }));
 
-    /* "Work, button" does not say what pressing it does. */
     expect(screen.getByTestId('status-folder').getAttribute('aria-label')).toBe('Change folder');
   });
 
@@ -77,8 +65,6 @@ describe('EditorStatusBar folder and tag slots', () => {
   it('shows the first tag and a count of the rest', () => {
     render(bar({ tagNames: ['work', 'ideas', 'urgent'] }));
 
-    /* A note with four tags does not fit in a 28 px row, and truncating the name of
-       the one shown would be worse than saying how many there are. */
     expect(screen.getByTestId('status-tags').textContent).toBe('#work +2');
   });
 
@@ -95,8 +81,6 @@ describe('EditorStatusBar folder and tag slots', () => {
 
     fireEvent.click(screen.getByTestId('status-folder'));
 
-    /* Measured at the click, not looked up later: a popover placed against a stored
-       rectangle would drift as soon as the window moved. */
     expect(onPickFolder).toHaveBeenCalledTimes(1);
     expect(onPickFolder.mock.calls[0]?.[0]).toBe(screen.getByTestId('status-folder'));
   });
@@ -113,8 +97,6 @@ describe('EditorStatusBar folder and tag slots', () => {
   it('reaches both slots from the keyboard', () => {
     render(bar({ folderName: 'Work', tagNames: ['work'] }));
 
-    /* §10: every action keyboard reachable. A slot that looked interactive and was not
-       would be the worse failure than having no slot at all. */
     expect(screen.getByTestId('status-folder').tagName).toBe('BUTTON');
     expect(screen.getByTestId('status-tags').tagName).toBe('BUTTON');
   });

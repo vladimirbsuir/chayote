@@ -1,6 +1,3 @@
--- 0001_initial.sql — folders, notes, tags, note_tags
--- `03-data-model.md` §3.2–§3.5. Forward-only (R8).
-
 CREATE TABLE IF NOT EXISTS folders (
   id         TEXT    PRIMARY KEY NOT NULL,
   name       TEXT    NOT NULL CHECK (length(trim(name)) > 0),

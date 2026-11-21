@@ -58,11 +58,6 @@ function paragraph(text: string): JsonDoc {
 
 const HR: JsonDoc = { type: 'horizontalRule' };
 
-/* Backspace in an empty top-level paragraph after a divider deletes the divider
-   at once. Without the `EditorShortcuts` case the empty block dies first and the
-   divider is left node-selected but unstyled, so the caret looks lost — and a
-   trailing divider strands entirely once the selection moves on. */
-
 describe('Backspace before an empty paragraph after a divider', () => {
   it('deletes the divider and keeps the caret in the empty paragraph', async () => {
     const mounted = mount({ type: 'doc', content: [paragraph('aaa'), HR, { type: 'paragraph' }] });
@@ -77,7 +72,6 @@ describe('Backspace before an empty paragraph after a divider', () => {
       expect(mounted.editor()?.getHTML()).not.toContain('<hr>');
     });
     expect(mounted.editor()?.getHTML()).toContain('aaa');
-    /* The empty paragraph survives: only the divider is gone. */
     expect(mounted.editor()?.state.doc.childCount).toBe(2);
   });
 
@@ -129,11 +123,9 @@ describe('Backspace before an empty paragraph after a divider', () => {
       const end = editor.state.doc.content.size;
       editor.commands.setTextSelection(end - 1);
     });
-    /* Sanity: the caret really is nested, so the top-level-only guard applies. */
     expect(mounted.editor()?.state.selection.$from.depth).toBeGreaterThan(1);
     pressBackspace(dom);
 
-    /* The divider survives; whatever the default did to the list item stands. */
     expect(mounted.editor()?.getHTML()).toContain('<hr>');
   });
 
@@ -141,7 +133,6 @@ describe('Backspace before an empty paragraph after a divider', () => {
     const mounted = mount({ type: 'doc', content: [paragraph('aaa'), HR, paragraph('bbb')] });
     const dom = await proseMirror();
 
-    /* Caret to the start of bbb, where the default chain selects the divider. */
     act(() => {
       const editor = mounted.editor();
       if (editor === null) return;
@@ -161,8 +152,6 @@ describe('Backspace before an empty paragraph after a divider', () => {
     });
     pressBackspace(dom);
 
-    /* One press removes the divider; the blocks join on the next press, which
-       is the default chain and stays default. */
     await waitFor(() => {
       expect(mounted.editor()?.getHTML()).not.toContain('<hr>');
     });

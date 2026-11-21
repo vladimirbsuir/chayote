@@ -10,15 +10,6 @@ import { notesApi, setMockBackend } from '../lib/ipc';
 import { useSelectionStore } from '../stores/selection';
 import type { NoteSummary } from '../types/ipc';
 
-/* `05-ui-ux.md` §6.2: "Delete moves the note to trash with an undo toast for 6
-   seconds offering 'Undo'. The soft delete is already persisted; undo simply
-   restores. Permanent delete and empty trash require `ConfirmDialog`."
-
-   What is asserted here is the *contract between the list and the actions*, because
-   that is where the two can drift: a row offering permanent delete in a live list is
-   the failure this whole milestone cares about, and it is invisible until someone
-   clicks it. */
-
 const NOW = 1_800_000_000_000;
 
 const EMPTY_STATE = {
@@ -68,9 +59,6 @@ function List(props: {
   );
 }
 
-/** Open a card's menu the way a user does: right-click the row. There is no
-    menu button — the menu answers to right-click, long-press and the
-    application key. */
 function openMenuFor(id: string): void {
   const card = document.querySelector(`[data-testid="note-card"][data-note-id="${id}"]`);
   if (!(card instanceof HTMLElement)) throw new Error(`no card ${id}`);
@@ -111,9 +99,7 @@ describe('note row actions', () => {
     expect(labels).toHaveLength(2);
     expect(labels[0]).toContain('Restore');
     expect(labels[1]).toContain('Delete permanently');
-    /* §6.2: a note already in the trash cannot be moved to the trash again. */
     expect(labels.some((label) => label.includes('Move to trash'))).toBe(false);
-    /* The pin of a deleted note is not actionable anywhere, menu included. */
     expect(screen.queryByTestId('note-menu-pin')).toBeNull();
   });
 
@@ -198,11 +184,6 @@ describe('note row actions', () => {
   });
 
   it('keeps the menu open when a write moves the note under it', () => {
-    /* Found as one flaky CI test: the menu was keyed by `updatedAt`, so the pin
-       write the menu itself triggered arrived after the key was taken and the
-       menu vanished between the hold and the read that followed. A menu a person
-       can watch disappear under their finger is the defect; the timestamp was
-       never what the key was for. */
     const { rerender } = render(<List onPin={noop} onDelete={noop} />);
     openMenuFor('n-1');
 
@@ -212,9 +193,6 @@ describe('note row actions', () => {
   });
 
   it('drops the menu when its note leaves the list, which is what the id is for', () => {
-    /* The other half of the same guard: a note removed from under an open menu —
-       a soft delete, a permanent delete, a restore — must not leave the menu up
-       over whatever takes its place. The id lookup is what covers it. */
     const { rerender } = render(<List onPin={noop} onDelete={noop} />);
     openMenuFor('n-1');
 
@@ -262,10 +240,6 @@ describe('note row actions', () => {
   });
 
   it('opens the menu from a right-click, the path a touch long-press takes', () => {
-    /* On the device a hold fires `contextmenu` — the WebView recognises the
-       adb swipe-hold, and the folder rows already open their menu this way. The
-       note rows answered it with a text selection, which is the gap: the menu
-       button is `pointer:fine`-only, so on touch there was no other path. */
     render(<List onRestore={noop} onDestroy={noop} />);
 
     fireEvent.contextMenu(screen.getByTestId('note-card'));
@@ -285,10 +259,6 @@ describe('note row actions', () => {
   });
 
   it('does not open the note on the click that ends a long-press, but does after', () => {
-    /* The release after the hold synthesises a click. Without the guard the row
-       opens the note under the menu it just opened; with it, exactly that one
-       click is eaten — and as an outside click it also dismisses the menu — so
-       the next real click opens as usual. */
     const onOpen = vi.fn();
     render(
       <NoteList
@@ -326,9 +296,6 @@ describe('note row actions', () => {
   });
 
   it('keeps only one menu open: a second row replaces the first', () => {
-    /* Found on a phone: long-pressing a second row left the first menu up, so
-       two portalled menus overlapped. The state lives in the list now, and
-       opening for another row replaces rather than adds. */
     render(
       <List
         notes={[note({ id: 'n-1', title: 'First' }), note({ id: 'n-2', title: 'Second' })]}
@@ -352,9 +319,6 @@ describe('note row actions', () => {
   });
 
   it('closes the menu when an action runs, before anything else changes', () => {
-    /* Found on a phone: permanent delete opens a confirmation, and the menu
-       stayed up under its own dialog — the note has not changed yet, so the
-       data-change keying cannot close it. Choosing closes, for all three items. */
     const onDestroy = vi.fn();
     render(<List onRestore={noop} onDestroy={onDestroy} />);
 
@@ -403,8 +367,6 @@ describe('trash actions against the backend', () => {
     });
 
     const after = await notesApi.get(target.id);
-    /* §6.2: "undo simply restores". A restore that lost the body would make the undo
-       toast a lie. */
     expect(after.doc).toEqual(before.doc);
     expect(after.deletedAt).toBeNull();
     expect((await notesApi.list({ kind: 'all' })).some((n) => n.id === target.id)).toBe(true);
@@ -449,7 +411,6 @@ describe('trash actions against the backend', () => {
 
     expect(removed).toBeGreaterThanOrEqual(2);
     expect(await notesApi.list({ kind: 'trash' })).toHaveLength(0);
-    /* The live notes are untouched: emptying the trash is not emptying the app. */
     expect((await notesApi.list({ kind: 'all' })).length).toBe(live.length - 2);
   });
 
@@ -460,8 +421,6 @@ describe('trash actions against the backend', () => {
     const target = live[0];
     if (target === undefined) return;
 
-    /* Restoring something already live is a no-op in the Rust repo; what matters is
-       that it cannot silently resurrect a destroyed row. */
     await act(async () => {
       await notesApi.destroy(target.id);
     });
@@ -469,9 +428,6 @@ describe('trash actions against the backend', () => {
   });
 });
 
-/* The toast's own module. Driven with fake timers, because the six seconds are the
-   contract and a real timer would make the test either slow or flaky — and this is
-   the only place in the app where a wall-clock duration is a user-visible promise. */
 describe('useUndoToast', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -523,8 +479,6 @@ describe('useUndoToast', () => {
     fireEvent.click(screen.getByTestId('undo-toast-undo'));
 
     expect(undo).toHaveBeenCalledTimes(1);
-    /* The toast goes with the undo, rather than sitting there offering to undo a
-       note that is already back in the list. */
     expect(screen.queryByTestId('undo-toast')).toBeNull();
   });
 
@@ -541,8 +495,6 @@ describe('useUndoToast', () => {
     elsewhere.focus();
     fireEvent.click(screen.getByTestId('show'));
 
-    /* Assertive would interrupt whatever a screen reader is reading, and a focus
-       move would break the keystroke the user is in the middle of. */
     expect(screen.getByTestId('undo-toast').getAttribute('aria-live')).toBe('polite');
     expect(document.activeElement).toBe(elsewhere);
   });
@@ -591,8 +543,6 @@ describe('useUndoToast', () => {
     fireEvent.click(screen.getByTestId('show'));
     fireEvent.click(screen.getByTestId('show'));
 
-    /* One toast, and it survives the full window from the *second* delete. Two
-       timers racing would restore whichever note each was pointed at. */
     expect(screen.getAllByTestId('undo-toast')).toHaveLength(1);
     act(() => {
       vi.advanceTimersByTime(UNDO_WINDOW_MS - 1);

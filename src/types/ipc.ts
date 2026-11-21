@@ -5,11 +5,6 @@ import type { SearchInput, SearchPage } from './search';
 import type { SyncConflict, SyncStatus, SyncSummary } from './sync';
 import type { AppInfo, UpdateSummary } from './update';
 
-/* Domain shapes crossing the IPC boundary. Rust structs carry
-   #[serde(rename_all = "camelCase")], so every field is camelCase here.
-   `Selection` and `NoteFilter` are `#[serde(flatten)]` on the Rust side, so
-   they serialise as `{"kind": "folder", "id": "..."}` rather than nested. */
-
 export type SelectionKind = 'all' | 'pinned' | 'folder' | 'tag' | 'trash';
 
 export type Selection =
@@ -42,11 +37,6 @@ export type Note = NoteSummary & {
   deletedAt: number | null;
 };
 
-/** A row in the note list: a summary, plus the one thing a search hit carries that
-    a plain list row does not. `SearchHit` is assignable to this, so the same
-    virtualised list renders both without a cast or a second card. The snippet is
-    `plain_text` with the match marked, and it replaces the excerpt rather than
-    sitting under it — the point of a result is the sentence that matched. */
 export type NoteRow = NoteSummary & {
   snippet?: string | undefined;
 };
@@ -58,9 +48,6 @@ export type SaveNoteInput = {
   tagIds: Uuid[];
   isPinned: boolean;
 };
-
-/* The complete v1 command surface, mirroring 02-architecture.md §7.
-   Adding a command requires updating that table and this file together. */
 
 export type AppErrorShape = {
   code: string;
@@ -131,11 +118,6 @@ export type CommandArgs = {
   sync_resolve_conflict: { id: string; keepLocal: boolean };
   app_info: Record<string, never>;
   updates_check: Record<string, never>;
-  /* `onEvent` is a live `tauri::ipc::Channel`, not data: nothing about it
-   serialises, the browser fallback has no channel to construct, and the mock
-   ignores it. `unknown` rather than the event union is the honest type — the one
-   place that knows what it really is and builds it is `lib/ipc.ts`, and a
-   `Channel` type here would put a Tauri import in the pure types module. */
 updates_install: { onEvent: unknown };
   window_ready: Record<string, never>;
 };
@@ -169,8 +151,6 @@ export type CommandOutput = {
   sync_list_conflicts: SyncConflict[];
   sync_resolve_conflict: undefined;
   app_info: AppInfo;
-  /* `null` is "checked, nothing newer" — distinct from an error, which is how
-     the tab can say "up to date" instead of "could not check". */
   updates_check: UpdateSummary | null;
   updates_install: undefined;
   window_ready: undefined;

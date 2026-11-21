@@ -4,19 +4,8 @@ import { UpdatePane } from './UpdatePane';
 import type { UpdatePaneProps } from './UpdatePane';
 import type { AppInfo, UpdateSummary } from '../types/update';
 
-/* The Updates tab's states are the whole of ADR-024's user-visible promise:
-   a check the user starts, an answer only after the check ran, an install only
-   when something is newer, and a disabled button with a reason on a platform
-   that cannot update. Each of those is a screen, and a screen no test can reach
-   is a screen that does not exist.
-
-   Plain Testing Library assertions, no `jest-dom` — this project does not take
-   that dependency, so `toHaveTextContent` and `toBeDisabled` are spelled out. */
-
 const WINDOWS: AppInfo = { version: '0.2.1', os: 'Windows', updatesSupported: true };
 const MACOS: AppInfo = { version: '0.2.1', os: 'macOS', updatesSupported: false };
-/** ADR-025: Android updates itself, so it is the supported fixture. It was the
-    unsupported one until the Kotlin installer existed. */
 const ANDROID: AppInfo = { version: '0.2.1', os: 'Android', updatesSupported: true };
 
 const FOUND: UpdateSummary = {
@@ -57,9 +46,6 @@ describe('UpdatePane', () => {
   it('shows the running version, and never a claim about anything else', () => {
     render(<UpdatePane {...pane()} />);
     expect(text('update-version')).toContain('Chayote 0.2.1');
-    /* Before a check has run the tab knows nothing about updates, so it says
-       nothing. "Up to date" here would be a claim about a version it has not
-       looked up. */
     expect(screen.queryByTestId('update-current')).toBeNull();
     expect(screen.queryByTestId('update-available')).toBeNull();
     expect(screen.queryByTestId('update-last-checked')).toBeNull();
@@ -80,9 +66,6 @@ describe('UpdatePane', () => {
   });
 
   it('does not inherit the daily tick’s result, only its timestamp', () => {
-    /* The silent check runs once at launch and records when it looked. It reports
-       nothing into the tab, so a tab opened afterwards knows *when* but not
-       *what* — and must not turn that into "up to date". */
     render(<UpdatePane {...pane({ hasChecked: false, lastCheckedAt: 1_780_000_000_000 })} />);
     expect(screen.queryByTestId('update-current')).toBeNull();
     expect(screen.queryByTestId('update-available')).toBeNull();
@@ -104,20 +87,13 @@ describe('UpdatePane', () => {
     expect(onCheck).not.toHaveBeenCalled();
     expect(text('update-unsupported')).toContain('macOS');
     expect(text('update-unsupported')).toContain('not code-signed');
-    /* The reason replaces the result line rather than sitting beside it. */
     expect(screen.queryByTestId('update-current')).toBeNull();
     rerender(<UpdatePane {...pane({ info: ANDROID, onCheck })} />);
-    /* ADR-025: Android installs itself, so there is nothing to explain and
-       nothing to disable. This assertion is the whole point of that change. */
     expect(isDisabled('update-check')).toBe(false);
     expect(screen.queryByTestId('update-unsupported')).toBeNull();
   });
 
   it('words Android’s outstanding grant as something to do, not as a failure', () => {
-    /* ADR-025. The install is refused for want of a permission that lives in
-       system settings, the bytes are still verified, and pressing Install again
-       installs them — so "try again" alone would leave the user pressing a button
-       that cannot work. */
     render(
       <UpdatePane
         {...pane({
@@ -131,18 +107,12 @@ describe('UpdatePane', () => {
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toContain('will not let Chayote install updates until you allow it');
     expect(alert.textContent).not.toContain('the sync server');
-    /* The Install button stays live, because the next press is the fix. */
     expect(isDisabled('update-install')).toBe(false);
-    /* And it is not painted like a failure. Red would report broken where the
-       truth is a screen the user has already been sent to — the assertion is on
-       the class, because the sentence alone cannot tell the two apart. */
     expect(alert.className).toContain('var(--warning)');
     expect(alert.className).not.toContain('var(--danger)');
   });
 
   it('paints every other install error as a failure', () => {
-    /* The complement of the test above, so the warning style cannot spread to
-       errors that really are failures by someone editing one branch. */
     render(
       <UpdatePane
         {...pane({
@@ -178,7 +148,6 @@ describe('UpdatePane', () => {
     render(<UpdatePane {...pane({ info: ANDROID, update: FOUND, installed: true })} />);
     expect(text('update-installed')).toContain('will close Chayote');
     expect(screen.queryByRole('alert')).toBeNull();
-    /* Still retryable: Android may have asked, and the answer may have been no. */
     expect(isDisabled('update-install')).toBe(false);
   });
 
@@ -227,10 +196,7 @@ describe('UpdatePane', () => {
       />,
     );
     expect(screen.getByRole('alert').textContent).toContain('Check your connection and try again.');
-    /* The contract's own sentence names the sync server, which an update check
-       never touches — so the tab replaces it rather than showing it. */
     expect(screen.getByRole('alert').textContent).not.toContain('sync server');
-    /* A failed check says nothing about being current. */
     expect(screen.queryByTestId('update-current')).toBeNull();
   });
 
@@ -260,8 +226,6 @@ describe('UpdatePane', () => {
 
   it('drops to bytes when the server reported no length', () => {
     render(<UpdatePane {...pane({ isInstalling: true, downloaded: 2_500_000, total: null })} />);
-    /* No progressbar: announcing a range the server never gave would be a bar
-       measuring nothing. The bytes travelled are still reported. */
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(text('update-progress')).toContain('Downloading… 2.5 MB');
     expect(text('update-progress')).toContain('The size was not reported.');

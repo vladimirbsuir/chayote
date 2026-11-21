@@ -39,9 +39,6 @@ def fruit_mask(im, bg):
     flat = Image.new("RGB", im.size, bg)
     diff = ImageChops.difference(smooth, flat).convert("L")
     mask = diff.point(lambda v: 255 if v > 24 else 0).filter(ImageFilter.MedianFilter(5))
-    # The artwork's outermost pixels are noisy: clear a frame, then fill the
-    # holes — whatever the flood from the frame does not reach is the fruit,
-    # which closes the navy ribs between the facets.
     w, h = im.size
     ImageDraw.Draw(mask).rectangle((0, 0, w - 1, h - 1), outline=0, width=24)
     ImageDraw.floodfill(mask, (0, 0), 128)
@@ -52,7 +49,7 @@ def fruit_mask(im, bg):
 def facet_mask(im):
     """The green facets and the stem, without the navy ribs between them."""
     r, g, b = im.split()
-    green = ImageChops.subtract(g, b)  # green: well above blue
+    green = ImageChops.subtract(g, b)
     return green.point(lambda v: 255 if v > 60 else 0).filter(ImageFilter.GaussianBlur(1.5))
 
 
@@ -72,8 +69,6 @@ def main():
     mask = fruit_mask(art, bg)
     bbox = mask.getbbox()
 
-    # Desktop: the artwork, cropped around the fruit, in a rounded square
-    # (32 px margin, 22 % corners — the geometry of the Physalis icon).
     cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
     side = (bbox[3] - bbox[1]) / 0.80
     square = art.crop((round(cx - side / 2), round(cy - side / 2), round(cx + side / 2), round(cy + side / 2)))
@@ -88,14 +83,11 @@ def main():
     icon.paste(square, (32, 32), round_mask)
     icon.save(SRC / "icon.png")
 
-    # Android adaptive foreground: the fruit alone, 62 of 108 dp tall, so the
-    # stem and the wide base stay inside the 66 dp safe circle.
     fruit = art.convert("RGBA")
     fruit.putalpha(mask)
     height = SIZE * 62 / 108
     place(fruit, bbox, height).save(SRC / "android-fg.png")
 
-    # Themed icon: white facets, same placement as the foreground.
     facets = facet_mask(art)
     mono = Image.new("RGBA", art.size, (255, 255, 255, 0))
     mono.putalpha(ImageChops.multiply(facets, mask))

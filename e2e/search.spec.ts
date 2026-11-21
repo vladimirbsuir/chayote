@@ -1,14 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
-/* `05-ui-ux.md` §6.5 and §8, driven through the browser against the mock backend.
-
-   This is the layer ADR-018 exists for: everything here is a claim about search
-   that a human would otherwise have to open the packaged app to check. The
-   backend answers with real `<mark>` snippets (`src/mock/search.ts`), so the
-   highlighting asserted below is the highlighting the real FTS5 snippet would
-   produce rather than a stub that happens to have the right shape. */
-
 const RICH_NOTE = '01980000-0000-7000-8000-000000000001';
 
 async function open(page: Page): Promise<void> {
@@ -27,12 +19,6 @@ function field(page: Page) {
   return page.getByRole('searchbox', { name: 'Search notes' });
 }
 
-/** Types a query and waits for the results to arrive.
-
-    The wait is on the header rather than on a timer: `01-product.md` §8 forbids a
-    visible loading state, so there is no spinner to wait for and nothing but the
-    result itself says the query has landed. The debounce itself is pinned in
-    `useSearch.test.tsx`, where the clock is under the test's control. */
 async function search(page: Page, query: string): Promise<void> {
   await field(page).fill(query);
   await expect(page.getByTestId('list-header')).toContainText('Results for');
@@ -44,27 +30,17 @@ test.describe('search', () => {
     const before = await page.getByTestId('note-card').count();
     expect(before).toBeGreaterThan(0);
 
-    /* `launch` is in a note's body. `roadmap` no longer is: migration 0006 lifted
-       it out of that note's first heading and into its title, so a search for it
-       now matches the title and returns a snippet with no mark in it (ADR-023).
-       Marking a snippet requires the word to be in the body, which is what this
-       test is about. */
     await search(page, 'launch');
 
     await expect(page.getByTestId('list-header')).toHaveText('Results for “launch”');
     await expect(page.locator('[data-testid="note-snippet"] mark').first()).toBeVisible();
 
-    /* The structure stays (§6.5: "the sidebar structure stays visible so the
-       search can be scoped"), so the region above the list is untouched. */
     await expect(page.getByRole('tree', { name: /folder/i })).toBeVisible();
   });
 
   test('finds a note by its title alone', async ({ page }) => {
     await open(page);
 
-    /* The other half of the test above: a name the user typed is indexed beside
-       the body, so a note whose title matches and whose text does not is still a
-       result — carrying a snippet, and no mark that is not there. */
     await search(page, 'roadmap');
 
     await expect(page.getByTestId('list-header')).toHaveText('Results for “roadmap”');
@@ -97,9 +73,6 @@ test.describe('search', () => {
 
     await expect(page.getByText('No results for “kumquat”')).toBeVisible();
 
-    /* Scoped to the sidebar: the field's own `x` carries the same accessible
-       name, and two controls doing the same thing is right — one is a pixel and
-       the other is an answer to "why is the list empty". */
     const clear = page.getByTestId('sidebar').getByRole('button', { name: 'Clear search' });
     await expect(clear).toBeVisible();
 
@@ -135,7 +108,6 @@ test.describe('search', () => {
     await page.getByTestId('note-card').first().click();
 
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
-    /* §6.5: a search scopes the list, it does not navigate away from it. */
     await expect(page.getByTestId('list-header')).toHaveText('Results for “roadmap”');
   });
 
@@ -172,17 +144,9 @@ test.describe('search', () => {
     const input = field(page);
     await input.focus();
 
-    /* `TopBar` puts the ring on the container; the bare input must not add a
-       second one, and `outline-none` cannot stop it — see `base.css`. */
     const ring = await input.evaluate((node) => getComputedStyle(node).outlineStyle);
     expect(ring).toBe('none');
 
-    /* Chromium's own cancel button is the other half of the same defect, and it
-       is not assertable from computed style: `getComputedStyle` on
-       `::-webkit-search-cancel-button` reports the user-agent value whatever the
-       author sheet says. What *is* assertable is that a full field offers one
-       clear control and not two; the picture is checked by eye in
-       `screenshots/search-light.png`, per `11-verification.md` §4 level 2. */
     await search(page, 'road');
     await expect(page.getByRole('button', { name: 'Clear search' })).toHaveCount(1);
   });
@@ -191,12 +155,8 @@ test.describe('search', () => {
     await page.setViewportSize({ width: 1280, height: 820 });
     await open(page);
 
-    /* The editor is code-split, so capturing before its chunk lands photographs
-       the Suspense fallback rather than the state. */
     await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
 
-    /* `launch`, because `roadmap` is a title match now and a title match has no
-       mark in its snippet — the screenshot is here to show a real highlight. */
     await search(page, 'launch');
     await expect(page.locator('[data-testid="note-snippet"] mark').first()).toBeVisible();
     await page.screenshot({ path: 'screenshots/search-light.png', fullPage: false });

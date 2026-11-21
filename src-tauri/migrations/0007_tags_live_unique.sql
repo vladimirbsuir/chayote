@@ -1,17 +1,3 @@
--- 0007_tags_live_unique.sql — drop the table-level UNIQUE on tags.name.
--- `03-data-model.md` §3.4. Forward-only (R8).
---
--- 0001 declared `name ... COLLATE NOCASE UNIQUE` on the column as well as the
--- partial index `idx_tags_name_live`. The column constraint covers tombstones
--- too, which is exactly what §3.4 says the partial index exists to allow: a
--- soft-deleted `work` beside a live `Work`. Uniqueness among live tags stays,
--- through the partial index, which inherits the column's NOCASE collation.
---
--- SQLite cannot drop a column constraint, so the table is rebuilt. `note_tags`
--- references `tags(id) ON DELETE CASCADE`, and DROP TABLE runs an implicit
--- DELETE with foreign keys on — which would cascade every tag link away — so
--- the links are copied aside first and restored after the rename.
-
 CREATE TEMP TABLE note_tags_0007 AS
   SELECT note_id, tag_id, created_at FROM note_tags;
 

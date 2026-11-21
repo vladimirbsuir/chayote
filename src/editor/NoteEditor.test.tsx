@@ -4,15 +4,6 @@ import type { Editor } from '@tiptap/core';
 import { NoteEditor } from './NoteEditor';
 import type { JsonDoc } from '../types/note';
 
-/* `10-conventions.md` §10 required test 9: switching notes resets undo history.
-   It exists because `setContent` does not clear history, so the bug it catches is
-   one note's text reappearing in another after Ctrl+Z. The fix is structural — a
-   new editor instance per note — so the test asserts the structure.
-
-   Input rules and smart typography are deliberately absent here: both fire on
-   typed input, which `insertContent` does not produce. They are checked with real
-   keystrokes in `e2e/editor.spec.ts`, where a WebView actually types. */
-
 type Mounted = { editor: Editor | null; unmount: () => void };
 
 function docOf(text: string): JsonDoc {

@@ -1,18 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { relativeTime } from './relativeTime';
 
-/* Every boundary in the §6.5a table, asserted from both sides. A timestamp
-   formatter is exactly the kind of code that looks right in review and is wrong
-   at 59 min or at exactly 7 days. */
-
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-/* Built in local time, not UTC: the formatter reads local time for display
-   (rule R2 — the wire format is epoch ms, the rendering is the user's), so a
-   UTC-based `now` would make the absolute-date expectations depend on the test
-   machine's offset. Local construction holds on any machine. */
 const NOW = new Date(2026, 9, 7, 12, 0, 0).getTime();
 
 function ago(ms: number): number {

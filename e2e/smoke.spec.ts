@@ -1,8 +1,5 @@
 import { expect, test } from '@playwright/test';
 
-/* The M0 shell is the top bar plus a first-launch empty state. M2 adds the
-   editor, so the smoke test drives one real note rather than a placeholder. */
-
 const RICH_NOTE = '01980000-0000-7000-8000-000000000001';
 
 test('loads the shell at 1280x820 with no console errors', async ({ page }) => {

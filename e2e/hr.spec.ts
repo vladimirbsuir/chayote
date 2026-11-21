@@ -2,11 +2,6 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { seedSettings } from './helpers';
 
-/* Dividers (`04-editor.md` §1.2) and the Backspace paths around them.
-   `EditorShortcuts` in `src/editor/extensions.ts` owns one narrow case — an
-   empty top-level paragraph after a divider — and everything else pins the
-   default chain so it cannot silently change. */
-
 async function settleEditor(page: Page): Promise<void> {
   await page.evaluate(
     () =>
@@ -45,7 +40,6 @@ test.describe('dividers', () => {
     const editor = page.getByRole('textbox', { name: 'Note content' });
     await insertDividerAfter(page, 'aaa');
 
-    /* The caret sits in the divider's own trailing paragraph. */
     await page.keyboard.press('Backspace');
     await settleEditor(page);
 
@@ -82,7 +76,6 @@ test.describe('dividers', () => {
     await page.keyboard.type('bbb');
     await settleEditor(page);
 
-    /* Arrow up out of bbb lands on the divider rather than skipping it. */
     await page.keyboard.press('ArrowUp');
     await settleEditor(page);
     const hr = editor.locator('hr');
@@ -125,9 +118,6 @@ test.describe('task list alignment', () => {
     await settleEditor(page);
     await page.getByRole('button', { name: 'Bullet list' }).click();
     await page.keyboard.press('End');
-    /* Two Enters: the first opens a second item, the second exits the list
-       into a plain paragraph. Toggling a task list from inside a bullet item
-       is inapplicable, so the button stays disabled until the caret is out. */
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     await page.keyboard.type('task');
@@ -137,15 +127,11 @@ test.describe('task list alignment', () => {
     await page.getByRole('button', { name: 'Task list' }).click();
     await settleEditor(page);
 
-    /* The marker has no box of its own, so the comparison is text to text:
-       the task content must sit on the same x as the bullet item's text. */
     const bulletBox = await editor.locator('ul:not([data-type]) li').first().boundingBox();
     const taskBox = await editor.locator('.note-task-item__content').first().boundingBox();
     expect(bulletBox, 'bullet item has no box').not.toBeNull();
     expect(taskBox, 'task content has no box').not.toBeNull();
     if (bulletBox === null || taskBox === null) return;
-    /* Bullet text starts after the 24 px list padding; the task row is an
-       18 px box plus a 10 px gap starting 4 px left of the column. */
     expect(Math.abs(taskBox.x - bulletBox.x)).toBeLessThanOrEqual(1.5);
   });
 });

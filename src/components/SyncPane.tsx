@@ -2,12 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, RotateCw } from 'lucide-react';
 import type { SyncConflict, SyncStatus, SyncSummary } from '../types/sync';
 
-/* The Sync tab of the settings dialog: connection string, enable switch,
-   manual trigger, status, and the conflict resolver. Every field here, like
-   the rest of the dialog, applies through commands rather than a submit —
-   except the connection string itself, which is secret text the user may
-   still be editing, so it saves on an explicit Save. */
-
 type SyncPaneProps = {
   status: SyncStatus | undefined;
   statusPending: boolean;
@@ -44,15 +38,8 @@ export function SyncPane({
   const [revealed, setRevealed] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
-  /* Status lines and the re-upload recovery live collapsed: the tab stays
-     short enough for a phone screen, and the error (if any) stays visible
-     outside. Content stays mounted while collapsed so status polls keep
-     working and tests keep reading it. */
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  /* The secret is write-only: the status says *whether* one is stored, never
-     the value. An empty field therefore means "keep the stored string" and
-     only the switch is saved — the Rust side treats empty as no-change. */
   const configured = status !== undefined && status.configured;
   const switchOn = enabled ?? (status !== undefined && status.enabled);
 
@@ -162,9 +149,6 @@ export function SyncPane({
           }}
           className="flex items-center gap-[6px] rounded-[var(--r-input)] border border-[var(--accent)] bg-[var(--accent)] px-4 py-2 text-[13px] font-medium text-white disabled:opacity-50"
         >
-          {/* Static label while saving: swapping the text resizes the button
-              and the whole tab twitches. Progress shows as dimmed; failures
-              show in red below. */}
           Save
         </button>
         <button
@@ -223,11 +207,6 @@ export function SyncPane({
             )}
           </div>
 
-          {/* Recovery, not routine: after a server wipe the device holds clean
-              rows against stale watermarks, and a sync would push nothing and
-              pull nothing. This re-queues the whole library so the next sync
-              uploads it again. Idempotent — running it twice changes nothing
-              the second time. */}
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
               <button
@@ -314,10 +293,6 @@ function ConflictsBlock({
   resolvingId: string | null;
   onResolve: (id: string, keepLocal: boolean) => void;
 }): React.ReactNode {
-  /* The list lives behind a button in a scrollable pop-up rather than inline:
-     with many conflicts the inline cards pushed the settings dialog past the
-     screen edge on both phone and desktop. The heading stays visible so the
-     badge count is never hidden. */
   const [open, setOpen] = useState(false);
   if (conflicts.length === 0) return null;
   return (
@@ -354,11 +329,6 @@ function ConflictsBlock({
   );
 }
 
-/* A pop-up over the settings dialog: the card caps its height and scrolls the
-   list inside, so any number of conflicts fits on a phone screen. `fixed`
-   positions against the viewport, so the settings panel's `overflow` never
-   clips it even though it renders inside that panel (which keeps the settings
-   focus trap wrapping the whole tree). */
 function ConflictsDialog({
   conflicts,
   resolvingId,
@@ -387,8 +357,6 @@ function ConflictsDialog({
         aria-label="Resolve conflicts"
         data-testid="sync-conflicts-dialog"
         onKeyDown={(event) => {
-          /* Esc closes this pop-up only: without stopping propagation the
-             settings panel's own Esc handler would close settings behind it. */
           if (event.key === 'Escape') {
             event.stopPropagation();
             onClose();
@@ -462,8 +430,6 @@ function ConflictsDialog({
   );
 }
 
-/* `AppError` arrives as `{ code, message }`; anything else is a bug shaped
-   like a string. The message is user-facing copy by contract (R7). */
 function messageOf(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {
     const message = (error as { message?: unknown }).message;

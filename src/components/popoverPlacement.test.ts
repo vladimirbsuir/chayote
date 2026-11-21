@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { popoverPlacement } from './popoverPlacement';
 
-/* The status-bar popovers open upward from their anchor — except on a narrow
-   viewport, where a 260 px panel at the anchor's edge parks against the screen
-   edge and is centred instead. Found on a phone: the tag editor hugged the
-   right edge. */
-
 function anchorAt(left: number, top: number): HTMLElement {
   const element = document.createElement('button');
   const rect: DOMRect = {
@@ -47,7 +42,6 @@ describe('popoverPlacement', () => {
   it('centres the panel on a narrow viewport instead of hugging the edge', () => {
     setViewportWidth(360);
 
-    /* (360 − 260) / 2: equal margins, reachable by either thumb. */
     expect(popoverPlacement(anchorAt(105, 700))).toEqual({ top: 412, left: 50 });
   });
 

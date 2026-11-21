@@ -3,12 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { ThemeToggle } from './ThemeToggle';
 import { nextTheme, nextVisibleTheme, themeLabel } from '../lib/theme';
 
-/* `05-ui-ux.md` §4 names `ThemeToggle` as the Light / Dark / System cycle and
-   §7 binds `Ctrl/Cmd+Shift+L` to it. The shortcut and the button have to run the
-   same cycle, and the button and the dialog have to show the same three states,
-   so the cycle is a named function with its own test rather than an increment
-   written twice. */
-
 describe('nextTheme', () => {
   it('cycles light to dark to system and back', () => {
     expect(nextTheme('light')).toBe('dark');
@@ -27,8 +21,6 @@ describe('nextTheme', () => {
 
 describe('nextVisibleTheme', () => {
   it('skips system when the OS already shows what is on screen', () => {
-    /* Stored dark on a dark OS: plain nextTheme would step onto system-dark,
-       a press that changes nothing. */
     expect(nextVisibleTheme('dark', true)).toBe('light');
     expect(nextVisibleTheme('light', false)).toBe('dark');
   });
@@ -63,9 +55,6 @@ describe('ThemeToggle', () => {
   });
 
   it('is one tab stop with a roving tabindex, as a radiogroup should be', () => {
-    /* Ten focus stops for three options is the same mistake §10.1 records for
-       the folder tree: the tab order would spend more presses on the control
-       than on the thing the control is for. */
     render(<ThemeToggle value="light" onChange={() => {}} />);
     const stops = screen
       .getAllByRole('radio')
@@ -89,9 +78,6 @@ describe('ThemeToggle', () => {
   });
 
   it('moves the selection with the arrow keys, and wraps at both ends', () => {
-    /* Driven from each state rather than three presses on one value: the
-       component is controlled, so holding `value` still would ask it the same
-       question three times. What is under test is the step from each state. */
     const step = (from: 'light' | 'dark' | 'system', key: string): string[] => {
       const seen: string[] = [];
       const { unmount } = render(

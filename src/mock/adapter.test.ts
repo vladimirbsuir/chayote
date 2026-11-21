@@ -83,11 +83,6 @@ describe('mock adapter', () => {
   it('finds a body match by prefix and marks it in the snippet', async () => {
     const backend = createMockBackend(buildMockDatabase());
 
-    /* `launch` appears in the body of a fixture and nowhere in its title, so this
-       is a body match and the snippet has to carry the mark. Asserting on a hit
-       rather than on the array's type is the point: the old substring test would
-       also have matched, so this is what stops a mock from quietly answering a
-       different question than FTS5 does. */
     const page = await backend.invoke('search_query', {
       input: { query: 'laun', filter: filterAll, limit: 20, offset: 0 },
     });
@@ -100,11 +95,6 @@ describe('mock adapter', () => {
   it('finds a note by its title alone, and marks nothing in its body', async () => {
     const backend = createMockBackend(buildMockDatabase());
 
-    /* Migration 0006 moved `roadmap` out of a note's first heading and into its
-       title, so this note now matches on the title and not on the body at all. Both
-       halves are worth asserting: the title is still indexed (which is what makes a
-       typed name searchable), and a title-only hit has a snippet that says so
-       rather than a mark that is not there. */
     const page = await backend.invoke('search_query', {
       input: { query: 'roadm', filter: filterAll, limit: 20, offset: 0 },
     });
@@ -137,8 +127,6 @@ describe('mock adapter', () => {
     expect(page.hits.every((hit) => hit.folderId === folder.id)).toBe(true);
     expect(page.total).toBe(page.hits.length);
 
-    /* The same query unscoped reaches notes the folder selection cannot, which is
-       the only way the assertion above proves anything at all. */
     const everywhere = await backend.invoke('search_query', {
       input: { query: 'the', filter: filterAll, limit: 20, offset: 0 },
     });
@@ -151,8 +139,6 @@ describe('mock adapter', () => {
     const target = list[0];
     if (target === undefined) throw new Error('fixture empty');
 
-    /* Cleared first, so the save below has every chance to invent a title from
-       its heading — and, under ADR-026, must not. */
     await backend.invoke('notes_set_title', { id: target.id, title: '' });
 
     const saved = await backend.invoke('notes_save', {
@@ -174,11 +160,9 @@ describe('mock adapter', () => {
       },
     });
 
-    /* ADR-026: a save never touches the title, whatever the document's first line. */
     expect(saved.title).toBe('');
     expect(saved.wordCount).toBe(2);
 
-    /* And once a title is typed, the next save leaves it alone (ADR-023). */
     const titled = await backend.invoke('notes_set_title', { id: target.id, title: 'Typed' });
     const afterSave = await backend.invoke('notes_save', {
       input: {

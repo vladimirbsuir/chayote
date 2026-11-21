@@ -3,10 +3,6 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { TopBar } from './TopBar';
 
-/* `05-ui-ux.md` §9: chrome text is not selectable — only text inputs and the
-   editor content are. The bar's brand, field box, hint and menu are read and
-   pressed, never copied; both search fields opt back in with `select-text`. */
-
 function bar(overrides: Partial<React.ComponentProps<typeof TopBar>> = {}): void {
   const props: React.ComponentProps<typeof TopBar> = {
     searchValue: '',

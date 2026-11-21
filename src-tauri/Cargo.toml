@@ -28,36 +28,12 @@ rustls = "0.23.45"
 webpki-roots = "1.0.9"
 tokio-postgres-rustls = "0.14.0"
 
-# The updater, on every target Android and desktop build for.
-#
-# `tauri-plugin-updater` declares `android = { level = "none" }` and its
-# `install_inner` is `Err(Error::UnsupportedOs)` under `cfg(mobile)`, so its
-# *install* is unusable there. Its check and download are not: `download()`
-# verifies the signature and returns the bytes. ADR-025 keeps those two and
-# replaces only the install with a Kotlin plugin, so the dependency is
-# unconditional — and `REQUEST_INSTALL_PACKAGES` is declared because something
-# can finally use it.
 tauri-plugin-updater = "2"
 
-# Android only. `rustls-platform-verifier` reaches Android's trust store by
-# calling into the JVM, which it cannot do until something hands it a Context —
-# without that it panics on the first HTTPS request with "Expect
-# rustls-platform-verifier to be initialized". `lib.rs`'s `android_init` does
-# that at startup, and the Kotlin component that makes the calls lives in the
-# `org.rustls:rustls-platform-verifier` AAR (`app/build.gradle.kts`).
-#
-# This is not optional plumbing: without it the updater does not merely fail to
-# install an update, it takes the app down a second after launch, because the
-# panic lands on a tokio worker and a panicking worker aborts the process.
-# `jni` is what lets our own function take the Context argument, and its version
-# must match the one `rustls-platform-verifier` was built against — two copies
-# mean two incompatible `JObject` types and the call will not compile.
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
 rustls-platform-verifier = "0.7"
 
-# Windows only: reaching WebView2's settings to hand browser accelerators
-# (Ctrl+F find, …) to the page (`06-platform.md` §1, shortcuts).
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39"
 windows-core = "0.62"

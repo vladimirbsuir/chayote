@@ -1,27 +1,7 @@
-//! Case-insensitive tag clashes across devices (`07-sync-plan.md` §5.2,
-//! `03-data-model.md` §3.4).
-//!
-//! Tag names are unique among live tags, ignoring case, on the device and on
-//! the server alike. Each device enforces that against its own tags only, so
-//! two devices can each create "work" and "Work" under different ids. Before
-//! this, the second one could never sync: its push hit the server's unique
-//! index and retried for ever, and a pull of the other device's tag hit the
-//! local one and failed every cycle before a single note was pulled.
-//!
-//! The policy: **the tag already on the server wins.** It was there first
-//! (the server took it first), every device sees the same row, and so every
-//! device merges the same way. The local tag is folded into it: its note
-//! links move to the server's tag, those notes are queued so the server
-//! learns the new links, and the local tag is dropped — with a tombstone
-//! queued for it if the server ever held it.
-
 use super::merge::TAGS_ONLY_KEY;
 use super::RemoteTag;
 use crate::error::AppError;
 
-/// Folds the local tag `loser_id` into the server's `winner`, inside `tx`.
-/// `known_to_server` is whether the loser's id exists on the server, in
-/// which case its deletion must propagate as a tombstone.
 pub(super) fn merge_tag_into(
     tx: &rusqlite::Transaction<'_>,
     loser_id: &str,
@@ -44,7 +24,6 @@ pub(super) fn merge_tag_into(
         .optional()?
         .unwrap_or(0);
 
-    // The links cascade with the row; they are re-made below on the winner.
     tx.execute("DELETE FROM tags WHERE id = ?1", [loser_id])?;
     tx.execute(
         "UPDATE outbox SET sent_at = ?2 WHERE sent_at IS NULL AND entity = 'tag' AND entity_id = ?1",
@@ -75,9 +54,6 @@ pub(super) fn merge_tag_into(
             "INSERT OR IGNORE INTO note_tags (note_id, tag_id, created_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![note_id, winner.id, now],
         )?;
-        /* The note's tag set changed under it, and only the tag set: the
-        payload says so, so the push cannot mistake this for a document edit
-        and park a conflict against a text change made elsewhere. */
         let rev: i64 = tx.query_row("SELECT rev FROM notes WHERE id = ?1", [note_id], |row| {
             row.get(0)
         })?;
@@ -88,8 +64,6 @@ pub(super) fn merge_tag_into(
     Ok(())
 }
 
-/// The live local tag whose name clashes with `name` (any case), other than
-/// `id` itself.
 pub(super) fn local_clash(
     conn: &rusqlite::Connection,
     id: &str,
@@ -125,9 +99,6 @@ mod tests {
         }
     }
 
-    /// "work" here, "Work" pulled from the server under another id: the pull
-    /// lands instead of failing every cycle, the note keeps its tag (now the
-    /// server's), and the note is queued with a tags-only change.
     #[test]
     fn a_pulled_tag_that_clashes_by_case_absorbs_the_local_one() {
         let db = Arc::new(Database::open_in_memory().expect("memory db"));
@@ -187,7 +158,6 @@ mod tests {
         assert!(touched.tags && !touched.doc, "tags only: {note_payload}");
     }
 
-    /// A tag this device never pushed needs no tombstone.
     #[test]
     fn an_unpushed_loser_leaves_no_tombstone() {
         let db = Arc::new(Database::open_in_memory().expect("memory db"));

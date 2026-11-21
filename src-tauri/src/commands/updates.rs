@@ -7,29 +7,12 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::error::AppError;
 
-/// The update a check found, held between `updates_check` and `updates_install`.
-/// `Update` owns the URL and signature it was built from, so it cannot be
-/// reconstructed from a version string — and holding it is what makes the
-/// install verify against the *checked* artifact rather than against whatever
-/// the endpoint says a moment later.
-///
-/// **An install reads it, never consumes it.** It used to be `take()`n on the
-/// first press, so every outcome short of the process being replaced — Android
-/// asking for its install grant, a dropped connection, a cancelled confirmation
-/// — left the next press with nothing to install, and the tab printed "There is
-/// no update waiting to be installed" under a button offering exactly that.
-/// Only a new check replaces it.
 #[derive(Default)]
 pub struct PendingUpdate(std::sync::Mutex<Pending>);
 
 #[derive(Default)]
 struct Pending {
     update: Option<Update>,
-    /// Android: the package `update` was downloaded to, already verified. The
-    /// grant round trip (ADR-025) is the usual second press, and it should
-    /// install these bytes rather than fetch 20 MB again. Held in memory only,
-    /// so a restarted process downloads afresh rather than trusting a file it
-    /// did not verify itself.
     #[cfg(target_os = "android")]
     apk: Option<std::path::PathBuf>,
 }
@@ -38,16 +21,9 @@ struct Pending {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSummary {
     pub version: String,
-    /// RFC 3339, formatted for the reader rather than parsed anywhere.
     pub date: Option<String>,
 }
 
-/// Progress for the download, streamed so the tab can show a real bar rather
-/// than an indeterminate spinner over a 15 MB transfer.
-///
-/// A `Channel` rather than polling shared state: the frontend owns the progress
-/// display, and this keeps the transfer's start / length / finish events in
-/// order without the tab re-reading anything.
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", content = "data")]
 pub enum DownloadEvent {
@@ -70,7 +46,6 @@ pub async fn updates_check(
         date: found.date.map(|date| date.to_string()),
     });
     let mut state = lock(&pending)?;
-    /* A verified package is kept only while it is still the version on offer. */
     #[cfg(target_os = "android")]
     if version_of(&state.update) != version_of(&update) {
         state.apk = None;
@@ -79,16 +54,6 @@ pub async fn updates_check(
     Ok(summary)
 }
 
-/// Download, verify, and install.
-///
-/// The download and the verification are the plugin's on every platform
-/// (ADR-024, ADR-025): `download()` checks the minisign signature and the signed
-/// version before returning a byte. Only the last step differs, and only because
-/// `install_inner` is `UnsupportedOs` under `cfg(mobile)`.
-///
-/// Two definitions rather than one with a `cfg` block inside, because the two
-/// tails are genuinely different and a block expression would leave whichever
-/// platform did not need a line looking like dead code.
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn updates_install(
@@ -103,11 +68,6 @@ pub async fn updates_install(
     Ok(())
 }
 
-/// ADR-025. Same download and same verification as desktop; the install is ours.
-///
-/// A second press — after the grant screen, or after a dismissed confirmation —
-/// reuses the package the first one verified, and reports it to the tab as one
-/// finished transfer so the progress line does not sit at "0 B".
 #[cfg(target_os = "android")]
 #[tauri::command]
 pub async fn updates_install(
@@ -133,8 +93,6 @@ pub async fn updates_install(
             let bytes = download(&update, &on_event).await?;
             let path = write_apk(&app, &update, &bytes)?;
             let mut state = lock(&pending)?;
-            /* A check that ran during the download may have moved on to a
-            different version; then these bytes are not the ones on offer. */
             if version_of(&state.update) == Some(&update.version) {
                 state.apk = Some(path.clone());
             }
@@ -169,14 +127,6 @@ async fn download(update: &Update, on_event: &Channel<DownloadEvent>) -> Result<
         .map_err(network)
 }
 
-/// The updater, with the manifest key this platform must ask for.
-///
-/// Android is the reason this exists. `tauri-plugin-updater` has no Android
-/// target of its own — `target()` returns `None` — because it has no Android
-/// install. Its download path works regardless, and the manifest can carry an
-/// `android-aarch64` key that `target()` names explicitly (ADR-025). The spelling
-/// matches the plugin's own so the two manifests read alike: `aarch64` and
-/// `armv7`, not `arm64`.
 fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, AppError> {
     #[cfg_attr(not(target_os = "android"), allow(unused_mut))]
     let builder = app.updater_builder();
@@ -185,8 +135,6 @@ fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, AppError> {
     builder.build().map_err(network)
 }
 
-/// An x86 emulator has no shipped artifact, so its key is absent from the
-/// manifest and the check fails visibly rather than silently offering nothing.
 #[cfg(target_os = "android")]
 fn android_target() -> &'static str {
     if cfg!(target_arch = "aarch64") {
@@ -198,20 +146,6 @@ fn android_target() -> &'static str {
     }
 }
 
-/// Windows exits the process as part of installing and the installer takes over.
-/// Linux replaces the AppImage but keeps the old process running, so the restart
-/// is ours to do. macOS never reaches this — `app_info` reports no support
-/// there (`06-platform.md` §3.8).
-///
-/// A function rather than a `cfg` attribute at the call site, and returning `()`
-/// on every platform including Linux.
-///
-/// `AppHandle::restart` returns `!`, so a `cfg`-gated call at the call site
-/// leaves the `Ok(())` after it unreachable *on Linux only* — which passes clippy
-/// on a Windows machine and fails the Linux CI job. Declaring the return type
-/// `()` here moves the divergence inside the body, where `app.restart();` is a
-/// statement whose `!` coerces to `()`, and the caller's `Ok(())` is reachable
-/// again on both.
 #[cfg(all(desktop, target_os = "linux"))]
 fn restart_after_install(app: &AppHandle) {
     app.restart();
@@ -220,13 +154,6 @@ fn restart_after_install(app: &AppHandle) {
 #[cfg(all(desktop, not(target_os = "linux")))]
 fn restart_after_install(_app: &AppHandle) {}
 
-/// ADR-025: the Android install.
-///
-/// The plugin's `install_inner` cannot write the package anywhere Android will
-/// accept, so this hands the verified bytes to a Kotlin plugin registered in
-/// `setup` (`crate::register_android_installer`). Everything security-relevant
-/// has already happened by the time this runs: the bytes came from the
-/// configured endpoint and their signature verified in `download`.
 #[cfg(target_os = "android")]
 pub struct Installer(pub tauri::plugin::PluginHandle<tauri::Wry>);
 
@@ -256,30 +183,12 @@ async fn install_on_android(app: &AppHandle, path: &std::path::Path) -> Result<(
         .map_err(AppError::from_detail)?;
 
     match outcome.status.as_str() {
-        /* The session is committed and Android takes it from here, silently or
-        behind its own confirmation screen. `commit` is asynchronous — it
-        returns before the package is replaced — so this reply is the normal
-        one. It used to be an error, which flashed a failure under every update
-        that was in fact on its way, and stayed there if the reader dismissed
-        Android's confirmation. */
         "committed" => Ok(()),
-        /* `REQUEST_INSTALL_PACKAGES` is not granted. Not an error the user
-        caused and not a failure of the update: the tab says what to do, and
-        the next press retries the same verified bytes. */
         "needs-permission" => Err(AppError::UpdatePermissionRequired),
         other => Err(AppError::internal(format!("installer reported {other}"))),
     }
 }
 
-/// The APK goes in the cache directory, which is where the session reads it
-/// from. `PackageInstaller.openWrite` streams it in, so — unlike the
-/// `ACTION_INSTALL_PACKAGE` route — no `FileProvider` grant is needed and no
-/// other app can read the file.
-///
-/// The version is in the name so a stale file from an earlier attempt cannot be
-/// mistaken for this one, and so two attempts do not collide. Written beside its
-/// final name and renamed, so a process killed mid-write never leaves a
-/// truncated package under a name that looks complete.
 #[cfg(target_os = "android")]
 fn write_apk(
     app: &AppHandle,
@@ -305,10 +214,6 @@ fn package_dir(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
         .map_err(|err| AppError::internal(format!("no cache directory: {err}")))
 }
 
-/// Deletes the packages an earlier process downloaded. Run at startup, when none
-/// can be in use: the verified path lives in memory only, so a file that outlived
-/// its process is either the update now installed or one that was abandoned —
-/// about 20 MB each, and nothing else ever removed them.
 #[cfg(target_os = "android")]
 pub fn clear_stale_packages(app: &AppHandle) {
     let Ok(dir) = package_dir(app) else { return };
@@ -326,7 +231,6 @@ pub fn clear_stale_packages(app: &AppHandle) {
     }
 }
 
-/// The update the last check found — cloned, so a failed install can be retried.
 fn current(pending: &PendingUpdate) -> Result<Update, AppError> {
     lock(pending)?.update.clone().ok_or_else(|| {
         AppError::Validation(
@@ -342,11 +246,6 @@ fn lock(pending: &PendingUpdate) -> Result<std::sync::MutexGuard<'_, Pending>, A
         .map_err(|err| AppError::internal(format!("updater state poisoned: {err}")))
 }
 
-/// Every updater failure is a network failure from the user's point of view: the
-/// endpoint was unreachable, the manifest was absent, or the signature did not
-/// verify. `NETWORK` is the code that means "try again later"
-/// (`10-conventions.md` §6), and the detail goes to `details` and the log rather
-/// than into the sentence the user reads.
 pub(crate) fn network(err: tauri_plugin_updater::Error) -> AppError {
     AppError::Network(err.to_string())
 }

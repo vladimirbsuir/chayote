@@ -83,17 +83,11 @@ test.describe('formatting toolbar', () => {
     await page.keyboard.press('Enter');
     await page.keyboard.type('toolbar bullet');
     await settleEditor(page);
-    /* `Shift+Home` selects the line without running off into the block above:
-       walking left a fixed count overshoots short text and the spanning
-       selection makes the list toggle inapplicable, so the button disables. */
     await page.keyboard.press('Shift+Home');
     await settleEditor(page);
     await page.getByRole('button', { name: 'Bullet list' }).click();
     await expect(editor.locator('ul li').last()).toHaveText('toolbar bullet');
 
-    /* Tailwind's preflight clears `list-style` globally: the indent without a
-       marker is the only visible symptom, so the marker style itself is the
-       assertion rather than the node existing. */
     const bulletStyle = await editor
       .locator('ul')
       .last()
@@ -131,9 +125,6 @@ test.describe('formatting toolbar', () => {
     await page.getByRole('button', { name: 'Bold' }).click();
     await expect(editor.locator('strong', { hasText: 'undo me' })).toHaveCount(1);
 
-    /* Scoped to the typed mark: the fixture already carries a bold
-       "launch date" in its first paragraph, so an absolute count never
-       reaches zero. */
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(editor.locator('strong', { hasText: 'undo me' })).toHaveCount(0);
   });

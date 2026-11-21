@@ -3,59 +3,25 @@ import { Folder, Hash, Pin } from 'lucide-react';
 import { sanitizeSnippet } from '../lib/sanitize';
 import type { NoteRow } from '../types/ipc';
 
-/* One row of the note list: title, excerpt, relative timestamp, pinned
-   indicator, and an optional folder or tag chip (`05-ui-ux.md` §4). It receives
-   a `NoteSummary` and nothing else — never a document, because the list must not
-   load one (`02-architecture.md` §8, `03-data-model.md` §3.3).
-
-   Every card carries its own border and surface, with an 8 px gap from the
-   list's virtual rows around it: adjacent notes must read as separate cards,
-   not as one continuous block. The open card's border is the accent rather
-   than a second background, so it stays distinct from a merely hovered one
-   without adding a tint that would compete with the pin.
-
-   Metrics are copied from the prototype: 9/10 padding, 14 px title at 550,
-   13 px excerpt clamped to two lines, 12 px meta row. */
-
 const UNTITLED = 'Untitled';
 
 type NoteCardProps = {
   note: NoteRow;
   isOpen: boolean;
-  /** Already formatted by the caller, so every row in a render shares one clock
-      reading (`05-ui-ux.md` §6.5a). */
   timestamp: string;
-  /** Folder name for the chip, or `null` when unfiled. Only rendered when the
-      active selection is one that spans folders, matching the prototype. */
   folderName: string | null;
   showFolder: boolean;
   onOpen: (id: string) => void;
-  /** `05-ui-ux.md` §6.3a: the pin control on a card. Present on every selection but
-      Trash, where a trashed note's pin is not something the user can act on. */
   onTogglePin?: (id: string) => void;
-  /** A write is in flight for this card, so its pin control is disabled rather than
-      accepting a second press that would race the first. */
   pinPending?: boolean;
-  /** §6.2. Absent in the trash for `onDelete`, and in every live list for the other
-      two: a card offers the actions its selection can actually perform, so there is
-      never a control that would delete something permanently by accident. */
   onDelete?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDestroy?: (id: string) => void;
-  /** Whether this row's menu is the list's open one. The state lives in the list —
-      per-card state lets two holds open two menus at once — so this is a read-only
-      flag for the toggle below. */
   menuOpen: boolean;
-  /** Open this row's menu, measured from the anchor. Always opens; the card
-      decides open versus close. */
   onOpenMenu: (id: string, anchor: HTMLElement) => void;
   onCloseMenu: () => void;
 };
 
-/* `memo` is not premature here: this is the component that renders once per
-   visible row, in a list virtualised to a few dozen live instances over 10 000
-   notes. Without it every 60 s clock tick re-renders every mounted card. The
-   props are all primitives or a stable summary reference. */
 export const NoteCard = memo(function NoteCard({
   note,
   isOpen,
@@ -76,20 +42,12 @@ export const NoteCard = memo(function NoteCard({
   const hasRowActions =
     onDelete !== undefined || onRestore !== undefined || onDestroy !== undefined;
 
-  /* A press that opened the menu via long-press is still a press: the release
-     after the hold synthesises a click, and a click opens the note — covering
-     the menu the user just asked for. The flag eats exactly that one. It is set
-     where the menu opens from `contextmenu` and cleared wherever the menu
-     closes, so a right-click followed by `Esc` leaves the next real click alone. */
   const suppressOpenRef = useRef(false);
   const handleMenuClose = (): void => {
     suppressOpenRef.current = false;
     onCloseMenu();
   };
 
-  /* The card decides open versus close — the list only sets — so a second press
-     on the same row closes through `onCloseMenu` and a press on another row
-     replaces. */
   const toggleMenu = (anchor: HTMLElement): void => {
     if (menuOpen) {
       handleMenuClose();
@@ -106,9 +64,6 @@ export const NoteCard = memo(function NoteCard({
       data-testid="note-card"
       data-note-id={note.id}
       onClick={() => {
-        /* A press that opened the menu via long-press ends here too: the release
-           after the hold synthesises a click, and opening the note under a menu
-           the user just asked for would cover it. */
         if (suppressOpenRef.current) {
           suppressOpenRef.current = false;
           return;
@@ -120,30 +75,15 @@ export const NoteCard = memo(function NoteCard({
           event.preventDefault();
           onOpen(note.id);
         }
-        /* §7: `ContextMenu` opens the focused row's menu — the application key
-           on a Windows keyboard, and the standard way to ask for a menu. It is
-           the keyboard path to the row's actions: there is no menu button. */
         if (event.key === 'ContextMenu') {
           if (!hasRowActions) return;
           event.preventDefault();
           toggleMenu(event.currentTarget);
         }
       }}
-      /* §2.2 and §9: right-click on desktop and long-press on touch — a hold
-         fires `contextmenu` on the device — reach the row menu. `preventDefault`
-         is what stops the hold from becoming a text selection instead. Rows
-         with no actions have no menu to open.
-         The `select-none` + `touch-callout` pair on the row is the other half:
-         on a text-rich card the hold is a selection gesture and no `contextmenu`
-         fires at all — measured on the device, where the hold selected text on
-         the old build and opened nothing on the new one until the row stopped
-         being selectable. Copying happens in the editor, not in the list, so
-         nothing specified is lost. */
       onContextMenu={(event) => {
         if (!hasRowActions) return;
         event.preventDefault();
-        /* Only a fresh open can precede a release click: when this row's menu is
-           already up the press closes it, and no click follows that. */
         if (!menuOpen) suppressOpenRef.current = true;
         toggleMenu(event.currentTarget);
       }}
@@ -154,12 +94,6 @@ export const NoteCard = memo(function NoteCard({
       }`}
     >
       <div className="flex items-baseline gap-[6px]">
-        {/* The pin is a control on a pinned note, and a plain icon where there
-            is nothing to toggle — the trash, where a deleted note's pin is not
-            something the user can act on. A disabled button would read as a
-            control that is broken rather than as one that does not exist here.
-            Unpinned rows carry no pin: pinning runs from the row menu, the
-            editor and the shortcut instead. */}
         {onTogglePin !== undefined ? (
           note.isPinned ? (
             <PinButton note={note} pending={pinPending} onTogglePin={onTogglePin} pinned />
@@ -200,17 +134,6 @@ export const NoteCard = memo(function NoteCard({
   );
 });
 
-/**
- * A search result shows the sentence that matched rather than the note's
- * opening (`05-ui-ux.md` §6.5), with FTS5's `<mark>` around the terms.
- *
- * The snippet is backend-supplied markup: `plain_text` is whatever the user
- * typed and FTS5 escapes none of it, so a note containing a script tag produces
- * a snippet containing a script tag. It goes through the snippet allowlist
- * before insertion, and only `mark` survives it.
- *
- * The highlight's four values are the prototype's `.note-card mark` rule.
- */
 function Snippet({ snippet }: { snippet: string }) {
   return (
     <p
@@ -235,17 +158,12 @@ function PinButton({
   return (
     <button
       type="button"
-      /* `aria-pressed` rather than a label that changes with the state: the control
-         is one thing that is on or off, and a screen reader announcing
-         "Pin"/"Unpin" forces the user to infer which is which. */
       aria-pressed={pinned}
       aria-label={`${pinned ? 'Unpin' : 'Pin'} ${note.title.length === 0 ? UNTITLED : note.title}`}
       data-testid="pin-toggle"
       data-note-id={note.id}
       disabled={pending || onTogglePin === undefined}
       onClick={(event) => {
-        /* The card is also a click target, and a pin that also opened the note would
-           make the control useless on a row the user was trying to read. */
         event.stopPropagation();
         onTogglePin?.(note.id);
       }}

@@ -1,21 +1,10 @@
 use serde::Serialize;
 
-/// The error contract. `10-conventions.md` §6.
-///
-/// Every command returns `Result<T, AppError>`. `code` is stable API: adding
-/// one is safe, changing or removing one is a breaking change (R7).
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("Something went wrong while reading or writing your notes.")]
     Db(#[from] rusqlite::Error),
 
-    /// `DbOpen` has no constructor yet: it is here because the frontend
-    /// will branch on its code the day a command can produce it, and the
-    /// constructor arrives with that milestone. `NETWORK` is constructed by
-    /// the sync engine. Dropped variants are not kept for history: `CONFLICT`
-    /// never fired (conflicts resolve through the conflicts table and the
-    /// Sync tab, not through an error), and `UNAUTHENTICATED` died with the
-    /// no-accounts decision — see `07-sync-plan.md` §7.
     #[allow(dead_code)]
     #[error("Your notes could not be read. Try again.")]
     DbOpen(String),
@@ -38,19 +27,10 @@ pub enum AppError {
     #[error("Could not reach the sync server.")]
     Network(String),
 
-    /// Android's `REQUEST_INSTALL_PACKAGES` is not granted yet (ADR-025).
-    ///
-    /// Its own code rather than a `VALIDATION` one, because the frontend reads
-    /// it to say a sentence about this and nothing else, and to keep offering
-    /// the button rather than treating the update as failed. Adding a code is
-    /// safe (`10-conventions.md` §6); this one is new in ADR-025.
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     #[error("Android has not been allowed to install updates for Chayote yet.")]
     UpdatePermissionRequired,
 
-    /// The detail is for `details` and the log. It used to be the message as
-    /// well, so a reader saw "stored id is not a UUID" or "database lock
-    /// poisoned" where `10-conventions.md` §6 promises plain words.
     #[error("Something went wrong. Try again, and restart Chayote if it keeps happening.")]
     Internal(String),
 }
@@ -75,16 +55,11 @@ impl AppError {
         Self::Internal(detail.to_string())
     }
 
-    /// The same constructor under the name the Android call sites read best,
-    /// where `internal` would look like a claim that something is broken rather
-    /// than a mapping of a foreign error into the contract.
     #[cfg(target_os = "android")]
     pub fn from_detail(detail: impl std::fmt::Display) -> Self {
         Self::Internal(detail.to_string())
     }
 
-    /// Technical detail, if any. `Display` stays user-facing by contract
-    /// (R7); this is what logs and the sync status store.
     pub fn details(&self) -> Option<String> {
         match self {
             Self::Db(source) => Some(source.to_string()),
@@ -96,8 +71,6 @@ impl AppError {
         }
     }
 
-    /// One line for logs and the sync `last_error`: code plus detail, so a
-    /// failure is diagnosable without reproducing it.
     pub fn log_line(&self) -> String {
         match self.details() {
             Some(detail) => format!("{}: {detail}", self.code()),
@@ -106,9 +79,6 @@ impl AppError {
     }
 }
 
-/// The wire shape: `{ code, message, details? }`.
-/// `message` is user-facing and plain; technical detail goes in `details`
-/// and the log, never in what the user reads.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WireError {

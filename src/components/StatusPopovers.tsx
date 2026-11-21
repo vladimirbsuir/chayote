@@ -6,9 +6,6 @@ import type { FolderNode } from '../types/folder';
 import type { TagWithCount } from '../types/tag';
 import type { Uuid } from '../types/note';
 
-/* The "no folder" choice, worded once: it labels the picker's first option and
-   the settings dialog's button for the same value, so the two can never read
-   as two different meanings. */
 export const NONE_LABEL = 'None';
 
 
@@ -53,9 +50,6 @@ function Popover({ anchor, placement, label, onClose, children }: PopoverProps):
       ref={ref}
       data-testid="status-popover"
       style={{ top: placement.top, left: placement.left }}
-      /* Option labels are chrome, not content: a hold on one must pick it,
-         never select its text. The tag editor's filter input opts back in with
-         `select-text`, so it keeps its selection toolbar. */
       className="fixed z-50 w-[260px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-pop)] select-none"
     >
       <div className="border-b border-[var(--border)] px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">
@@ -67,13 +61,8 @@ function Popover({ anchor, placement, label, onClose, children }: PopoverProps):
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  FolderPicker
- * ------------------------------------------------------------------ */
-
 export type FolderPickerProps = {
   anchor: HTMLElement;
-  /** Viewport coordinates, measured by the caller in its click handler. */
   placement: { top: number; left: number };
   folders: FolderNode[];
   current: Uuid | null;
@@ -93,9 +82,6 @@ export function FolderPicker({
   const [query, setQuery] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
 
-  /* Case-insensitive substring, like the tag editor's filter: a large library
-     is narrowed by typing rather than scrolled. The "None" choice filters by
-     its own label too, so an active filter never shows a stale first row. */
   const needle = query.trim().toLowerCase();
   const matches =
     needle.length === 0
@@ -115,8 +101,6 @@ export function FolderPicker({
           onChange={(event) => {
             setQuery(event.target.value);
           }}
-          /* Explicitly selectable: the popover root carries `select-none`, and
-             a field the user types in must keep its selection toolbar. */
           className="h-[26px] w-full rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text)] outline-none select-text"
         />
       </div>
@@ -126,10 +110,6 @@ export function FolderPicker({
         aria-label="Folder"
         data-testid="folder-picker-list"
         tabIndex={0}
-        /* Capped so the whole panel stays within the height `popoverPlacement`
-           assumes (280): label + filter + list must fit above the anchor with
-           room to spare, or the panel would cover the button that toggles it —
-           and then the list could only be dismissed by clicking elsewhere. */
         className="max-h-[190px] overflow-y-auto p-1 outline-none"
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -152,10 +132,6 @@ export function FolderPicker({
               <Option
                 id={null}
                 name={NONE_LABEL}
-                /* Depth one with no icon, exactly like a top-level folder: the
-                   old row carried a folder glyph none of the other rows has,
-                   which read as emphasis on the default rather than a choice
-                   among equals. */
                 depth={1}
                 selected={current === null}
                 onPick={onPick}
@@ -195,8 +171,6 @@ function Option({
     <div
       role="option"
       aria-selected={selected}
-      /* `id === null` for "no folder", which is a real option and must not collide
-         with a folder id in the DOM. */
       data-testid="folder-picker-option"
       data-folder-id={id ?? 'none'}
       tabIndex={-1}
@@ -222,19 +196,11 @@ function Option({
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  TagEditor
- * ------------------------------------------------------------------ */
-
 export type TagEditorProps = {
   anchor: HTMLElement;
-  /** Viewport coordinates, measured by the caller in its click handler. */
   placement: { top: number; left: number };
   tags: TagWithCount[];
   selected: Uuid[];
-  /** Resolves a typed name to a tag, creating it if it does not exist. §6.4: "A tag
-      is created by typing a new name into the tag editor; existing names complete.
-      Case-insensitive match, normalised to the first-created spelling." */
   onToggle: (tagId: Uuid) => void;
   onCreate: (name: string) => Promise<void>;
   onClose: () => void;
@@ -252,9 +218,6 @@ export function TagEditor({
   const [query, setQuery] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
 
-  /* Case-insensitive, per §6.4. The match is on the typed text so `work` completes
-     `Work`, and the tag keeps its first-created spelling because the backend
-     returns the existing row rather than making a new one. */
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (needle.length === 0) return tags;
@@ -284,11 +247,6 @@ export function TagEditor({
               event.preventDefault();
               const name = query.trim();
               if (name.length === 0) return;
-              /* An exact match toggles rather than creates: typing the name of a tag
-                 that already exists is a request to add it, not to add a second copy
-                 of it. §6.4 says the case-insensitive match is normalised to the
-                 first-created spelling, which is the backend's job — asking it to
-                 create the same name again would be asking for a duplicate. */
               if (exact !== null) {
                 onToggle(exact.id);
                 setQuery('');
@@ -299,8 +257,6 @@ export function TagEditor({
               });
             }
           }}
-          /* Explicitly selectable: the popover root carries `select-none`, and a
-             field the user types in must keep its selection toolbar. */
           className="h-[26px] w-full rounded-[var(--r-input)] border border-[var(--border-strong)] bg-[var(--surface)] px-2 text-[13px] text-[var(--text)] outline-none select-text"
         />
       </div>

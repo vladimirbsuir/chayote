@@ -1,23 +1,3 @@
-// A command-line driver for the app on a connected Android phone, for agent
-// sessions and quick manual checks (docs/11-verification.md §3.5b). Elements are
-// found over the WebView devtools protocol; touches go through real Android
-// input (`adb shell input`), so they arrive as touch pointers exactly like a
-// finger — mouse clicks over CDP would hide touch-only bugs.
-//
-//   node scripts/device.mjs start [--clear]   launch (or relaunch) the app
-//   node scripts/device.mjs ui [filter]        visible controls with @refs
-//   node scripts/device.mjs tap <target>       tap the center of a target
-//   node scripts/device.mjs long <target>      long-press (700 ms)
-//   node scripts/device.mjs drag <from> <to> [ms]  touch drag
-//   node scripts/device.mjs type <text>        insert text into the focus
-//   node scripts/device.mjs key back|enter|del press a hardware/IME key
-//   node scripts/device.mjs shot [name] [width]  screenshot of the whole phone
-//                                              screen, scaled (default 540 px)
-//   node scripts/device.mjs eval <js>          evaluate in the page, print JSON
-//
-// A target is `@N` (a ref printed by `ui`), `x,y` (CSS pixels), `text=…`
-// (visible text), `role=button[name]`, or any CSS selector.
-
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
@@ -75,14 +55,12 @@ async function connect() {
       }
       await browser.close();
     } catch {
-      // The socket comes up a moment after the process.
     }
     await sleep(300);
   }
   throw new Error('the WebView devtools socket did not come up');
 }
 
-/** CSS pixel → device pixel (the WebView fills the screen edge to edge). */
 async function scaleOf(page) {
   return page.evaluate(() => window.devicePixelRatio);
 }
@@ -122,7 +100,6 @@ async function touch(page, ...points) {
   return points.map(({ x, y }) => [Math.round(x * scale), Math.round(y * scale)]);
 }
 
-/** The visible controls and text of the page, one line each, with refs. */
 async function dump(page, filter) {
   const lines = await page.evaluate((needle) => {
     const out = [];
@@ -255,7 +232,6 @@ async function main() {
         process.exitCode = 2;
     }
   } finally {
-    // Disconnect only: closing would not kill the app, but be explicit.
     await browser.close().catch(() => undefined);
   }
 }
