@@ -1039,17 +1039,7 @@ async fn connect(conn_str: &str) -> Result<Client, AppError> {
             });
             Ok(client)
         } else {
-            let mut roots = rustls::RootCertStore::empty();
-            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let mut config = rustls::ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth();
-            if mode == SslMode::Require {
-                config
-                    .dangerous()
-                    .set_certificate_verifier(std::sync::Arc::new(NoVerify));
-            }
-            let tls = tokio_postgres_rustls::MakeRustlsConnect::new(config);
+            let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config(mode)?);
             let (client, connection) = tokio_postgres::connect(owned.as_str(), tls)
                 .await
                 .map_err(pg_error)?;
@@ -1062,6 +1052,24 @@ async fn connect(conn_str: &str) -> Result<Client, AppError> {
     tokio::time::timeout(CONNECT_TIMEOUT, dial)
         .await
         .map_err(|_| network("connection timed out after 15 s"))?
+}
+
+fn tls_config(mode: SslMode) -> Result<rustls::ClientConfig, AppError> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let mut config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|err| AppError::internal(format!("TLS setup failed: {err}")))?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    if mode == SslMode::Require {
+        config
+            .dangerous()
+            .set_certificate_verifier(Arc::new(NoVerify));
+    }
+    Ok(config)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2269,6 +2277,14 @@ mod tests {
             ssl_mode("postgresql://h/db?connect_timeout=10&sslmode=disable"),
             SslMode::Disable
         );
+    }
+
+    #[test]
+    fn tls_config_builds_for_every_encrypted_mode() {
+        for mode in [SslMode::Require, SslMode::VerifyFull] {
+            let config = tls_config(mode).expect("TLS config builds");
+            assert!(!config.crypto_provider().cipher_suites.is_empty());
+        }
     }
 
     #[test]

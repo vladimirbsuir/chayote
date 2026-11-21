@@ -32,6 +32,14 @@ implementation. There are no accounts: the connection string is the
 credential, and sync is settings-gated rather than feature-flagged — a user
 who never configures it runs exactly the v1 build.
 
+The wire is TLS unless the string says `sslmode=disable`: `tokio-postgres`
+over `rustls` with the bundled `webpki-roots`. The `rustls` crypto provider
+is `ring`, passed to `ClientConfig::builder_with_provider` rather than left
+for `rustls` to infer from crate features. Inference panics when more than
+one provider is compiled in, and `tauri-plugin-updater` already compiles in
+`ring`; `rustls` is also built without its default features, so `aws-lc-rs`
+is not in the dependency tree at all (`11-verification.md` §4.1e).
+
 ## 3. Phase plan
 
 | Phase | Scope | Status |
