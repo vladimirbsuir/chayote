@@ -611,34 +611,47 @@ fn empty_trash_removes_only_soft_deleted_notes() {
 }
 
 #[test]
-fn destroy_refuses_a_note_that_has_never_synced() {
-    let f = fixture("destroy-guard");
+fn destroy_removes_a_note_that_never_synced_and_queues_its_tombstone() {
+    let f = fixture("destroy-unsynced");
     let repo = notes(&f.db);
+    let deletes = "SELECT COUNT(*) FROM outbox WHERE op = 'delete' AND base_rev = 0";
 
     let created = repo.create(None).expect("create");
-    let err = repo.destroy(&created.summary.id).expect_err("refused");
-    assert_eq!(err.code(), "VALIDATION");
-    assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 1);
-    assert!(repo.get(&created.summary.id).is_ok());
+    repo.soft_delete(&created.summary.id).expect("soft delete");
+    let before = scalar(&f.db, deletes);
+    repo.destroy(&created.summary.id)
+        .expect("destroy without sync");
 
-    mark_synced(&f.db, &created.summary.id);
-    repo.destroy(&created.summary.id).expect("goes after sync");
+    assert_eq!(
+        repo.get(&created.summary.id).unwrap_err().code(),
+        "NOT_FOUND"
+    );
+    assert_eq!(
+        scalar(&f.db, deletes),
+        before + 1,
+        "a later first sync still tells the server"
+    );
 }
 
 #[test]
-fn empty_trash_leaves_never_synced_notes_behind() {
-    let f = fixture("empty-trash-guard");
+fn empty_trash_removes_synced_and_never_synced_notes() {
+    let f = fixture("empty-trash-all");
     let repo = notes(&f.db);
+    let deletes = "SELECT COUNT(*) FROM outbox WHERE op = 'delete'";
 
     let synced = repo.create(None).expect("synced");
     let fresh = repo.create(None).expect("fresh");
+    let kept = repo.create(None).expect("kept");
     repo.soft_delete(&synced.summary.id).expect("soft delete");
     repo.soft_delete(&fresh.summary.id).expect("soft delete");
     mark_synced(&f.db, &synced.summary.id);
+    let before = scalar(&f.db, deletes);
 
-    assert_eq!(repo.empty_trash().expect("empty"), 1);
+    assert_eq!(repo.empty_trash().expect("empty"), 2);
     assert!(repo.get(&synced.summary.id).is_err());
-    assert!(repo.get(&fresh.summary.id).is_ok());
+    assert!(repo.get(&fresh.summary.id).is_err());
+    assert!(repo.get(&kept.summary.id).is_ok());
+    assert_eq!(scalar(&f.db, deletes), before + 2);
 }
 
 #[test]

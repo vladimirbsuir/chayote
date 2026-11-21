@@ -35,8 +35,88 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 025 | Android keeps the Tauri updater's check and download, and supplies its own install | Accepted |
 | 026 | The title is only what was typed in the title field | Accepted |
 | 027 | Sync merges the fields each device touched; the server's copy wins a tag-name or folder-cycle clash | Accepted |
+| 028 | The trash empties whether or not the note ever synced | Accepted |
+| 029 | One desktop instance, and a startup failure that says why | Accepted |
 
 ---
+
+## ADR-029 - One desktop instance, and a startup failure that says why
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Implements:** `06-platform.md` §3.2
+
+**Context.** `06-platform.md` §3.2 required a second launch to focus the
+existing window, and nothing implemented it. Two processes each held their own
+connection and their own sync service over one database: whichever
+whole-document autosave landed last overwrote the other window's edit, and both
+sync engines drained one outbox at once. Separately, a database that could not
+be opened made the app vanish. Tauri 2.12 does not return an error from
+`setup` through `build()`; it panics ("Failed to setup app"), and the release
+profile's `panic = "abort"` with `windows_subsystem = "windows"` left no window,
+no console and no message.
+
+**Decision.**
+
+1. `tauri-plugin-single-instance` on desktop, registered first so a second
+   process stops before any other plugin or the database starts. The running
+   instance unminimizes, shows and focuses its window.
+2. A failure to find the data folder or open the database is handled inside
+   `setup`: the message goes to stderr and to a native error dialog naming the
+   folder and the reason, then the process exits with code 1. The dialog is
+   `rfd`, the crate `tauri-plugin-dialog` is built on, called directly.
+
+The user approved adding both dependencies on 2026-11-21.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| `tauri-plugin-dialog` for the error | It exists to give the webview a dialog API, which needs a capability and a JS binding nothing here uses; the failure happens before the webview has anything to say. Its blocking call is also documented to deadlock on the main thread, which is where `setup` runs. |
+| Return the error from `setup` and report it after `build()` | That branch is never reached: Tauri panics on a setup error instead of returning it. |
+| A lock file in the data folder instead of the plugin | Detects the second instance but cannot hand focus to the first, and a crash leaves a stale lock to explain. |
+
+**Consequences.**
+
+- The single-instance handshake is a local channel (`06-platform.md` §1 names
+  it per platform), the one exception to "no local socket". Nothing listens on
+  the network.
+- `AppError::DbOpen`, unused until now, carries the folder-creation failure.
+- Android is unchanged: one process per app is the platform's rule already, and
+  a startup failure there is reported to logcat only.
+
+## ADR-028 - The trash empties whether or not the note ever synced
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Amends:** `07-sync-plan.md` §5.4, `02-architecture.md` §7
+
+**Context.** Sync Phase E refused a permanent delete while a note's `rev` was 0,
+and `notes_empty_trash` skipped such notes, so "a never-pushed note cannot vanish
+from another device without ever existing there". Without sync every note has
+`rev` 0, so a user who never configured sync could not delete anything
+permanently: the button answered "sync first", and Empty trash left every note
+where it was. `02-architecture.md` §7 had already named this outcome as the
+reason the rule waited for sync, and then it shipped anyway. The user reported
+it as wrong on 2026-11-21.
+
+**Decision.** `notes_destroy` and `notes_empty_trash` remove any trashed note,
+synced or not. Each removal still appends its `delete` outbox row in the same
+transaction (R5), with the note's current `rev` as its base. If sync is
+configured later, or the note already exists on a server this device switched
+to (whose `rev` the switch reset to 0), the drain pushes that tombstone and the
+note stays gone everywhere instead of coming back on the next pull.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Keep the guard only while sync is configured | A note that is not yet pushed exists on no other device, so there is nothing for the guard to protect; and a configured but failing server would lock the trash again. |
+| Drop the outbox row for a never-pushed note | Saves a tombstone write on first sync, but after a server switch `rev` 0 no longer means "never on a server", and a missing tombstone would let the pull resurrect it. |
+
+**Consequences.**
+
+- The "This note has not synced yet" `VALIDATION` error is gone; Empty trash's
+  count is every note it removed.
+- A first sync after deleting notes offline pushes tombstones for notes the
+  server never had. They are a few dozen bytes each (§5.4 keeps tombstones
+  indefinitely anyway) and are applied as no-ops by every other device.
 
 ## ADR-027 - Sync merges the fields each device touched; the server's copy wins a tag-name or folder-cycle clash
 

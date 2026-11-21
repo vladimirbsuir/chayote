@@ -19,8 +19,9 @@ Tauri 2 owns both platforms. The differences below are platform-specific behavio
 This is a deliberate reduction in rigour, taken because testing the floor means pinning an old WebView on a real device and holding that combination for a platform v1 will not otherwise be revisited. The rule above still stands as a *constraint* — no syntax or API newer than the oldest supported WebView should be used — and `color-mix()` is the one place already close to the line, which is why ADR-019 notes that `ConfirmDialog` used it before M6 did. What is gone is the **test**, not the constraint. A user on a genuinely old WebView may find a rendering difference that no check in this repository would have caught; that is the accepted cost, recorded rather than hidden.
 | Window chrome | Native decorations in v1. A custom title bar is a deliberate simplification; see `09-decisions.md` ADR-009. |
 | Min OS | Windows 10 1809, macOS 10.15, Ubuntu 20.04, Android 8.0 (API 26) |
-| IPC | `invoke` only. No HTTP server, no local socket, no port. |
+| IPC | `invoke` only. No HTTP server, no local socket, no port. The one exception is the single-instance handshake on desktop (§3.2), which never leaves the machine: a named mutex and a window message on Windows, a D-Bus session-bus name on Linux, a Unix socket file on macOS. |
 | Startup | Window is created hidden; `show()` after the frontend's first paint, to avoid a white flash. |
+| Startup failure | If the data folder or the database cannot be opened, a native error dialog names the folder and the reason, and the app exits with code 1 having changed nothing. Desktop only; on Android the reason goes to logcat (ADR-029). |
 
 The app is offline. v1 makes zero network requests. This is a verifiable property, not an aspiration — CI should assert that no `fetch`/`XMLHttpRequest`/`WebSocket` reaches a remote origin.
 
@@ -59,7 +60,7 @@ WAL sidecar files (`chayote.db-wal`, `chayote.db-shm`) live next to the database
 | `Focused(false)` | Flush the autosave |
 | `Resized` / `Moved` | Debounced 500 ms, persist geometry to settings |
 | `ThemeChanged` (OS) | Update the effective theme if the user selected System |
-| Second instance launched | Focus the existing window; do not start a second process |
+| Second instance launched | Focus the existing window; do not start a second process. `tauri-plugin-single-instance`, registered before every other plugin, hands the launch to the running process, which unminimizes, shows and focuses `main`; the second process exits with code 0 before it opens the database (ADR-029) |
 
 ### 3.3 Clipboard
 
