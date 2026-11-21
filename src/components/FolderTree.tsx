@@ -16,21 +16,6 @@ import type { Selection } from '../types/ipc';
 import type { FolderNode } from '../types/folder';
 import type { Uuid } from '../types/note';
 
-/* The folder tree: recursive, collapsible, keyboard navigable
-   (`05-ui-ux.md` §10), and draggable to re-parent and reorder (§6.3).
-
-   Two decisions are load-bearing:
-
-   **Roving tabindex.** Every row is a `treeitem`, so a depth-10 tree would put
-   ten-plus stops in the tab order and a keyboard user would tab through the whole
-   structure to reach the note list. The tree is one tab stop; arrows move within
-   it. This is the WAI-ARIA tree pattern and it is what §10 asks for.
-
-   **A flat row list underneath a recursive render.** The DOM stays nested, which
-   is what `role="tree"` requires, but navigation reads from the flattened list in
-   `folderRows.ts`. Recursion and keyboard navigation are different problems and
-   solving them in one function makes both harder to test. */
-
 type FolderTreeProps = {
   nodes: FolderNode[] | undefined;
   counts: Map<string, number>;
@@ -38,61 +23,30 @@ type FolderTreeProps = {
   collapsed: Uuid[];
   onSelect: (next: Selection) => void;
   onToggle: (id: Uuid) => void;
-  /** §6.3: creating a folder is an inline text input in place. The parent is
-      `null` for a root folder, or the focused folder to nest inside it. */
   onCreate: (name: string, parentId: Uuid | null) => Promise<void>;
   onRename: (id: Uuid, name: string) => Promise<void>;
   onDelete: (id: Uuid) => Promise<void>;
-  /** §6.3: drag to re-parent and reorder. `position` is sibling-local and the
-      backend densifies it (`03-data-model.md` §3.2), so this only supplies the
-      parent and the slot index. */
   onMove: (id: Uuid, newParentId: Uuid | null, position: number) => Promise<void>;
-  /** Rejected names come back as `VALIDATION` and stay in the input with the
-      message beside it (§8, "Keep editing"), rather than closing the editor. */
   onError?: (message: string) => void;
-  /** Whether the root-level create input is open. Held by the sidebar, because
-      the `+` that opens it lives in the section header above the tree. */
   creatingRoot: boolean;
   onCreatingRootChange: (open: boolean) => void;
 };
 
-/** What a *row* is currently editing: a rename, or a new child of that row. One
-    slot rather than a per-row flag, because there can only be one inline editor
-    at a time — a second one would be a second focus target competing for the same
-    keystroke.
-
-    The root-level create input is deliberately *not* in here. Its trigger is the
-    `+` in the section header, which lives above the tree in `Sidebar`, so its
-    open state is owned there and arrives as `creatingRoot`. Two owners for one
-    editor is how an input ends up open in two places, or open with nobody able to
-    close it. */
 type Editing =
   | { kind: 'rename'; id: Uuid; name: string }
   | { kind: 'create'; parentId: Uuid; name: string }
   | null;
 
-/** Everything `commit` can write. `createRoot` is separate from `create` with a
-    null parent because the two restore differently on rejection: a row editor is a
-    slot in `editing`, while the root input's text is its own state because its open
-    flag belongs to the sidebar. Folding them together would force one of the two
-    restore paths to be wrong. */
 type CommitTarget =
   | { kind: 'rename'; id: Uuid; name: string }
   | { kind: 'create'; parentId: Uuid; name: string }
   | { kind: 'createRoot'; name: string };
 
-/** Where a drag currently is. `zone` is which band of the target row the pointer is
-    over — `before`/`after` reorder among siblings, `inside` makes the row the new
-    parent. A `null` zone means the pointer is over a row that cannot accept this
-    folder, which is what draws the "not allowed" cursor instead of a drop line. */
 type DragState = { draggedId: Uuid; targetId: Uuid | null; zone: DropZone | null };
 
 const MENU_WIDTH = 168;
 const MENU_ESTIMATED_HEIGHT = 120;
 
-/* §6.3: re-parenting by drag is mouse-only in v1. A function of the live media
-   rather than a constant, because tests pin both answers by stubbing
-   `matchMedia` per case. */
 function isCoarsePointer(): boolean {
   return (
     typeof window !== 'undefined' &&
@@ -122,16 +76,7 @@ export function FolderTree({
     null,
   );
 
-  /* Measured here, in the handler that opens the menu — the `NoteCard` contract.
-     The tree scrolls inside an `overflow` container, so a menu opening downward
-     past the container's edge is clipped; flip upward when there is no room
-     below, against the viewport rather than the row. */
   const openMenu = (id: Uuid, anchor: HTMLElement): void => {
-    /* Opening a menu ends any drag UI: a drag in progress owns the pointer, and a
-       menu opening over it means the gesture became something else — on touch, a
-       hold that started a drag before the menu's re-render withdrew `draggable`.
-       Without this the row stays dimmed and untappable with no `dragend` ever
-       coming to clear it. */
     setDrag(null);
     const rect = anchor.getBoundingClientRect();
     const up =
@@ -139,9 +84,6 @@ export function FolderTree({
     setMenu({
       id,
       placement: {
-        /* Clamped so the estimate always lands inside the viewport — the same
-           13 px clip the note rows hit in the trash-restore flow: moving the
-           top above the row does not move the box's bottom edge with it. */
         top: Math.min(
           Math.max(8, up ? rect.top - 4 : rect.bottom + 4),
           window.innerHeight - MENU_ESTIMATED_HEIGHT - 8,
@@ -154,14 +96,8 @@ export function FolderTree({
     suppressOpenRef.current = false;
     setMenu(null);
   };
-  /* Which row is being dragged, which row is under the pointer, and which of the
-     three bands of it. Held here rather than read from the event on drop, because
-     `dragover` fires many times and the drop event carries only the dragged id. */
   const [drag, setDrag] = useState<DragState | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
-  /* The root create input's text, held here even though its open state lives in
-     `Sidebar`, because the input itself is rendered here and a value that lived
-     with its flag would have to be lifted for no other reason. */
   const [rootName, setRootName] = useState('');
   const [pendingDelete, setPendingDelete] = useState<{
     id: Uuid;
@@ -169,15 +105,6 @@ export function FolderTree({
     descendants: number;
   } | null>(null);
 
-  /* The focused row is the tree's single tab stop, and it is *derived* rather
-     than stored: a requested row that has been deleted, or hidden by collapsing
-     an ancestor, is not in the list and cannot hold the tab stop. Falling back to
-     the selected row and then to the first keeps focus inside the tree instead of
-     dropping it to the document body, where `ArrowDown` would stop working.
-
-     Deriving it during render rather than correcting it in an effect matters:
-     an effect that repairs state after a render where the wrong row held
-     `tabIndex={0}` would show the tab stop on two rows for one frame. */
   const selectedId = selection.kind === 'folder' ? selection.id : null;
   const [requestedId, setRequestedId] = useState<Uuid | null>(selectedId);
 
@@ -190,30 +117,17 @@ export function FolderTree({
 
   const rowRefs = useRef(new Map<Uuid, HTMLDivElement>());
 
-  /* Move the tab stop *and* the DOM focus. Both, because the two can diverge: a
-     key press decides the next row and must focus it, while a focus that arrives
-     from a click or from assistive technology has already happened and only needs
-     the tab stop to follow it. */
   const focusRow = (id: Uuid): void => {
     setRequestedId(id);
     rowRefs.current.get(id)?.focus();
   };
 
-  /* §6.3: empty input cancels, so both the create and the rename editor close on
-     a blank name without a round trip. The backend would refuse it with
-     `VALIDATION` either; checking here is what makes `Esc` and "cleared the field
-     and pressed Enter" behave identically, which is what §6.3 promises. */
   const closeEditing = (): void => {
     setEditing(null);
     setEditError(null);
     onCreatingRootChange(false);
   };
 
-  /* One commit path for all three editors. Each has its own name and its own
-     target, but they share the empty-cancels rule and the restore-on-rejection
-     behaviour, and three copies of that logic is three chances to have one of them
-     quietly diverge — which is how an `Esc` starts working in one place and not
-     another. */
   const commit = (target: CommitTarget): void => {
     const name = target.name.trim();
     if (name.length === 0) {
@@ -226,20 +140,12 @@ export function FolderTree({
         ? onRename(target.id, name)
         : onCreate(name, target.kind === 'createRoot' ? null : target.parentId);
 
-    /* Cleared before the call so a rejected write can put it back. A rejected
-       rename restores the row editor; a rejected root create restores the
-       sidebar-owned one. */
     setEditing(null);
     onCreatingRootChange(false);
     setEditError(null);
 
     void write.catch((error: unknown) => {
       const message = messageOf(error);
-      /* Put the editor back exactly where the user left it, so a rejected write
-         costs them nothing but the reason it failed. The root input's text lives
-         apart from the row editors', so it is the one case that restores a value
-         rather than a slot — which is why it has its own discriminant instead of
-         being a `create` with a null parent. */
       if (target.kind === 'createRoot') {
         setRootName(target.name);
         onCreatingRootChange(true);
@@ -254,10 +160,6 @@ export function FolderTree({
     if (editing !== null) commit(editing);
   };
 
-  /* §6.3: "Deleting a folder with children requires confirmation naming the
-     count." A childless folder is one click and no dialog — the confirmation
-     exists to warn about a subtree, and warning about nothing is the dialog
-     habit principle 1 warns against. */
   const requestDelete = (id: Uuid): void => {
     const node = rows.find((row) => row.node.id === id)?.node;
     if (node === undefined) return;
@@ -271,17 +173,6 @@ export function FolderTree({
     setPendingDelete({ id, name: node.name, descendants });
   };
 
-  /* §6.3 drag. Three handlers rather than one, because the browser's drag model
-     gives each event different information: `dragstart` names the folder,
-     `dragover` fires continuously with a pointer position and must preventDefault
-     on every one of them for the drop to be allowed at all, and `drop` carries only
-     the dragged id. Holding the intermediate state here is what lets `drop` know
-     which row and which band it is over.
-
-     A refused drop — onto itself, into its own descendant, or a no-op reorder —
-     resolves to `null` in `folderRows.ts` and simply does nothing. Refusing before
-     the write is the point: the user learns why while the pointer is still down,
-     rather than after a round trip answers `CYCLE_DETECTED`. */
   const onDragStart = (id: Uuid): void => {
     setDrag({ draggedId: id, targetId: id, zone: null });
   };
@@ -291,8 +182,6 @@ export function FolderTree({
       if (current === null) return current;
       const zone = dropZoneAt(offsetY, rowHeight);
       if (current.targetId === id && current.zone === zone) return current;
-      /* A target that cannot accept the folder shows the "no" cursor, which is the
-         only feedback available before the drop. */
       const accepted = resolveDrop(rows, current.draggedId, id, zone) !== null;
       return { ...current, targetId: id, zone: accepted ? zone : null };
     });
@@ -315,15 +204,8 @@ export function FolderTree({
     setDrag(null);
   };
 
-  /* A press that opened the menu via long-press ends in a release click on
-     engines that synthesise one — measured on the phone, where the hold
-     selected the row under its own menu. The flag eats exactly that one: the
-     same guard the note cards carry, for the same gesture. */
   const suppressOpenRef = useRef(false);
 
-  /* A drag in progress owns the pointer, so a row under it must not also select.
-     §5 says selecting a folder is exclusive with everything else, and a re-parent
-     that also changed the selection would be a second, unrequested change. */
   const clickRow = (id: Uuid): void => {
     if (drag !== null) return;
     if (suppressOpenRef.current) {
@@ -334,9 +216,6 @@ export function FolderTree({
     onSelect({ kind: 'folder', id });
   };
 
-  /* The gesture path to the menu — right-click, long-press — as opposed to the
-     row button and the keyboard, after neither of which a release click can
-     follow. Only a fresh open arms the guard (see `suppressOpenRef`). */
   const contextMenuRow = (id: Uuid, anchor: HTMLElement): void => {
     if (menu === null) suppressOpenRef.current = true;
     openMenu(id, anchor);
@@ -403,9 +282,6 @@ export function FolderTree({
         />
       )}
 
-      {/* The root-level create input sits after the tree rather than inside it: a
-          new root folder is a sibling of everything, and `+` in the section header
-          means "a folder at the top level" (`05-ui-ux.md` §6.3). */}
       {creatingRoot ? (
         <InlineNameInput
           label="New folder name"
@@ -502,11 +378,8 @@ function FolderRows({
   editError: string | null;
   menu: { id: Uuid; placement: { top: number; left: number } } | null;
   drag: DragState | null;
-  /** The root create input is open, which suspends dragging for the whole tree. */
   creatingRoot: boolean;
   onSelect: (next: Selection) => void;
-  /** Click, which is a selection *and* a focus move — and which a drag in progress
-      must suppress, so it is separate from `onSelect` used by `Enter`. */
   onClickRow: (id: Uuid) => void;
   onToggle: (id: Uuid) => void;
   onFocusRow: (id: Uuid) => void;
@@ -515,8 +388,6 @@ function FolderRows({
   onCommitEditing: () => void;
   onEditEditing: () => void;
   onOpenMenu: (id: Uuid, anchor: HTMLElement) => void;
-  /** The gesture path to the menu (right-click, long-press), which arms the
-      release-click guard — unlike the row button and the keyboard. */
   onContextMenuRow: (id: Uuid, anchor: HTMLElement) => void;
   onCloseMenu: () => void;
   onMenuAction: (action: FolderMenuAction, id: Uuid) => void;
@@ -540,9 +411,6 @@ function FolderRows({
         const isTarget = drag !== null && drag.targetId === node.id;
         const dropHere = isTarget ? drag.zone : null;
 
-        /* A row being renamed is not a row any more: it is an input. Rendering
-           both would leave the old name in the tree and a second control in the
-           tab order. */
         if (renaming) {
           return (
             <div key={node.id} role="none" style={{ paddingLeft: depth * 16 }}>
@@ -578,36 +446,11 @@ function FolderRows({
               aria-level={depth + 1}
               aria-setsize={row?.setSize ?? 1}
               aria-posinset={row?.posInSet ?? 1}
-              /* Roving tabindex: the tree is one stop in the tab order and arrows
-                 move within it. */
               tabIndex={node.id === focusedId ? 0 : -1}
               data-testid="folder-row"
               data-folder-id={node.id}
               data-dragging={isDragged ? 'true' : undefined}
-              /* No `aria-dropeffect`: it is deprecated in ARIA 1.1 and, more to the
-                 point, drag-and-drop has neither a keyboard equivalent in the DOM
-                 at all nor a touch path — re-parenting is mouse-only in v1, and
-                 rows are not draggable on a coarse pointer at all. (A hold on a
-                 draggable row can start a touch drag on this WebView after all,
-                 with no `dragend` to end it — which is exactly why the gate is
-                 here rather than trusting the gesture to never start.) The
-                 keyboard route to a specific position is a documented gap
-                 (`05-ui-ux.md` §6.3) rather than a fake ARIA attribute, and touch
-                 re-parenting waits on the same v1.1 "move to…" item. */
-              /* The row hangs under its section header: the twisty sits where the
-                 header's chevron sits and the glyph where the header's glyph
-                 sits, at any root size. The header's side is rem-based (`px-3`
-                 plus a `w-5` chevron), so a pixel indent cannot meet it once the
-                 font scales — the base indent is rem with only the per-level
-                 nesting kept in pixels, which is the offset §6.3 promises to
-                 keep. */
               style={{ paddingLeft: `calc(0.25rem + ${depth * 16}px)` }}
-              /* `draggable` only while nothing else is going on. A row being renamed
-                 is an input, and dragging a menu open over the tree would otherwise
-                 start a drag from whatever is underneath it. Never on a coarse
-                 pointer: drag is mouse-only in v1, and on touch a hold on a
-                 draggable row can start a drag that no `dragend` ever ends — the
-                 row is left dimmed and untappable, found on a phone. */
               draggable={
                 editing === null &&
                 menu === null &&
@@ -620,16 +463,10 @@ function FolderRows({
               }}
               onDragEnd={onDragEnd}
               onDragOver={(event) => {
-                /* preventDefault on every `dragover` is what marks the row as a
-                   valid drop target; without it the browser refuses the drop and
-                   `drop` never fires at all. */
                 event.preventDefault();
                 event.stopPropagation();
                 onDragOver(node.id, event.clientY - rowRect(event).top, rowRect(event).height);
               }}
-              /* `dragleave` fires when the pointer crosses a child too, so the
-                 count below is what makes leaving the row distinguishable from
-                 moving within it. */
               onDrop={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -641,17 +478,11 @@ function FolderRows({
               onClick={() => {
                 onClickRow(node.id);
               }}
-              /* §2.2 and §9: right-click on desktop, long-press on touch, and the
-                 row's own button, all reach the same menu. */
               onContextMenu={(event) => {
                 event.preventDefault();
                 onContextMenuRow(node.id, event.currentTarget);
               }}
               onKeyDown={(event) => {
-                /* §7: F2 renames, Delete removes. Both go through the same handler
-                   the menu items do, so the keyboard and the mouse cannot drift
-                   apart — a second implementation of "delete a folder" is how the
-                   confirmation ends up counting descendants in one path only. */
                 if (event.key === 'F2') {
                   event.preventDefault();
                   onShortcut('rename', node.id);
@@ -662,8 +493,6 @@ function FolderRows({
                   onShortcut('delete', node.id);
                   return;
                 }
-                /* ContextMenu is the "application key" on a Windows keyboard and
-                   the standard way to ask for the menu of the focused item. */
                 if (event.key === 'ContextMenu') {
                   event.preventDefault();
                   onOpenMenu(node.id, event.currentTarget);
@@ -680,8 +509,6 @@ function FolderRows({
                   case 'expand':
                   case 'collapse':
                     onToggle(action.id);
-                    /* The rows are the same after a toggle, so focus survives it
-                       without a second lookup. */
                     onFocusRow(action.id);
                     break;
                   case 'select':
@@ -697,15 +524,6 @@ function FolderRows({
                     : 'text-[var(--text)] hover:bg-[var(--surface-sunken)]'
               }`}
             >
-              {/* The row is not selectable, like the note cards and the tag rows
-                 beside it: a hold over the name must reach the row's
-                 `contextmenu`, not the platform's text selection — on the device
-                 the name selected instead and no menu opened. Copying happens in
-                 the editor, not in the tree, so nothing specified is lost. */}
-              {/* The drop indicator: a 2 px accent rule pinned to the top or bottom
-                  edge, or a soft accent fill for "into". A rule on the wrong edge
-                  would read as re-ordering when the intent was re-parenting, which is
-                  the whole distinction the three bands exist to make. */}
               {dropHere === 'before' ? (
                 <span
                   data-testid="drop-line-before"
@@ -727,11 +545,6 @@ function FolderRows({
                   className="pointer-events-none absolute inset-0 rounded-[var(--r-input)] bg-[var(--accent-soft)]"
                 />
               ) : null}
-              {/* The twisty slot is the header chevron's width (`w-5` either way),
-                  so the two arrows share a column and the glyphs below share
-                  theirs — the column contract in the row's `paddingLeft`. The
-                  icon is centred in the slot like the header chevron is in its
-                  button: left-aligned it sat 2 px off the header's column. */}
               <span className="flex w-5 flex-none justify-center">
                 {hasChildren ? (
                   <button
@@ -743,19 +556,6 @@ function FolderRows({
                       event.stopPropagation();
                       onToggle(node.id);
                     }}
-                    /* The button fills the slot (`h-5 w-5` like the header
-                       chevron's), so the two boxes — and therefore the icons —
-                       share the column exactly; centring a 16 px icon in the
-                       slot still left the left edges 2 px apart. Collapsing
-                       works from touch today — the twisty is a real button —
-                       but 16 px is a miss waiting to happen against §9's 44 px
-                       touch bar. The row is 26 px tall and the name owns the
-                       rest of it, so a full-size target would steal taps from its
-                       neighbours; the invisible hit slop below roughly doubles the
-                       target on coarse pointers without moving any pixel. A 44 px
-                       target genuinely does not fit here — recorded in the M8
-                       tracker rather than faked with an overlap that misattributes
-                       taps to the rows above and below. */
                     className="relative grid h-5 w-5 flex-none place-items-center text-[var(--text-subtle)] hover:text-[var(--text)] pointer-coarse:before:absolute pointer-coarse:before:-inset-x-3 pointer-coarse:before:-inset-y-2 pointer-coarse:before:content-['']"
                   >
                     {isCollapsed ? (
@@ -786,13 +586,6 @@ function FolderRows({
                   }}
                 />
               ) : (
-                /* `pointer-fine:group-hover:flex`, in that order: `hidden` first so
-                   the button is absent by default, then the two variants that turn
-                   it on. §9 says hover styling exists at `pointer: fine` and
-                   nowhere else — and the reverse order would make it permanently
-                   visible on a desktop, which is three controls on every row rather
-                   than one on the row under the cursor. On touch the menu opens by
-                   long-press instead. */
                 <span className="ml-auto hidden flex-none pointer-fine:group-hover:flex">
                   <FolderMenuButton
                     folderName={node.name}
@@ -860,27 +653,14 @@ function FolderRows({
   );
 }
 
-/* Focus arriving on a row that does not hold the tab stop — a mouse click, or a
-   screen reader moving the caret — has to move the tab stop with it, and there is
-   no key handler to do it. Guarded so the common case, where the focused row
-   already is the tab stop, does not re-focus an element that has focus: calling
-   `.focus()` inside a focus handler is a re-entrant call for no benefit. */
 function setFocusedQuietly(current: Uuid | null, next: Uuid, onFocusRow: (id: Uuid) => void): void {
   if (current !== next) onFocusRow(next);
 }
 
-/** The row's own box, read once per `dragover`.
-    `getBoundingClientRect` on a row during a drag is the one layout read the handler
-    cannot avoid — the zone is a fraction of the row's height — and it is cheap
-    because it is one element, not a reflow of the tree. */
 function rowRect(event: React.DragEvent<HTMLDivElement>): DOMRect {
   return event.currentTarget.getBoundingClientRect();
 }
 
-/** `AppError` reaches the frontend as `{ code, message }` over IPC and as a
-    `MockBackendError` with the same two fields (`10-conventions.md` §6). The
-    message is user-facing copy by contract, so it is safe to show inline; an
-    unrecognised throw gets the generic text rather than `undefined`. */
 function messageOf(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {
     const { message } = error;

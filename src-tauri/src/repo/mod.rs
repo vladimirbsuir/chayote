@@ -4,21 +4,14 @@ use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Types crossing the repository boundary. Rust structs carry
-/// `#[serde(rename_all = "camelCase")]`, matching `src/types/`.
-/// UUIDv7 string (R1). Generated on the device, never reassigned or reused.
 pub type Uuid = String;
 
-/// R2: UTC epoch milliseconds, never local time.
 pub type Timestamp = i64;
 
 pub mod folders;
 pub mod notes;
 pub mod tags;
 
-/// `{"kind": "all"}`, `{"kind": "folder", "id": "..."}` — an internally tagged
-/// enum, matching the discriminated union in `src/types/ipc.ts` and the `?S`
-/// / `?1` binding shape in `services/search.rs`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Selection {
@@ -30,7 +23,6 @@ pub enum Selection {
 }
 
 impl Selection {
-    /// The tag this variant serialises with.
     #[cfg(test)]
     pub fn kind(&self) -> &'static str {
         match self {
@@ -43,8 +35,6 @@ impl Selection {
     }
 }
 
-/// The single selection model: exactly one of all, pinned, folder, tag or
-/// trash is active at a time (`05-ui-ux.md` §5).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteFilter {
@@ -55,8 +45,6 @@ pub struct NoteFilter {
 }
 
 impl NoteFilter {
-    /// The paging fields are optional on the wire, so this builds a filter
-    /// without spelling them out. Commands deserialise their own instance.
     #[cfg(test)]
     pub fn new(selection: Selection) -> Self {
         Self {
@@ -74,8 +62,6 @@ pub struct TagRef {
     pub name: String,
 }
 
-/// Never carries the document body: `excerpt` and `word_count` exist so the
-/// note list does not have to load one (`10-conventions.md` §8).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteSummary {
@@ -100,8 +86,6 @@ pub struct Note {
     pub deleted_at: Option<Timestamp>,
 }
 
-/// `02-architecture.md` §7: one named argument, so adding a field is not a
-/// breaking change.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveNoteInput {
@@ -109,9 +93,6 @@ pub struct SaveNoteInput {
     pub doc: Value,
     pub folder_id: Option<Uuid>,
     pub tag_ids: Vec<Uuid>,
-    /// Accepted and ignored. The pin is written only by `notes_set_pinned`: a
-    /// save carrying it wrote back whatever the editor last read, so a note
-    /// pinned from its card while open was unpinned by the next keystroke.
     #[serde(default)]
     #[allow(dead_code)]
     pub is_pinned: bool,
@@ -149,8 +130,6 @@ pub struct SearchInput {
 pub struct SearchHit {
     #[serde(flatten)]
     pub summary: NoteSummary,
-    /// `bm25` weight. FTS5 returns more negative values for better matches,
-    /// so `ORDER BY rank` ascending is correct.
     pub rank: f64,
     pub snippet: String,
 }
@@ -163,52 +142,21 @@ pub struct SearchPage {
     pub next_offset: Option<i64>,
 }
 
-/// The seam remote storage plugs into (ADR-003, ADR-005).
-///
-/// `v1` has exactly one implementation, the SQLite repos below. Sync does
-/// not add a second implementation: `crate::sync` replicates these rows to
-/// any Postgres over the wire protocol, which is what makes sync additive
-/// rather than architectural.
-///
-/// Every method owns its transaction, and the row write and the outbox append
-/// commit together or not at all (R5).
 pub trait NotesRepo: Send + Sync {
-    /// Notes in a selection, pinned first then by recency.
     fn list(&self, filter: &NoteFilter) -> Result<Vec<NoteSummary>, crate::error::AppError>;
     fn get(&self, id: &str) -> Result<Note, crate::error::AppError>;
     fn create(&self, folder_id: Option<&str>) -> Result<Note, crate::error::AppError>;
     fn save(&self, input: &SaveNoteInput) -> Result<Note, crate::error::AppError>;
     fn move_to(&self, id: &str, folder_id: Option<&str>) -> Result<Note, crate::error::AppError>;
-    /// Flips `is_pinned` without touching `doc_json`.
-    ///
-    /// Separate from `save` because the note list carries only a `NoteSummary`
-    /// (`03-data-model.md` §3.3): pinning from a card has no document to send, and
-    /// loading one to change a boolean would put the body of every pinned note on
-    /// the save path. `save` stays the whole-document write the editor uses.
     fn set_pinned(&self, id: &str, is_pinned: bool) -> Result<Note, crate::error::AppError>;
-    /// Writes `title` and `title_source` without touching `doc_json` (ADR-023).
-    ///
-    /// A non-empty title is stored as `manual` and kept verbatim through every
-    /// later save; an empty one returns the note to `auto`, which hands the title
-    /// back to derivation. The document is not loaded or rewritten, for the same
-    /// reason `set_pinned` does not: the title is metadata, and putting a body on
-    /// the write path to change one word would rewrite every note's derived
-    /// columns on every keystroke.
     fn set_title(&self, id: &str, title: &str) -> Result<Note, crate::error::AppError>;
-    /// Sets `deleted_at`; the row stays, so the deletion can propagate (R3).
     fn soft_delete(&self, id: &str) -> Result<(), crate::error::AppError>;
     fn restore(&self, id: &str) -> Result<(), crate::error::AppError>;
-    /// Removes the row outright. Refused while the server has never assigned
-    /// the row a `rev` (`07-sync-plan.md` §5.4): a never-pushed note must
-    /// soft-delete and sync first, so the tombstone propagates before the
-    /// row goes. `empty_trash` applies the same rule per row and leaves
-    /// never-synced notes in the trash.
     fn destroy(&self, id: &str) -> Result<(), crate::error::AppError>;
     fn empty_trash(&self) -> Result<i64, crate::error::AppError>;
 }
 
 pub trait FoldersRepo: Send + Sync {
-    /// The whole live tree, assembled in Rust from a flat ordered read.
     fn list(&self) -> Result<Vec<FolderNode>, crate::error::AppError>;
     fn create(
         &self,
@@ -222,24 +170,16 @@ pub trait FoldersRepo: Send + Sync {
         new_parent_id: Option<&str>,
         position: i64,
     ) -> Result<FolderNode, crate::error::AppError>;
-    /// Permanent in v1: the subtree goes, its notes become unfiled. See
-    /// `07-sync-plan.md` §5.2 for what sync changes about this.
     fn delete(&self, id: &str) -> Result<(), crate::error::AppError>;
 }
 
 pub trait TagsRepo: Send + Sync {
-    /// Counts exclude notes in the trash: an empty filter in the sidebar is
-    /// noise (`03-data-model.md` §5).
     fn list(&self) -> Result<Vec<TagWithCount>, crate::error::AppError>;
-    /// Case-insensitive: `Work`, `work` and `WORK` are one tag, normalised to
-    /// the first-created spelling.
     fn create(&self, name: &str) -> Result<TagWithCount, crate::error::AppError>;
     fn rename(&self, id: &str, name: &str) -> Result<TagWithCount, crate::error::AppError>;
     fn delete(&self, id: &str) -> Result<(), crate::error::AppError>;
 }
 
-/// Every service write appends here in the same transaction as the row write
-/// (R5). If the process dies between the two, neither happened.
 pub(crate) fn append_outbox(
     tx: &rusqlite::Transaction<'_>,
     entity: &str,
@@ -277,12 +217,9 @@ pub(crate) fn base_rev_of(
     .optional()
 }
 
-/// The columns every note read shares, in a fixed order.
 pub(crate) const SUMMARY_COLUMNS: &str =
     "n.id, n.title, n.excerpt, n.folder_id, n.is_pinned, n.word_count, n.updated_at";
 
-/// Owned copy of the summary columns. Rows are collected into this before the
-/// connection is reused, so no `Row` borrow is ever held across another query.
 #[derive(Clone)]
 pub(crate) struct SummaryRow {
     pub id: String,
@@ -308,7 +245,6 @@ impl SummaryRow {
     }
 }
 
-/// Folder names for `NoteSummary.folder_name`, in one query.
 pub(crate) fn folder_names(
     conn: &rusqlite::Connection,
 ) -> Result<HashMap<String, String>, rusqlite::Error> {
@@ -324,7 +260,6 @@ pub(crate) fn folder_names(
     Ok(map)
 }
 
-/// Tag references for a set of notes, in one query.
 pub(crate) fn tags_for(
     conn: &rusqlite::Connection,
     note_ids: &[Uuid],
@@ -364,8 +299,6 @@ pub(crate) fn tags_for(
     Ok(map)
 }
 
-/// Resolves folder names and tag references for a page of rows, in two queries
-/// rather than one per row.
 pub(crate) fn attach(
     conn: &rusqlite::Connection,
     rows: &[SummaryRow],
@@ -390,11 +323,8 @@ pub(crate) fn attach(
         .collect())
 }
 
-/// `params![]` is not `Params`, and neither is an empty array: an owned empty
-/// `Vec` is the empty binding set.
 pub(crate) fn no_params() {}
 
-/// Reads a page of summary rows for an optional scope parameter.
 pub(crate) fn read_rows(
     conn: &rusqlite::Connection,
     sql: &str,

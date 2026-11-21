@@ -1,13 +1,5 @@
 use serde_json::Value;
 
-/// Derived values, `03-data-model.md` §4. Everything here is recomputed from
-/// the document on every write and never accepted from the frontend (R9).
-///
-/// Derivation is deterministic, so a second device fed the same document
-/// reaches the same values. That is the property that makes the derived
-/// columns safe to cache.
-/// `03-data-model.md` §4.2. Truncated at 200 000 characters, which bounds
-/// both the FTS index and the cost of derivation.
 pub const MAX_PLAIN_TEXT: usize = 200_000;
 
 const MAX_TITLE: usize = 120;
@@ -20,13 +12,10 @@ pub struct Derived {
     pub word_count: i64,
 }
 
-/// The text of one block, with inline marks transparent.
 fn block_text(node: &Value) -> String {
     match node {
         Value::String(text) => text.clone(),
         Value::Object(obj) => match obj.get("text").and_then(Value::as_str) {
-            // Invariant 6 guarantees non-empty text nodes, so an absent or
-            // empty `text` here can only be a non-text node.
             Some(text) => text.to_owned(),
             None => node
                 .get("content")
@@ -42,9 +31,6 @@ fn is_block(node_type: &str) -> bool {
     !matches!(node_type, "text" | "hardBreak")
 }
 
-/// `03-data-model.md` §4.2: a recursive walk of the tree. Text contributes
-/// its text, marks are transparent, hard breaks contribute `\n`, and block
-/// nodes terminate with `\n`.
 pub fn plain_text(doc: &Value) -> String {
     let mut out = String::new();
     walk(doc, &mut out);
@@ -94,19 +80,10 @@ fn truncate_on_word(text: &str, max: usize) -> String {
     }
 }
 
-/// The same 120-character cap a derived title gets, applied to a typed one
-/// (ADR-023). A list row and a search result are built for a title this size, so
-/// a field that ignored the cap would put a paragraph where a line belongs.
 pub fn truncate_title(text: &str) -> String {
     truncate_on_word(text, MAX_TITLE)
 }
 
-/// The text of the document's first block, when that block is a heading.
-///
-/// Only `0006_note_title_field.sql` asks this: it moves a leading heading into
-/// the note's title field and off the first line of the body (ADR-023), and it has
-/// to read the heading before removing it. Keeping the question here rather than in
-/// the migration means one place decides what "a heading" is.
 pub fn leading_heading_text(doc: &Value) -> Option<String> {
     let first = doc.get("content")?.as_array()?.first()?;
     if first.get("type").and_then(Value::as_str) != Some("heading") {
@@ -115,9 +92,6 @@ pub fn leading_heading_text(doc: &Value) -> Option<String> {
     Some(block_text(first).trim().to_owned())
 }
 
-/// `03-data-model.md` §4.3: collapsed to single spaces, truncated at 200
-/// characters on a word boundary. Feeds the note list without loading whole
-/// documents.
 pub fn excerpt(plain: &str) -> String {
     let collapsed = plain.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.chars().count() <= MAX_EXCERPT {
@@ -127,8 +101,6 @@ pub fn excerpt(plain: &str) -> String {
     format!("{clipped}…")
 }
 
-/// `03-data-model.md` §4.3: cheap status-bar value, avoids parsing the
-/// document on open.
 pub fn word_count(plain: &str) -> i64 {
     plain.split_whitespace().count() as i64
 }

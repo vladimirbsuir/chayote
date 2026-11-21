@@ -19,7 +19,6 @@ describe('settings store', () => {
     expect(DEFAULT_SETTINGS.theme).toBe('system');
     expect(DEFAULT_SETTINGS.accent).toBeNull();
     expect(DEFAULT_SETTINGS.lastCustomHex).toBe('#2f6fed');
-    // ADR-014: first launch creates no folders, so the default folder is none.
     expect(DEFAULT_SETTINGS.defaultFolderId).toBeNull();
     expect(DEFAULT_SETTINGS.collapsedFolders).toEqual([]);
     expect(DEFAULT_SETTINGS.sectionsCollapsed).toEqual({ folders: false, tags: false });
@@ -49,8 +48,6 @@ describe('settings store', () => {
   });
 
   it('falls back to defaults when the stored value is corrupt', async () => {
-    // A corrupt settings file must not stop the app from starting; notes are
-    // untouched either way.
     window.localStorage.setItem(STORE_FILE, '{ not json');
     await expect(loadSettings()).resolves.toEqual(DEFAULT_SETTINGS);
   });
@@ -64,7 +61,6 @@ describe('settings store', () => {
     window.localStorage.setItem(STORE_FILE, JSON.stringify({ theme: 'light' }));
     const loaded = await loadSettings();
     expect(loaded.theme).toBe('light');
-    // Everything absent keeps its default rather than becoming undefined.
     expect(loaded.accent).toBe(DEFAULT_SETTINGS.accent);
     expect(loaded.sidebarWidth).toBe(DEFAULT_SETTINGS.sidebarWidth);
   });
@@ -73,7 +69,6 @@ describe('settings store', () => {
     const first = await loadSettings();
     expect(first).toEqual(DEFAULT_SETTINGS);
 
-    // A write behind the store's back must not be observed while cached.
     window.localStorage.setItem(STORE_FILE, JSON.stringify({ theme: 'dark' }));
     expect((await loadSettings()).theme).toBe('system');
 
@@ -95,8 +90,6 @@ describe('settings store', () => {
   });
 
   it('matches the swatches the prototype ships', () => {
-    // `prototype/index.html` §5 lists these in this order. If they drift, the
-    // settings dialog and the prototype disagree, which ADR-016 forbids.
     expect(ACCENT_PRESETS.map((preset) => preset.light)).toEqual([
       '#2769ec',
       '#1f7a4d',
@@ -116,11 +109,6 @@ describe('settings store', () => {
   });
 
   it('reads a stored preset hex as that preset, not as a custom accent', async () => {
-    /* Files written before M6 hold a bare hex. Left as a custom colour it would
-       be written inline and defeat the cascade in dark mode — the bug ADR-019
-       records. Each retired hex maps back to the preset it used to be, so a user
-       who had chosen Violet keeps Violet rather than being handed a colour the
-       dark theme can no longer lift. */
     window.localStorage.setItem(STORE_FILE, JSON.stringify({ accent: '#2f6fed' }));
     expect((await loadSettings()).accent).toEqual({ kind: 'preset', index: 1 });
 
@@ -153,9 +141,6 @@ describe('settings store', () => {
   });
 
   it('reads a stored preset object, and falls back on anything malformed', async () => {
-    /* A settings file must never be able to stop the app starting, whatever it
-       contains — so an out-of-range index or a non-hex is the default, not an
-       error. */
     for (const stored of [
       { kind: 'preset', index: 0 },
       { kind: 'preset', index: 99 },

@@ -1,13 +1,5 @@
 import DOMPurify from 'dompurify'
 
-/* Paste is the only place untrusted markup enters the app. The allowlist below
-   is the intersection of `04-editor.md` §4.1 and the schema in §1.2. ProseMirror
-   drops anything it does not parse on top of this, so an omission degrades to a
-   lost node rather than a hole. */
-
-/* §1.2 node names, plus the HTML shapes ProseMirror parses into the four marks:
-   `strong`/`b` → bold, `em`/`i` → italic, `s`/`strike`/`del` → strike. `doc`,
-   `paragraph`, `text`, and `hardBreak` have no distinct HTML counterpart. */
 const ALLOWED_TAGS = [
   'p',
   'h1',
@@ -36,15 +28,8 @@ const ALLOWED_TAGS = [
   'th',
 ]
 
-/* §4.1 rule 2: presentational attributes are stripped unconditionally, and what
-   survives is only this. `href` and `src` are absent by design — §4.1 rule 3
-   rejects every one of them, and v1 has no link mark and no image node. The two
-   surviving attributes exist because a pasted table keeps its spans after
-   §4.1 rule 6 flattens it into paragraphs. */
 const ALLOWED_ATTR = ['colspan', 'rowspan']
 
-/* §4.1 rule 4, plus the non-visual elements that would otherwise survive as
-   empty boxes. */
 const FORBID_TAGS = [
   'script',
   'style',
@@ -76,15 +61,6 @@ const FORBID_TAGS = [
 
 const MAX_NESTING_DEPTH = 12
 
-/**
- * §4.2: sanitise the pasted HTML *before* ProseMirror parses it. Sanitising the
- * resulting tree instead would mean writing a second traversal, which is exactly
- * the easier-to-get-wrong variant this rule exists to reject.
- *
- * `ALLOWED_URI_REGEXP` matching nothing is redundant with `ALLOWED_ATTR` omitting
- * `href` and `src`; it is here so that adding a URL attribute later cannot
- * silently reopen a `javascript:` surface.
- */
 export function sanitizeAndNormalize(html: string): string {
   if (html.length === 0) return ''
 
@@ -103,11 +79,6 @@ export function sanitizeAndNormalize(html: string): string {
   return reshape(clean)
 }
 
-/**
- * §4.1 rule 7: blank lines separate paragraphs, a single newline becomes a hard
- * break. Splitting rather than emitting one block per line keeps a pasted list of
- * single lines readable instead of a column of empty paragraphs.
- */
 export function textToParagraphs(text: string): string {
   const blocks = text
     .replace(/\r\n?/g, '\n')
@@ -120,30 +91,12 @@ export function textToParagraphs(text: string): string {
   return blocks.map((block) => `<p>${escapeHtml(block).split('\n').join('<br>')}</p>`).join('')
 }
 
-/** True when the sanitised markup would leave something visible in the document. */
 export function hasVisibleContent(html: string): boolean {
   if (html.length === 0) return false;
   if (/<(?:hr|br)\s*\/?>/i.test(html)) return true;
   return bodyOf(html).textContent.trim().length > 0;
 }
 
-/**
- * A search snippet, and only a search snippet.
- *
- * `SearchService` builds it with FTS5's `snippet()`, which wraps matches in the
- * `<mark>` tags passed to it — `03-data-model.md` §3.6. Everything else in the
- * string is `plain_text`, which is derived from a note the user typed into, so a
- * note containing `<script>` produces a snippet containing `<script>`. FTS5 does
- * not escape what it reads, and the snippet is the one place in the app where a
- * backend's HTML reaches the DOM.
- *
- * This is a separate allowlist from the paste one above, deliberately. That list
- * is the intersection of the document schema and §4.1 and is broad enough for a
- * pasted document; this one is the exact tag the backend is allowed to emit, so
- * adding a node to the editor can never widen what search markup may contain. An
- * empty `ALLOWED_ATTR` means `mark` may carry nothing at all — the backend emits
- * none, and a class on a highlight would be a value chosen by the note's content.
- */
 export function sanitizeSnippet(html: string): string {
   if (html.length === 0) return '';
   return DOMPurify.sanitize(html, {
@@ -158,13 +111,6 @@ export function sanitizeSnippet(html: string): string {
 const SNIPPET_TAGS = ['mark'];
 const SNIPPET_ATTR: string[] = [];
 
-/**
- * §4.1 rule 6 — table cells become paragraphs in reading order. The table
- * elements are allowed through DOMPurify precisely so that cell order survives
- * sanitisation, then flattened here; v1 has no table node.
- * §4.1 rule 5 — nesting past 12 levels is unwrapped, so the validator in
- * `doc/validate.rs` never has to reject a depth it should have flattened.
- */
 function reshape(html: string): string {
   const body = bodyOf(html)
 

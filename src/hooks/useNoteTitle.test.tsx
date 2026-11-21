@@ -6,18 +6,6 @@ import { useNoteTitle } from './useNoteTitle';
 import { qk } from '../queries/keys';
 import type { Note, NoteSummary } from '../types/ipc';
 
-/* ADR-023. What matters here is not that the hook calls the command — that is one
-   line — but the three things around it, each of which is a way a title can be
-   lost or shown in the wrong place:
-
-   - A typing burst is one write, not one per keystroke.
-   - A burst in flight when something else needs the title flushed is not dropped.
-     This is the half that matters: the field has no autosave controller behind it,
-     so nothing else will ever flush it.
-   - The response replaces the open note and every cached list, because
-     `updated_at` moves with the title and the lists order by it. A patch that left
-     the timestamp stale would put the note back where it was. */
-
 const calls: { id: string; title: string }[] = [];
 
 vi.mock('../lib/ipc', () => ({
@@ -92,8 +80,6 @@ describe('useNoteTitle', () => {
     const { result } = renderHook(() => useNoteTitle(), { wrapper: wrapper(client) });
 
     result.current.write(ID, 'Half typed');
-    /* Far less than the 800 ms debounce. The field loses focus, the note is
-       switched, the sync engine drains — anything that means "last chance". */
     result.current.flush();
 
     await waitFor(() => {
@@ -126,8 +112,6 @@ describe('useNoteTitle', () => {
     const lists = client.getQueryData<NoteSummary[]>(['notes', { kind: 'all' }]);
     expect(lists?.[0]?.title).toBe('After');
     expect(lists?.[0]?.updatedAt).toBe(4242);
-    /* The other note is not touched: a patch that rewrote every row would be a
-       second list re-sort nobody asked for. */
     expect(lists?.[1]?.title).toBe('Other');
     expect(lists?.[1]?.updatedAt).toBe(1);
   });

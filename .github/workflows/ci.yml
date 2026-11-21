@@ -41,12 +41,6 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   e2e:
-    # Sharded across machines, not workers: one runner's CPUs are already
-    # saturated at two workers, so more workers on the same box only add
-    # contention. Each shard gets its own runner and part of the suite.
-    # Touch-emulation tests (tagged `@touch`) ride in the same matrix as
-    # their own entry: their real-timer holds need an unloaded browser, so
-    # they run alone on one worker rather than in a shard.
     name: End-to-end (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
@@ -71,13 +65,6 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test ${{ matrix.args }}
-      # Traces (and the screenshots inside them) are the only way to see a
-      # headless failure after the runner is gone. `always()` rather than
-      # `failure()`: with `retries: 2` a shard that flakes and then passes exits
-      # 0, so `failure()` is false and the run looks green while its `##[error]`
-      # lines stay in the log with no trace attached. Uploading always keeps the
-      # first-retry trace for exactly those flakes; fully green runs upload
-      # nothing (`if-no-files-found: ignore`).
       - uses: actions/upload-artifact@v5
         if: always()
         with:

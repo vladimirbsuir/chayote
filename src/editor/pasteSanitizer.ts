@@ -6,25 +6,6 @@ import { hasVisibleContent, sanitizeAndNormalize } from '../lib/sanitize'
 
 type EditorProps = NonNullable<EditorOptions['editorProps']>
 
-/**
- * `04-editor.md` §4. Rules 1–7, in the two shapes ProseMirror actually offers.
- *
- * **HTML flavour.** Rules 1–6 are `transformPastedHTML`: DOMPurify strips
- * everything outside the allowlist, presentational attributes, and every
- * `href`/`src`, then the DOM pass flattens table cells and deep nesting.
- * ProseMirror parses what survives.
- *
- * **Plain-text flavour.** Rule 7 is ours, in `handlePaste`, and it cannot be a
- * `transformPastedText`. ProseMirror treats that hook's return value as *text*:
- * it splits on newlines and wraps each piece in a paragraph, so returning
- * `<p>one<br>two</p>` inserts those characters literally. It also drops single
- * newlines instead of turning them into hard breaks, which is what rule 7 asks
- * for. Building the slice here is the only way to get both.
- *
- * Rule 8 needs `handlePaste` in either case: a paste that yields nothing must
- * insert nothing and leave the selection untouched. Returning `true` consumes
- * the event; returning `false` hands the event back to ProseMirror.
- */
 export function buildPasteProps(): EditorProps {
   return {
     handlePaste: (view: EditorView, event: ClipboardEvent): boolean => {
@@ -49,7 +30,6 @@ export function buildPasteProps(): EditorProps {
   }
 }
 
-/** §4.1 rule 7: blank lines separate paragraphs, a single newline is a hard break. */
 export function sliceFromPlainText(schema: Schema, text: string, marks: readonly Mark[]): Slice | null {
   const blocks = text
     .replace(/\r\n?/g, '\n')

@@ -1,13 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { seedSettings } from './helpers';
 
-/* ADR-019: the accent follows the theme through the cascade. Before M6,
-   `applyAccent` wrote `--accent` inline on the element carrying `data-theme`,
-   which beat the dark block, so the dark accent was unreachable. The rendered
-   value is read back off the document rather than asserted from the token file,
-   because the whole defect was that the token file was right and the DOM was
-   not — asserting the token would have passed while the app was wrong. */
-
 const THEMES = ['light', 'dark'] as const;
 
 test.describe('accent follows the theme', () => {
@@ -34,7 +27,6 @@ test.describe('accent follows the theme', () => {
 
       expect(resolved.theme).toBe(theme);
       expect(resolved.inline).toBe('');
-      /* Computed rgb of the expected hex, since getComputedStyle normalises. */
       const expected = theme === 'light' ? 'rgb(39, 105, 236)' : 'rgb(72, 129, 239)';
       expect(resolved.computed).toBe(expected);
     });
@@ -54,9 +46,6 @@ test('a custom accent is the one case that writes a literal inline', async ({
   });
 
   test('a chosen preset writes a variable reference, not a hex', async ({ page }) => {
-    /* The distinction is the whole of ADR-019: `var(--accent-preset-6)` resolves
-       through the cascade to whichever value the dark theme gives that preset,
-       while `#0f766e` is a literal that would fix the accent in both themes. */
     await seedSettings(page, { theme: 'light', accent: { kind: 'preset', index: 6 } });
     await page.goto('/');
     await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();

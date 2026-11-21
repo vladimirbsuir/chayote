@@ -4,12 +4,6 @@ import { parseHex } from './contrast';
 
 export type Theme = 'light' | 'dark' | 'system';
 
-/** Which accent is in use. The distinction that matters is preset versus
-    custom, not the hex: a preset can be written inline as a *reference* to
-    `--accent-preset-N`, which the dark theme then resolves to its own value,
-    while a custom colour is a literal that cannot. Collapsing both onto a hex
-    would make all six presets indistinguishable from "the default" — and would
-    re-break ADR-019, because an inline hex defeats the cascade. */
 export type AccentChoice =
   | { kind: 'preset'; index: number }
   | { kind: 'custom'; hex: string }
@@ -17,42 +11,24 @@ export type AccentChoice =
 
 export type AccentPreset = 1 | 2 | 3 | 4 | 5 | 6;
 
-/** Which of the sidebar's structure sections are collapsed as a whole. This is
-    the high-level list, not the per-folder twisty state in `collapsedFolders`:
-    with many top-level folders or tags the tree itself is the thing to hide. */
 export type SectionCollapse = {
   folders: boolean;
   tags: boolean;
 };
 
-/** The palette's fallback before the user has ever picked a colour of their own. */
 export const DEFAULT_CUSTOM_HEX = '#2f6fed';
 
 export type Settings = {
   theme: Theme;
   accent: AccentChoice;
-  /** The last custom colour the palette held, remembered even while a preset
-      is in use so reopening the editor restores it rather than the fallback. */
   lastCustomHex: string;
-  /** `null` means notes start unfiled; nothing is pre-created. */
   defaultFolderId: Uuid | null;
   sidebarWidth: number;
-  /** `true` when the sidebar is hidden. Width is remembered separately, so
-      toggling back restores 320 px rather than the minimum. */
   sidebarCollapsed: boolean;
   collapsedFolders: Uuid[];
   sectionsCollapsed: SectionCollapse;
   lastNoteId: Uuid | null;
   lastSelection: Selection;
-  /** When the updater last looked for a new version, epoch ms, or `null` if
-      never. Persisted here rather than in the notes database because it is
-      runtime state about the app, not a note, and `settings.json` is the only
-      store the frontend owns (`06-platform.md` §2).
-
-      Not a preference, and it is the one field on this type that is not: nothing
-      in Settings configures the user. It rides along because a second store file
-      for one timestamp is a worse trade, and because a reset clearing it costs
-      exactly one extra network check. */
   lastUpdateCheckAt: number | null;
 };
 
@@ -80,15 +56,6 @@ function isTauri(): boolean {
 let cached: Settings | null = null;
 let inflight: Promise<Settings> | null = null;
 
-/**
- * Settings live in the Tauri store, never in the notes database, so resetting
- * or syncing them can never touch notes (`05-ui-ux.md` §6.6).
- *
- * Outside Tauri — `npm run dev`, Playwright — the store resolves to a
- * `localStorage`-backed stand-in so the settings dialog and theme switching can
- * be driven in a browser (ADR-018). That is the only difference from the real
- * path; the shape is identical.
- */
 export async function loadSettings(): Promise<Settings> {
   if (cached !== null) return cached;
   inflight ??= read();
@@ -103,9 +70,6 @@ export async function loadSettings(): Promise<Settings> {
 async function read(): Promise<Settings> {
   const raw = await readRaw();
   const stored = parse(raw);
-  /* The accent is the one field whose stored shape has changed, and the only one
-     that can be a bare hex, an object or absent. Parsed here rather than trusted
-     so a file from an earlier build loads as what it meant. */
   return {
     ...DEFAULT_SETTINGS,
     ...stored,
@@ -114,7 +78,6 @@ async function read(): Promise<Settings> {
   };
 }
 
-/// Debounced at 300 ms by the caller (`10-conventions.md` §7).
 export async function saveSettings(next: Settings): Promise<void> {
   cached = next;
   await writeRaw(JSON.stringify(next));
@@ -159,17 +122,10 @@ function parse(raw: string | null): Partial<Settings> {
     if (typeof value !== 'object' || value === null) return {};
     return value;
   } catch {
-    // A corrupt settings file must not stop the app from starting. Defaults
-    // are a working state; notes are untouched either way.
     return {};
   }
 }
 
-/// The six presets, in the order `05-ui-ux.md` §6.6 presents them. Each carries a
-/// value per theme, because an accent used as text needs 4.5:1 against the raised
-/// surface of whichever theme is active and one value cannot clear it in both.
-/// The same pairs are in `styles/tokens.css`; the contrast test is what keeps the
-/// two copies honest.
 export const ACCENT_PRESETS: ReadonlyArray<{ name: string; light: string; dark: string }> = [
   { name: 'Blue', light: '#2769ec', dark: '#4881ef' },
   { name: 'Green', light: '#1f7a4d', dark: '#26975f' },
@@ -179,24 +135,16 @@ export const ACCENT_PRESETS: ReadonlyArray<{ name: string; light: string; dark: 
   { name: 'Teal', light: '#0f766e', dark: '#13948a' },
 ];
 
-/** The value a preset resolves to in the given effective theme. */
 export function presetValue(preset: (typeof ACCENT_PRESETS)[number], dark: boolean): string {
   return dark ? preset.dark : preset.light;
 }
 
-/** Preset values that have since been replaced, and which theme they came from.
-    A file written before the accent became per-theme holds one of these as a
-    bare hex. Each maps to the preset it used to be, so a user who had chosen
-    Violet keeps Violet rather than being handed a custom colour the theme can
-    no longer lift. */
 const RETIRED_PRESETS: ReadonlyMap<string, number> = new Map([
   ['#2f6fed', 1],
   ['#8b5cf6', 3],
   ['#6f9bff', 1],
 ]);
 
-/** True when a stored accent is one of the current preset values rather than a
-    choice the user made. Kept for the settings test and for `parseAccent`. */
 function isPresetAccent(accent: string): boolean {
   return ACCENT_PRESETS.some((preset) => preset.light === accent || preset.dark === accent);
 }
@@ -229,9 +177,6 @@ function parseAccent(value: unknown): AccentChoice {
   return null;
 }
 
-/** A stored custom colour is either a valid hex or the fallback: a file from
-    an earlier build, or a hand-edited one, carries nothing the palette can
-    restore. */
 function parseCustomHex(value: unknown): string {
   if (typeof value === 'string' && parseHex(value) !== null) return value.toLowerCase();
   return DEFAULT_CUSTOM_HEX;

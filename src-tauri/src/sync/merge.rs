@@ -1,25 +1,6 @@
-//! Field-wise note merge (`07-sync-plan.md` §5.1).
-//!
-//! A conflict is "both sides changed since `base_rev`", but that alone does
-//! not say *which fields* this device changed. The outbox does: every local
-//! write appends a row whose payload names what it wrote (`notes_save` the
-//! document, filing and tags; `notes_set_pinned` the pin; `notes_move` the
-//! filing; `notes_set_title` the title). Reading the unsent rows tells the
-//! merge which fields are this device's to defend, and every other field is
-//! simply taken from the server.
-//!
-//! Without this, a pin or a move on one device racing a text edit on another
-//! parked a conflict and pushed the stale local document over the server —
-//! the local copy of a document this device never touched. Disjoint fields
-//! are supposed to merge (§5.1), and now they do.
-
 use super::{docs_equal, union_sets, LocalNote, RemoteNote};
 use crate::error::AppError;
 
-/// Which fields of a note this device's unsent writes touched. A row whose
-/// payload cannot be read (none at all: a restore, a re-upload, a resolved
-/// conflict, the title migration) touches everything — claiming a field is
-/// the safe direction, because the worst it can do is park a conflict.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct Touched {
     pub doc: bool,
@@ -56,7 +37,6 @@ impl Touched {
             || (self.tags && other.tags)
     }
 
-    /// What one outbox row's payload says it wrote.
     fn of_payload(op: &str, payload: Option<&str>) -> Self {
         if op != "upsert" {
             return Self::ALL;
@@ -72,7 +52,6 @@ impl Touched {
         let mut touched = Self::default();
         let mut known = false;
         if object.contains_key("tagIds") {
-            // `notes_save`: the document, its filing and its tag set.
             touched.doc = true;
             touched.folder = true;
             touched.tags = true;
@@ -102,14 +81,8 @@ impl Touched {
     }
 }
 
-/// Payload key for a note row the sync engine queues itself after relinking
-/// the note's tags (a cross-device tag merge). It touches the tag set alone,
-/// so it can never park a document conflict.
 pub(super) const TAGS_ONLY_KEY: &str = "tagSetMerged";
 
-/// The union of what every unsent row for `note_id` touched, restricted to
-/// rows newer than `after` when given (the rows queued while a push was on
-/// the wire).
 pub(super) fn local_touches(
     conn: &rusqlite::Connection,
     note_id: &str,
@@ -129,29 +102,13 @@ pub(super) fn local_touches(
     }))
 }
 
-/// The arbitrated note: what both sides should hold after this round.
 #[derive(Debug, Clone)]
 pub(super) struct Merged {
     pub note: LocalNote,
-    /// Both sides changed the document and they differ: the remote copy is
-    /// parked and the local one stays live (§5.1, never auto-resolved).
     pub park: bool,
-    /// Fields whose merged value came from the server. A local write queued
-    /// while the push was on the wire must not be overwritten by them.
     pub adopted: Touched,
 }
 
-/// Field-wise merge. A field this device did not touch takes the server's
-/// value; a field it did touch keeps the local value. That is not
-/// last-write-wins on `updated_at`, and deliberately: `updated_at` is per
-/// row, so a remote row that is newer only because its *text* changed would
-/// win every metadata field it never touched — exactly the clobbering this
-/// merge exists to stop. With no base snapshot there is no telling whether
-/// the other device also changed a field this one touched, so the device
-/// that changed it and pushes it now keeps it. The document is never decided
-/// that way: touched here and different there, it parks. The tag set unions only when this device changed
-/// it (§5.3); otherwise the server's set stands, so a removal made
-/// elsewhere is not resurrected by a device that never looked at the tags.
 pub(super) fn merge_note(
     local: &LocalNote,
     remote: &RemoteNote,
@@ -177,11 +134,6 @@ pub(super) fn merge_note(
         note.is_pinned = remote.is_pinned;
         adopted.pinned = true;
     }
-    /* The title travels with nothing but itself (ADR-023): a parked document
-    still carries its `remote_title` in the conflicts row, so the live title
-    is merged like any other metadata field. It used to be the local one
-    unconditionally, so a rename on the other device was overwritten by a
-    device that had only pinned the note. */
     if !touched.title {
         note.title = remote.title.clone();
         note.title_source = remote.title_source.clone();
@@ -202,9 +154,6 @@ pub(super) fn merge_note(
     }
 }
 
-/// Writes the merged fields into the local row, inside `tx`. A field a newer
-/// queued row touched (`newer`) is left as the user has it now: the server
-/// already took the merged value, and that newer row will push the user's.
 pub(super) fn write_merged(
     tx: &rusqlite::Transaction<'_>,
     note_id: &str,
@@ -254,11 +203,6 @@ pub(super) fn write_merged(
     Ok(())
 }
 
-/// Whether rows queued while the push was on the wire may be rebased onto
-/// the rev just assigned. Not when one of them touched a field the server
-/// just took from the other device: rebased, that row would push the stale
-/// local value over it as a plain update. Left on the old base it arrives as
-/// a conflict next round and goes through this merge again.
 pub(super) fn may_rebase(merged: &Merged, newer: Touched) -> bool {
     !merged.adopted.intersects(newer)
 }
@@ -309,7 +253,6 @@ mod tests {
                 is_pinned: false,
             })
             .expect("saves");
-        // Pushed and clean: what the next local write starts from.
         db.with_conn(|conn| {
             conn.execute("UPDATE outbox SET sent_at = 1", ())?;
             conn.execute("UPDATE notes SET rev = 3, dirty = 0 WHERE id = ?1", [&id])?;
@@ -319,8 +262,6 @@ mod tests {
         (db, notes, id)
     }
 
-    /// A pin racing a text edit elsewhere is disjoint: no conflict, the
-    /// remote document and title are taken, the local pin is kept.
     #[test]
     fn a_metadata_change_takes_the_remote_document_instead_of_parking() {
         let (db, notes, id) = setup();
@@ -353,8 +294,6 @@ mod tests {
         assert!(merged.note.is_pinned, "the local pin is this device's");
     }
 
-    /// A save does touch the document: both changed and different parks,
-    /// and the local document stays live.
     #[test]
     fn a_save_racing_a_remote_edit_still_parks() {
         let (db, notes, id) = setup();
@@ -381,11 +320,9 @@ mod tests {
         let merged = merge_note(&local, &remote_of(&local, &id, "remote edit"), &[], touched);
         assert!(merged.park);
         assert!(merged.note.doc_json.contains("local edit"));
-        // The title was not this device's: the remote rename is kept.
         assert_eq!(merged.note.title, "Remote title");
     }
 
-    /// A row without a readable payload claims every field.
     #[test]
     fn an_unreadable_payload_touches_everything() {
         assert_eq!(Touched::of_payload("upsert", None), Touched::ALL);
@@ -406,8 +343,6 @@ mod tests {
         );
     }
 
-    /// An untouched tag set takes the server's set rather than re-adding a
-    /// tag the other device removed.
     #[test]
     fn untouched_tags_take_the_remote_set() {
         let (db, notes, id) = setup();
@@ -436,8 +371,6 @@ mod tests {
         assert_eq!(merged.note.tag_ids, vec!["a", "b", "c"]);
     }
 
-    /// A newer queued row that touched an adopted field blocks the rebase,
-    /// so it comes back as a conflict instead of overwriting the merge.
     #[test]
     fn a_newer_edit_to_an_adopted_field_is_not_rebased() {
         let (db, notes, id) = setup();
@@ -459,7 +392,6 @@ mod tests {
                 ..Touched::default()
             },
         );
-        // Typing lands while the push is on the wire.
         notes
             .save(&crate::repo::SaveNoteInput {
                 id: id.clone(),

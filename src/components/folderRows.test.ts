@@ -2,12 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { descendantCount, treeKeyAction, visibleFolderRows } from './folderRows';
 import type { FolderNode } from '../types/folder';
 
-/* `05-ui-ux.md` §10: the tree pattern — arrows move, `Right` expands, `Left`
-   collapses, `Enter` selects. M4's acceptance bar is a depth-10 tree navigated by
-   keyboard alone, so the traversal is tested as pure data rather than through the
-   DOM: jsdom cannot lay out a tree and, more to the point, the traversal is the
-   part that can be wrong independently of the rendering. */
-
 function node(id: string, children: FolderNode[] = []): FolderNode {
   return { id, name: id, parentId: null, position: 0, children };
 }
@@ -16,7 +10,6 @@ function child(id: string, parentId: string, children: FolderNode[] = []): Folde
   return { id, name: id, parentId, position: 0, children };
 }
 
-/* depth: 0 → d, 1 → d/1, … 9 → d/9 — ten levels, the M4 acceptance bar. */
 function deepTree(): FolderNode[] {
   const nodes: FolderNode[] = [node('d')];
   let current = nodes[0] as FolderNode;
@@ -79,7 +72,6 @@ describe('visibleFolderRows', () => {
   });
 
   it('counts only descendants, not the folder itself and not its notes', () => {
-    /* §6.3: the confirmation names how many folders go with it. */
     expect(descendantCount([node('a', [node('a1'), node('a2')]), node('b')], 'a')).toBe(2);
     expect(descendantCount([node('a', [node('a1')]), node('b')], 'b')).toBe(0);
   });
@@ -108,8 +100,6 @@ describe('visibleFolderRows', () => {
 
     expect(rows.find((row) => row.node.id === 'b')?.setSize).toBe(3);
     expect(rows.find((row) => row.node.id === 'b')?.posInSet).toBe(2);
-    /* The child is alone among its siblings, so its set size is 1, not the
-       parent's 3. */
     expect(rows.find((row) => row.node.id === 'c1')?.setSize).toBe(1);
     expect(rows.find((row) => row.node.id === 'c1')?.posInSet).toBe(1);
   });
@@ -183,9 +173,6 @@ describe('treeKeyAction', () => {
     let rows = visibleFolderRows(deepTree(), []);
     let current = 'd';
 
-    /* Nine presses to walk down nine levels. Every press has to land on a real
-       row, which is what makes this an assertion about traversal rather than
-       about the first row. */
     for (let press = 0; press < 9; press += 1) {
       const action = treeKeyAction(rows, current, 'ArrowDown');
       expect(action?.kind).toBe('move');
@@ -193,12 +180,6 @@ describe('treeKeyAction', () => {
     }
     expect(current).toBe('d/9');
 
-    /* Climbing out of a chain alternates two behaviours, and both are needed to
-       reach the root: the deepest node is a leaf, so `Left` on it climbs
-       directly, while every node above it is an expanded branch, so `Left` first
-       collapses it and only the next press climbs. The collapse removes the
-       subtree from the row list, so each press after the first has to be resolved
-       against the list *after* the toggle — which is the case the caller renders. */
     let collapsed: string[] = [];
 
     expect(treeKeyAction(rows, 'd/9', 'ArrowLeft')).toEqual({ kind: 'move', id: 'd/8' });
@@ -218,7 +199,6 @@ describe('treeKeyAction', () => {
     }
 
     expect(current).toBe('d');
-    /* The root refuses to climb further — there is nothing above it. */
     expect(treeKeyAction(rows, 'd', 'ArrowLeft')).toEqual({ kind: 'collapse', id: 'd' });
   });
 });

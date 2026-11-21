@@ -2,12 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { applySaveToList, compareSummaries } from './noteOrder';
 import type { NoteSummary } from '../types/ipc';
 
-/* `03-data-model.md` §5: `is_pinned DESC, updated_at DESC` everywhere but the
-   trash. The editor patches saves into the cached lists without refetching, so
-   the patch has to carry the ordering — otherwise an edit strands its note
-   mid-list. These pin the comparator and the patch-then-sort contract,
-   including the two orderings a save must not touch. */
-
 function summary(overrides: Partial<NoteSummary> & { id: string }): NoteSummary {
   return {
     title: overrides.id,
@@ -50,7 +44,6 @@ describe('applySaveToList', () => {
     const next = applySaveToList(existing, summary({ id: 'c', updatedAt: 400 }), 'all');
 
     expect(next.map((row) => row.id)).toEqual(['c', 'a', 'b']);
-    /* The input is not mutated: it may be another cache's entry. */
     expect(existing.map((row) => row.id)).toEqual(['a', 'b', 'c']);
   });
 
@@ -66,8 +59,6 @@ describe('applySaveToList', () => {
   });
 
   it('patches a trash list without re-sorting it', () => {
-    /* Trash orders by `deleted_at`, which a save cannot change and summaries do
-       not carry — sorting by updatedAt here would scramble deletion order. */
     const existing = [
       summary({ id: 'a', updatedAt: 300 }),
       summary({ id: 'b', updatedAt: 200 }),

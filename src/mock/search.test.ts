@@ -2,12 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { matchesTokens, rankFor, snippetFor, toSearchTokens } from './search';
 import type { JsonDoc } from '../types/note';
 
-/* Required test 7 in `10-conventions.md` §10 is the Rust half: search input
-   containing FTS operators cannot produce an error or an injection. This is the
-   browser half of the same rule, and it matters more than it looks — a mock that
-   quietly accepted `NEAR(` would let a Playwright test pass while the real query
-   rejected it, which is the whole failure ADR-018 is written to prevent. */
-
 function doc(text: string): JsonDoc {
   return { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] };
 }
@@ -90,9 +84,6 @@ describe('snippetFor', () => {
   });
 
   it('falls back to the opening of the body when only the title matched', () => {
-    /* FTS5's `snippet(…, 1, …)` reads column 1, the body, whatever column matched.
-       A result whose only hit was in the title therefore still shows the body —
-       which is the useful thing, because the card prints the title itself. */
     const snippet = snippetFor(doc('A body with nothing relevant in it.'), tokens('roadmap'));
 
     expect(snippet).not.toContain('<mark>');

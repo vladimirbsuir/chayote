@@ -3,39 +3,11 @@ import { createPortal } from 'react-dom';
 import { MoreHorizontal } from 'lucide-react';
 import type { Uuid } from '../types/note';
 
-/* The per-row overflow menu for a folder: rename, new subfolder, delete.
-   `more-horizontal` from the `05-ui-ux.md` §3.3 inventory, which is what that icon
-   is for.
-
-   Why a menu rather than three always-visible icons: a 26 px row has room for the
-   twisty, the folder glyph, the name, and a count. Three more controls would leave
-   the name about forty pixels wide. A menu also matches §2.2's "right-click for
-   menu", which is why the row opens this on right-click as well as on the button.
-
-   **The items carry no icons.** The `05-ui-ux.md` §3.3 inventory is closed and has
-   no pencil or edit glyph, and ADR-015 says adding an icon to the UI means adding
-   it there first. Rather than grow the inventory for three verbs that are already
-   words, the menu is text — which is also §1's rule that no icon sits where a word
-   is clearer, applied to a menu whose items are three distinct English verbs.
-
-    The menu is a `menu` with `menuitem`s rather than a list of buttons, because that
-    is what lets the arrow keys move between items and `Esc` return focus to the row
-    — the behaviour a user expects from a menu that opened under their cursor.
-
-    Portalled against the viewport, like `NoteRowMenu`: the tree scrolls inside
-    an `overflow` container, and a menu rendered in the row is clipped by it —
-    the long-press menu on a phone arrived as a sliver. Placement is measured by
-    the opener and arrives as a prop, never measured here in an effect. */
-
 export type FolderMenuAction = 'rename' | 'create' | 'delete';
 
 type FolderRowMenuProps = {
   folderId: Uuid;
   folderName: string;
-  /** Viewport coordinates, measured by the row in the handler that opened the
-      menu — the same contract as `NoteRowMenu`, for the same reason: an effect
-      that measures and then sets state is a second render for geometry that
-      was already in hand. */
   placement: { top: number; left: number };
   onAction: (action: FolderMenuAction, id: Uuid) => void;
   onClose: () => void;
@@ -52,9 +24,6 @@ export function FolderRowMenu({
   const firstItemRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  /* Focus the first item on open, and hand focus back on close — both are what
-     make the menu usable from the keyboard rather than only from the mouse that
-     opened it. */
   useEffect(() => {
     firstItemRef.current?.focus();
   }, []);
@@ -66,10 +35,6 @@ export function FolderRowMenu({
     [folderId],
   );
 
-  /* Outside press closes on `mousedown` (plus `click` for presses with no
-     button-down) — the same contract as `NoteRowMenu`: never on `auxclick`,
-     whose order against `contextmenu` differs by platform and shuts the
-     just-opened menu where it lands after. */
   useEffect(() => {
     const onOutsidePress = (event: MouseEvent): void => {
       if (menuRef.current?.contains(event.target as Node)) return;
@@ -113,8 +78,6 @@ export function FolderRowMenu({
         itemRefs.current[next]?.focus();
       }}
       style={{ top: placement.top, left: placement.left }}
-      /* Menu labels are chrome, not content: a hold on an item must press it,
-         never select its text. */
       className="fixed z-50 min-w-[168px] overflow-hidden rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-pop)] select-none"
     >
       {items.map((item, index) => (
@@ -145,10 +108,6 @@ export function FolderRowMenu({
   );
 }
 
-/** The row's own affordance. Kept out of the tab order (`tabIndex={-1}`) for the
-    same reason the collapse twisty is: the row's own keydown handles the menu, so a
-    stop between every folder row and its menu is one more thing to tab past for no
-    gain. */
 export function FolderMenuButton({
   folderName,
   onOpen,

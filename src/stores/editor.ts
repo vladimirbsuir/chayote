@@ -1,21 +1,11 @@
 import { create } from 'zustand';
 import type { Uuid } from '../types/note';
 
-/* The autosave state machine of `04-editor.md` §5.2, and nothing else. §7 lists
-   what the status bar shows; this store holds the two things that are not the
-   editor's own — which note is open, and where the write path has got to. The
-   document itself belongs to TipTap (`10-conventions.md` §7) and is never
-   stored here.
-
-   The save state carries the note id so that a failure on a note the user has
-   already left does not paint the status bar of the note now open. */
-
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 
 export type EditorState = {
   noteId: Uuid | null;
   saveState: SaveState;
-  /** The note the current `saveState` refers to, or `null` for no note. */
   subjectId: Uuid | null;
 };
 
@@ -27,7 +17,6 @@ const INITIAL: EditorState = {
 
 export const useEditorStore = create<EditorState>(() => ({ ...INITIAL }));
 
-/** `saveState` as the status bar should show it for the note now open. */
 export function selectSaveState(state: EditorState, noteId: Uuid | null): SaveState {
   if (noteId === null || state.subjectId !== noteId) return 'saved';
   return state.saveState;

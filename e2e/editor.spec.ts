@@ -1,15 +1,8 @@
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
-/* `04-editor.md` §3 and §5, driven with real keystrokes. Input rules and smart
-   typography only fire on typed input, so they cannot be checked with a
-   programmatic insert — that is what this file is for. */
-
 const RICH_NOTE = '01980000-0000-7000-8000-000000000001';
 
-/* Seeds the settings store once, and only if it is empty: `addInitScript` runs on
-   every navigation, and writing unconditionally would reset any state a test has
-   since changed. */
 async function openRichNote(page: Page): Promise<void> {
   await page.addInitScript((id) => {
     if (window.localStorage.getItem('settings.json') !== null) return;
@@ -22,10 +15,6 @@ async function openRichNote(page: Page): Promise<void> {
   await expect(page.getByRole('textbox', { name: 'Note content' })).toBeVisible();
 }
 
-/* Chromium does not move a contenteditable caret with Ctrl+End. Clicking the
-   last block and pressing Enter puts the caret in a fresh empty paragraph, which
-   is also what markdown input rules need: they only fire at the start of a text
-   block. */
 async function caretToNewBlock(page: Page, editor: Locator): Promise<void> {
   await editor.locator(':scope > *').last().click();
   await settleEditor(page);
@@ -33,26 +22,6 @@ async function caretToNewBlock(page: Page, editor: Locator): Promise<void> {
   await page.keyboard.press('Enter');
 }
 
-/**
- * Waits for the frame in which ProseMirror reads the DOM selection into its own
- * state.
- *
- * A click returns to the driver before ProseMirror has processed it, so a
- * shortcut pressed immediately afterwards is evaluated against the *previous*
- * selection: the mark applies to nothing, or `Ctrl+Enter` finds no `taskItem`
- * and returns false. Measured at roughly 50 % on a loaded machine, and it
- * predates M3 — the same test fails the same way on the M2 shell.
- *
- * Waiting on one animation frame is the fix rather than a poll of the DOM
- * selection. Reading `window.getSelection()` reports the *DOM* caret, which is
- * already correct before ProseMirror has seen it, so polling it returns true
- * while the command is still evaluated against a stale selection. A frame is
- * when ProseMirror's own DOM observer runs, so it is the point at which the
- * editor state actually matches what the user can see.
- *
- * This is a race in driving the editor, not a defect in it: a person cannot press
- * a shortcut before seeing the caret land.
- */
 async function settleEditor(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => {
@@ -65,10 +34,6 @@ test('renders the fixture document with every block in the schema', async ({ pag
   await openRichNote(page);
   const editor = page.getByRole('textbox', { name: 'Note content' });
 
-  /* The fixture's *leading* heading is gone from the body: migration 0006 lifted
-     it into the title field (ADR-023), so the first H1 here is a section inside
-     the note rather than the note's name. Asserting the one that is left is what
-     keeps this test covering the H1 node at all. */
   await expect(page.getByTestId('note-title-input')).toHaveValue('Meeting notes');
   await expect(editor.locator('h1')).toHaveText('Apologies');
   await expect(editor.locator('h2').first()).toHaveText('Decisions');
@@ -83,9 +48,6 @@ test('shows the note title and the word count', async ({ page }) => {
   await openRichNote(page);
 
   await expect(page.getByTestId('word-count')).toContainText('words');
-  /* The title is in the field above the text (ADR-023), not in the status bar —
-     `title.spec.ts` proves the field end to end, and this is the one assertion
-     that the editor pane renders it. */
   await expect(page.locator('section[aria-label="Editor"]')).toContainText('Meeting notes');
 });
 
@@ -136,10 +98,6 @@ test('applies the four marks from 05-ui-ux.md §7', async ({ page }) => {
   await page.keyboard.type('marked');
   await settleEditor(page);
 
-  /* A double click does not move ProseMirror's selection under Playwright;
-     walking left with Shift does. Twelve, because the paragraph is shorter than
-     that and the walk runs off its start into the block above — which is fine,
-     since the assertion is on the marked run of text. */
   for (let i = 0; i < 12; i += 1) {
     await page.keyboard.press('Shift+ArrowLeft');
   }
@@ -153,9 +111,6 @@ test('applies the four marks from 05-ui-ux.md §7', async ({ page }) => {
   ] as const) {
     await page.keyboard.press(`Control+${key}`);
     await expect(editor.locator(selector).last()).toContainText('marked');
-    /* Settle before the toggle-off as well: without it the off-press is
-       evaluated against the selection from before the on-press and the mark
-       survives, so the next iteration starts from a different document. */
     await settleEditor(page);
     await page.keyboard.press(`Control+${key}`);
   }

@@ -7,8 +7,6 @@ use crate::db::Database;
 use crate::error::AppError;
 use crate::repo::{append_outbox, base_rev_of, TagWithCount, TagsRepo};
 
-/// `03-data-model.md` §3.4. Tag names are case-insensitive unique among live
-/// tags, normalised to the first-created spelling.
 pub struct SqliteTagsRepo {
     db: Arc<Database>,
 }
@@ -36,10 +34,6 @@ impl SqliteTagsRepo {
         })
     }
 
-    /// `COLLATE NOCASE` on the column plus the partial unique index gives
-    /// case-insensitive uniqueness without application-level case folding that
-    /// Postgres would disagree with. Creating `work` when `Work` exists returns
-    /// the existing tag rather than a duplicate.
     fn lookup(&self, name: &str) -> Result<Option<(String, String)>, AppError> {
         self.db.with_conn(|conn| {
             let found = conn
@@ -56,9 +50,6 @@ impl SqliteTagsRepo {
 }
 
 impl TagsRepo for SqliteTagsRepo {
-    /// `03-data-model.md` §5. Tags stay listed at a zero count so they can be
-    /// created before any note carries them (ADR-021); counts still exclude
-    /// trashed notes.
     fn list(&self) -> Result<Vec<TagWithCount>, AppError> {
         self.db.with_conn(|conn| {
             let mut stmt = conn.prepare(
@@ -116,11 +107,6 @@ impl TagsRepo for SqliteTagsRepo {
         if clean.is_empty() {
             return Err(AppError::Validation("Give the tag a name.".into()));
         }
-        /* Renaming onto another live tag's name (in any case) is refused in
-        words. It used to reach the unique index and come back as `DB_ERROR`,
-        which the frontend treats as storage failing rather than as input to
-        correct (`10-conventions.md` §6). Renaming a tag to a new spelling of
-        its own name is not a clash. */
         if let Some((existing, _)) = self.lookup(&clean)? {
             if existing != id {
                 return Err(AppError::Validation(
@@ -146,8 +132,6 @@ impl TagsRepo for SqliteTagsRepo {
         self.with_count(id, name.trim())
     }
 
-    /// Removing a tag never removes it from a note's own history: the
-    /// `note_tags` rows cascade, the tag row goes with them.
     fn delete(&self, id: &str) -> Result<(), AppError> {
         let tag_id = id.to_owned();
         self.db.with_conn(move |conn| {

@@ -4,16 +4,6 @@ import { openNote, useEditorStore } from '../stores/editor';
 import type { Note, SaveNoteInput } from '../types/ipc';
 import type { JsonDoc, Uuid } from '../types/note';
 
-/* `04-editor.md` §5.1: "the same serialised document is not written again", and the
-   exception the status bar creates. A folder or tag change arrives carrying an
-   unchanged document, so the comparison calls it unchanged and the write never
-   happens — the same failure a pin-only write has, and the reason `notes_set_pinned`
-   exists as its own command.
-
-   These tests pin that exception down through the paths that can lose it: the
-   debounce, an explicit flush, and the retry timer. The retry is the one that cannot
-   be reached from the UI, which is exactly why it needs a test. */
-
 const NOTE: Uuid = '01980000-0000-7000-8000-000000000001';
 const OTHER: Uuid = '01980000-0000-7000-8000-000000000002';
 
@@ -54,7 +44,6 @@ function asNote(input: SaveNoteInput): Note {
   };
 }
 
-/** Lets every pending microtask and the autosave's own timers run. */
 async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
@@ -102,8 +91,6 @@ describe('createAutosave', () => {
     const autosave = createAutosave(vi.fn());
     autosave.setBaseline(base);
 
-    /* The comparison against the baseline, not against a document the user never
-       had: opening a note is not a change. */
     autosave.noteChanged({ ...base });
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
 
@@ -136,12 +123,6 @@ describe('createAutosave', () => {
     const autosave = createAutosave(vi.fn());
     autosave.setBaseline(base);
 
-    /* The order matters and is the bug this guards: the tag write is queued, then a
-       document edit arrives before the debounce fires. If the queueing of the edit
-       cleared the "this write is metadata" state, the single write that results
-       would be judged on the document alone — which has changed, so it would pass.
-       The inverse is worse: a keystroke that normalises back to the same document
-       would drop the tag. */
     autosave.schedule({ ...base, tagIds: ['tag-1'] });
     autosave.noteChanged({ ...base, doc: doc('hello'), tagIds: ['tag-1'] });
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
@@ -163,15 +144,6 @@ describe('createAutosave', () => {
   });
 
   it('overlapping flushes wait for the in-flight save instead of spinning', async () => {
-    /* Found on a phone: type a title into a fresh note, press back, freeze. The
-       tap blurs the editor — flush one starts the save — and the unmount
-       flushes again — flush two — while it is still running. The old
-       `while (inFlight)` loop re-entered `persist` and early-returned forever:
-       a microtask loop that starves the task queue the save's own response
-       arrives on, so on a real WebView the save never settles and the app
-       deadlocks. A platform IPC response arrives on a later task, so this test
-       resolves the save from a `setTimeout`: with the spin in place the timer
-       never fires and the test times out instead of passing. */
     vi.useRealTimers();
     try {
       const autosave = createAutosave(vi.fn());
@@ -191,7 +163,6 @@ describe('createAutosave', () => {
       const first = autosave.flush();
       const second = autosave.flush();
 
-      /* The platform answers on a later task. */
       await new Promise((resolve) => setTimeout(resolve, 20));
       resolveSave(asNote({ ...base, doc: doc('A brand new title') }));
 
@@ -210,8 +181,6 @@ describe('createAutosave', () => {
     const autosave = createAutosave(vi.fn());
     autosave.setBaseline(base);
 
-    /* A note switch flushes the outgoing note unconditionally, and this is what
-       keeps that free: no change, no write. */
     await autosave.flush({ ...base });
     await settle();
 
@@ -229,10 +198,6 @@ describe('createAutosave', () => {
     expect(save).toHaveBeenCalledTimes(1);
     expect(useEditorStore.getState().saveState).toBe('error');
 
-    /* The retry is where a force flag riding on the caller's argument would have been
-       lost: this re-entry has only the queue, and the document it carries is the one
-       already in the baseline. Judged on the document alone, the retry is "unchanged"
-       and the tag is silently lost while the bar says "Saved". */
     await vi.advanceTimersByTimeAsync(RETRY_BASE_MS);
     await settle();
 
@@ -269,9 +234,6 @@ describe('createAutosave', () => {
   });
 
   it('writes what was pending once on dispose, and never retries it', async () => {
-    /* A tag picked in the last 800 ms before the editor went away used to be
-       dropped with the timer. The change is written; a failure after the editor
-       is gone is not retried, because nothing is left to show it. */
     const autosave = createAutosave(vi.fn());
     autosave.setBaseline(base);
     save.mockRejectedValueOnce(new Error('database is locked'));
@@ -286,9 +248,6 @@ describe('createAutosave', () => {
   });
 
   it('keeps a note’s newest document when another note opens during its save', async () => {
-    /* Reproduced from the audit: type in A, keep typing while A's save runs, open
-       B. B's baseline used to overwrite the one shared slot, so the drain wrote B's
-       unchanged document and A's last keystrokes were never saved. */
     let release!: () => void;
     save.mockImplementationOnce(
       (input) =>
@@ -327,7 +286,6 @@ describe('createAutosave', () => {
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
     expect(save).toHaveBeenCalledTimes(1);
 
-    /* The switch used to clear the retry along with the slot. */
     autosave.setBaseline({ ...base, id: OTHER, doc: doc('b0') });
     await vi.advanceTimersByTimeAsync(RETRY_BASE_MS);
     await settle();
@@ -341,8 +299,6 @@ describe('createAutosave', () => {
     autosave.setBaseline(base);
     autosave.setBaseline({ ...base, id: OTHER, doc: doc('b0') });
 
-    /* A's document is unchanged from A's own baseline, so it is not a write even
-       though the most recent baseline was B's. */
     autosave.noteChanged({ ...base });
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
     await settle();
@@ -357,8 +313,6 @@ describe('createAutosave', () => {
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
     await settle();
 
-    /* The switch: a new note, adopted as the baseline. A flush of the old note must
-       not leave the comparison pointing at the new one's document. */
     autosave.setBaseline({ ...base, id: OTHER, doc: doc('second') });
 
     await autosave.flush({ ...base, id: OTHER, doc: doc('second') });

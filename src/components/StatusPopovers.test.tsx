@@ -5,15 +5,6 @@ import { flattenFolders } from './popoverPlacement';
 import type { FolderNode } from '../types/folder';
 import type { TagWithCount } from '../types/tag';
 
-/* `05-ui-ux.md` §6.4: "A tag is created by typing a new name into the tag editor;
-   existing names complete. Case-insensitive match, normalised to the first-created
-   spelling. Removing a tag from a note never deletes the tag itself."
-
-   §6.4's "case-insensitive match, normalised to the first-created spelling" is
-   mostly the backend's job — `tags_create` returns the existing row — so what is
-   asserted here is the half the frontend owns: that typing a name which already
-   exists toggles rather than asking for a duplicate. */
-
 const FOLDERS: FolderNode[] = [
   {
     id: 'a',
@@ -87,8 +78,6 @@ describe('FolderPicker', () => {
     renderPicker();
 
     const options = screen.getAllByTestId('folder-picker-option');
-    /* Depth one, exactly like Work below it: the old row carried a folder
-       glyph none of the other rows has. */
     expect(options[0]?.style.paddingLeft).toBe('20px');
     expect(options[1]?.style.paddingLeft).toBe('20px');
     expect(options[0]?.querySelector('svg')).toBeNull();
@@ -105,8 +94,6 @@ describe('FolderPicker', () => {
   });
 
   it('says so when nothing matches, without offering to create', () => {
-    /* Folder creation lives in the sidebar behind `+`, not in a picker: an
-       Enter-to-create here would be a second implementation of it. */
     renderPicker();
 
     fireEvent.change(screen.getByTestId('folder-picker-filter'), { target: { value: 'zzz' } });
@@ -142,7 +129,6 @@ describe('FolderPicker', () => {
   it('can clear the folder, because "unfiled" is a real choice', () => {
     const { onPick } = renderPicker({ current: 'a' });
 
-    /* ADR-014: everything starts unfiled, so a note can always go back there. */
     fireEvent.click(screen.getAllByRole('option')[0] as HTMLElement);
 
     expect(onPick).toHaveBeenCalledWith(null);
@@ -242,13 +228,8 @@ describe('TagEditor', () => {
 
     fireEvent.click(screen.getAllByRole('option')[0] as HTMLElement);
 
-    /* §6.4: "Removing a tag from a note never deletes the tag itself." The editor has
-       no delete affordance at all, which is the simplest way to guarantee it. */
     expect(onToggle).toHaveBeenCalledWith('t-work');
     expect(onCreate).not.toHaveBeenCalled();
-    /* The tag is still listed. §6.4: removing a tag from a note never removes the
-       tag itself, and a library that lost the entry would make it unaddable again
-       without typing it. */
     expect(screen.getAllByRole('option')).toHaveLength(2);
   });
 
@@ -275,9 +256,6 @@ describe('TagEditor', () => {
     fireEvent.change(screen.getByTestId('tag-editor-input'), { target: { value: 'Work' } });
     fireEvent.keyDown(screen.getByTestId('tag-editor-input'), { key: 'Enter' });
 
-    /* The backend normalises to the first-created spelling, so asking it to create
-       `Work` again would be asking for a second `work`. The exact-match case is a
-       request to add the tag, not to duplicate it. */
     expect(onToggle).toHaveBeenCalledWith('t-work');
     expect(onCreate).not.toHaveBeenCalled();
   });
@@ -289,8 +267,6 @@ describe('TagEditor', () => {
     fireEvent.keyDown(screen.getByTestId('tag-editor-input'), { key: 'Enter' });
 
     expect(onCreate).toHaveBeenCalledWith('urgent');
-    /* Not toggled here: the backend returns the row, and the shell toggles it with
-       the id that comes back. */
     expect(onToggle).not.toHaveBeenCalled();
   });
 
@@ -308,7 +284,6 @@ describe('TagEditor', () => {
 
     fireEvent.change(screen.getByTestId('tag-editor-input'), { target: { value: 'urgent' } });
 
-    /* §8's rule that every state explains the cause. */
     expect(screen.getByText(/Press Enter to create/)).toBeDefined();
   });
 
@@ -339,9 +314,6 @@ describe('TagEditor', () => {
   it('carries no document and no counts into the note list', () => {
     renderEditor();
 
-    /* `03-data-model.md` §3.3: a `NoteSummary` carries tags as `{id, name}` and
-       nothing else. The editor shows the count because the tag library carries it,
-       not because the note does. */
     const option = screen.getAllByRole('option')[0];
     expect(option?.textContent).not.toContain('14');
   });

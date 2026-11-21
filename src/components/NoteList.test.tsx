@@ -12,9 +12,6 @@ import type { NoteSummary } from '../types/ipc';
 
 const SEEDED_NOTES = 10_000;
 
-/* The empty state is a prop because §8 gives six situations their own copy and
-   their own glyph, and the list has no way to tell which one it is in. Only the
-   copy matters here, so one shared stand-in keeps these tests about the list. */
 const EMPTY_STATE = {
   title: 'Nothing here',
   body: 'No notes in this view.',
@@ -62,9 +59,6 @@ describe('NoteList', () => {
   });
 
   it('mounts a bounded number of cards at 10 000 notes', async () => {
-    /* `02-architecture.md` §8: the list must be virtualised from the first
-       commit and must not degrade at 10 000 notes. The assertion is that the DOM
-       holds a window, not that all 10 000 rows exist. */
     const summaries = await seededSummaries(SEEDED_NOTES);
     expect(summaries).toHaveLength(SEEDED_NOTES);
 
@@ -88,9 +82,6 @@ describe('NoteList', () => {
       expect(cards.length).toBeLessThan(60);
     });
 
-    /* The scroll container must span the whole list, or scrolling could never
-       reach the last note. Rows are measured, so the total is the sum of the
-       measured heights rather than a constant times the count. */
     const container = screen.getByTestId('note-list');
     const spacer = container.firstElementChild as HTMLElement;
     const total = Number.parseFloat(spacer.style.height);
@@ -101,9 +92,6 @@ describe('NoteList', () => {
   });
 
   it('carries no document body on a summary row', async () => {
-    /* R9 and `03-data-model.md` §3.3: the list renders `excerpt` and never a
-       document, because walking 10 000 documents to draw a list is the mistake
-       this column split exists to prevent. */
     const summaries = await seededSummaries(3);
     render(
       <QueryClientProvider client={client()}>
@@ -174,9 +162,6 @@ describe('NoteList', () => {
   });
 
   it('renders every card with its own border and surface, not as a continuous block', async () => {
-    /* Adjacent notes must read as separate cards: each carries its own border
-       and surface, with the 8 px gap living in the measured virtual row around
-       it. A `border-transparent` card on the raised sidebar is one block. */
     const summaries = await seededSummaries(3);
     render(
       <QueryClientProvider client={client()}>
@@ -205,8 +190,6 @@ describe('NoteList', () => {
   });
 
   it('marks the open card with the accent border', async () => {
-    /* The open card is an accent border on the same surface — distinct from a
-       merely hovered card without a second background competing with the pin. */
     const summaries = await seededSummaries(3);
     const openId = summaries[0]?.id ?? null;
     render(

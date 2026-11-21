@@ -1,20 +1,5 @@
 name: Release
 
-# ADR-024. Every bundle in `06-platform.md` §3.7 is produced on a clean runner,
-# one job per OS, and published as a GitHub Release rather than as an Actions
-# artifact. That change is what makes the updater possible: `tauri-plugin-updater`
-# reads a static `latest.json` over HTTPS, and an artifact bucket is not an
-# endpoint. It also fixes the old workflow's deprecated `upload-artifact@v4` and
-# gives bundles stable download URLs.
-#
-# Triggered by pushing a `v*` tag. A manual dispatch publishes the version
-# currently in `src-tauri/tauri.conf.json`, which the `version` job below asserts
-# is the same thing a tag would have had to be.
-#
-# The Android APK is built by its own job below, not by the desktop matrix.
-# ADR-025: it keeps the plugin's check and download and supplies its own
-# install, so it needs a keystore and a manifest key that `tauri-action` has no
-# way to merge. See `docs/06-platform.md` §3.8.1.
 
 on:
   workflow_dispatch:
@@ -22,14 +7,9 @@ on:
     tags:
       - 'v*'
 
-# Creating and updating a Release needs a write token. `contents: write` and
-# nothing else: no `actions: write`, no packages, no deployments.
 permissions:
   contents: write
 
-# Two tags pushed in quick succession must not race for `releases/latest`, which
-# is the endpoint `plugins.updater.endpoints` reads. Serialising per branch means
-# the second waits, and `latest` settles on the higher version.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -67,10 +47,6 @@ jobs:
     name: Bundle (${{ matrix.os }})
     needs: version
     runs-on: ${{ matrix.os }}
-    # The signing key lives in the `release` environment, not at repository
-    # level. A job only sees an environment's secrets when it names the
-    # environment, and the failure without this is a build that stops at
-    # "no private key" rather than anything obvious about permissions.
     environment: release
     strategy:
       fail-fast: false
@@ -98,9 +74,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
       - run: npm ci
-      # `createUpdaterArtifacts` in tauri.conf.json makes the bundler sign every
-      # artifact, and a bundle with no signature cannot be updated from. The key
-      # is a repository secret and is never written to the runner's disk.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -132,10 +105,6 @@ jobs:
             permission, granted in system settings rather than in a pop-up.
           includeUpdaterJson: true
           args: --bundles ${{ matrix.bundles }}
-      # Only the portable executable is uploaded as a workflow artifact. The
-      # bundles reach users through the Release above, which has stable URLs and
-      # is what the updater resolves; keeping a second copy in the artifact store
-      # would be a second place to look for a build that could drift.
       - name: Portable executable (Windows)
         if: matrix.os == 'windows-latest'
         run: npx tauri build --no-bundle
@@ -147,11 +116,6 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-  # ADR-025. Runs after the desktop matrix, and the ordering is not incidental:
-  # `tauri android build` packages through Gradle, so it produces no updater
-  # artifact and `tauri-action` has nothing to merge. This job signs the APK
-  # itself and merges one manifest key into the document the matrix already
-  # published — which only exists once that matrix has finished.
   android:
     name: APK (Android)
     needs: [version, desktop]
@@ -170,24 +134,10 @@ jobs:
         id: ndk
         with:
           ndk-version: r27c
-      # Before the SDK step, because `sdkmanager` is a shell script that needs a
-      # JDK. Pinned rather than inherited from the runner: AGP 9.3 needs a JDK it
-      # can rely on, and "whatever ubuntu-latest happens to ship today" is not a
-      # thing to build a signed release against. 21 is what M7 was verified on
-      # (`06-platform.md` §4.5).
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      # Not `android-actions/setup-android`, which fails on current runner images
-      # before it does anything useful: it installs the standalone `tools`
-      # package, and Google removed that from the repository, so its own
-      # `sdkmanager` call exits 1 on "Failed to find package 'tools'". The
-      # runner already ships cmdline-tools, so the components are named here.
-      #
-      # `platforms;android-37.0` is not a typo: Android 17 ships a minor SDK
-      # version and `compileSdk = 37` resolves to the `android-37.0` directory
-      # (`06-platform.md` §4.5, verified on M7).
       - name: Set up the Android SDK
         run: |
           set -eu
@@ -200,13 +150,6 @@ jobs:
           sdkmanager --list_installed | grep -E "platforms;android-37|build-tools"
       - run: npm ci
 
-      # Android refuses an update whose signing certificate differs from the
-      # installed one, so a debug-signed APK could never update in place. The
-      # default debug keystore is public knowledge, which would make any APK
-      # claiming to be this app installable, so the release key is ours and is
-      # a secret. Losing it costs every installed user their notes: Android
-      # gives no way to update, only to uninstall, and uninstalling deletes
-      # chayote.db. `06-platform.md` §4.6 records it.
       - name: Set up the release signing key
         env:
           ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
@@ -224,9 +167,6 @@ jobs:
           keytool -list -keystore "$RUNNER_TEMP/chayote-release.jks" \
             -storepass "$ANDROID_KEY_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
 
-      # Both ARM ABIs in one APK, which is what makes a single signature serve the
-      # two manifest keys. `x86_64` is not shipped (`06-platform.md` §4.1), so an
-      # emulator's check finds no key and says so rather than offering nothing.
       - name: Build the release APK
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}

@@ -11,8 +11,6 @@ use crate::repo::{
 };
 use crate::services::derive;
 
-/// The only implementation. Sync replicates its rows to Postgres without
-/// touching anything above this trait (ADR-003).
 pub struct SqliteNotesRepo {
     db: Arc<Database>,
 }
@@ -61,13 +59,10 @@ impl SqliteNotesRepo {
     }
 }
 
-/// A fresh UUIDv7 (R1). Generated on the device at creation time, never
-/// reassigned, never reused after a delete.
 fn new_id() -> String {
     UuidV7::now_v7().to_string()
 }
 
-/// Reads `rev` outside the write transaction's borrow, then writes.
 fn base_rev(conn: &rusqlite::Connection, id: &str) -> Result<i64, AppError> {
     base_rev_of(conn, "notes", id)?.ok_or(AppError::NotFound)
 }
@@ -75,8 +70,6 @@ fn base_rev(conn: &rusqlite::Connection, id: &str) -> Result<i64, AppError> {
 const DEFAULT_ORDER: &str = "n.is_pinned DESC, n.updated_at DESC";
 
 impl NotesRepo for SqliteNotesRepo {
-    /// `03-data-model.md` §5. Pinned notes sort first across the whole
-    /// selection, not just within a folder.
     fn list(&self, filter: &NoteFilter) -> Result<Vec<NoteSummary>, AppError> {
         self.db.with_conn(|conn| {
             let (liveness, order) = match filter.selection {
@@ -113,8 +106,6 @@ impl NotesRepo for SqliteNotesRepo {
             let rows = read_rows(conn, &sql, scope)?;
             let mut summaries = attach(conn, &rows)?;
 
-            // Paging is applied after the joins so the limit counts notes, not
-            // join rows.
             let offset = filter.offset.unwrap_or(0).max(0) as usize;
             if offset > 0 {
                 summaries = summaries.into_iter().skip(offset).collect();
@@ -147,15 +138,6 @@ impl NotesRepo for SqliteNotesRepo {
                  VALUES (?1, ?2, 'auto', ?3, ?4, ?5, ?6, ?7, 0, 0, 1, ?8, ?8)",
                 rusqlite::params![
                     id,
-                    /* An empty title, not a placeholder. This used to store the
-                    literal "Untitled" that `derive::title` produced for an empty
-                    document, which with derivation gone became a real title:
-                    it would be synced to other devices as though the reader had
-                    typed it, and a cleared title stored "" beside it. The
-                    placeholder is a rendering decision — `NoteCard` and
-                    `EditorPane` both map an empty title to "Untitled" — and
-                    keeping it out of the database is what lets a new note and a
-                    cleared one agree. */
                     "",
                     serialised,
                     derived.plain_text,
@@ -171,8 +153,6 @@ impl NotesRepo for SqliteNotesRepo {
         })
     }
 
-    /// Derived values, the tag set and the outbox row are written in the same
-    /// transaction as the document (R5, R9).
     fn save(&self, input: &SaveNoteInput) -> Result<Note, AppError> {
         doc::validate::validate(&input.doc)?;
 
@@ -183,28 +163,9 @@ impl NotesRepo for SqliteNotesRepo {
         let tag_ids = input.tag_ids.clone();
 
         self.db.with_conn(move |conn| {
-            /* The title is not read, derived or written here.
-             *
-             * It was: a save re-derived the title from the document whenever
-             * `title_source` was `auto`, which meant that typing in the first
-             * line of the body silently renamed the note. That was the
-             * pre-ADR-023 behaviour, kept alive by the `auto` branch — but the
-             * title is a field of its own now, written only by `notes_set_title`
-             * (ADR-023, as amended), and a save that moves it would undo the
-             * very separation the field was added for.
-             *
-             * So a save leaves `title` and `title_source` alone entirely, and
-             * the query for them is gone rather than kept and ignored. */
             let base_rev = base_rev(conn, &note_id)?;
             let derived = derive::derive(&input.doc);
 
-            /* A folder or tag deleted while the note was open — from the sidebar,
-             * or by a sync pull — is dropped rather than written. The editor
-             * sends what it last knew, and a dangling id used to fail the
-             * foreign key and roll back the whole save, so every keystroke after
-             * the delete was lost until the note was reopened. The document is
-             * what the user is typing; it must not depend on metadata that
-             * vanished under it. */
             let folder = match folder {
                 Some(id) if folder_is_live(conn, &id)? => Some(id),
                 _ => None,
@@ -266,21 +227,11 @@ impl NotesRepo for SqliteNotesRepo {
         })
     }
 
-    /// `updated_at` moves with the pin. A pinned note sorts above everything, so
-    /// pinning one is a change to where it appears in every list — a note pinned
-    /// six months ago should come to the top when the user pins it now, not resume
-    /// its old position. Same reasoning as `move_to`.
     fn set_pinned(&self, id: &str, is_pinned: bool) -> Result<Note, AppError> {
         let note_id = id.to_owned();
         let now = crate::clock::now_ms();
 
         self.db.with_conn(move |conn| {
-            /* `base_rev` rather than `base_rev_of`: the helper exists for the folder
-            and tag repos, whose tables have no per-note shortcut, and it reports
-            a missing row as `None` rather than `NotFound`. Pinning a note that
-            does not exist has to be `NOT_FOUND` — `10-conventions.md` §6 lists it
-            as "close the editor, refresh the list", and a silent success would do
-            neither. */
             let base_rev = base_rev(conn, &note_id)?;
             let payload = serde_json::json!({ "id": note_id, "isPinned": is_pinned }).to_string();
 
@@ -295,17 +246,6 @@ impl NotesRepo for SqliteNotesRepo {
         })
     }
 
-    /// Writes the title alone. `03-data-model.md` §4.1: a non-empty title is
-    /// stored as `manual`, an empty one as `auto`, and neither is derived from
-    /// the document.
-    ///
-    /// Clearing the field used to hand the title back to derivation, so that an
-    /// emptied field meant "derive it again" rather than "no title". That was
-    /// ADR-023's decision and it is amended: the title is what the reader typed
-    /// and nothing else, so an empty field is an empty title and the note reads
-    /// as "Untitled" until one is typed. The body is not loaded here and no
-    /// derived column is recomputed, which is what keeps this cheap enough to
-    /// run on every keystroke of the title field.
     fn set_title(&self, id: &str, title: &str) -> Result<Note, AppError> {
         let note_id = id.to_owned();
         let trimmed = title.trim().to_owned();
@@ -320,10 +260,6 @@ impl NotesRepo for SqliteNotesRepo {
                 return Err(AppError::NotFound);
             }
 
-            /* `auto` is now simply "this note has no title", not "derive one".
-             * The column's CHECK constraint has always allowed the three values
-             * and sync pushes it, so the vocabulary is unchanged and a remote
-             * peer reading it sees exactly what it saw before. */
             let capped = derive::truncate_title(&trimmed);
             let (title, title_source) = if capped.is_empty() {
                 (String::new(), "auto".to_owned())
@@ -382,10 +318,6 @@ impl NotesRepo for SqliteNotesRepo {
     fn destroy(&self, id: &str) -> Result<(), AppError> {
         let note_id = id.to_owned();
         self.db.with_conn(move |conn| {
-            // `07-sync-plan.md` §5.4: a never-pushed note cannot vanish without
-            // ever existing elsewhere — permanent delete is refused while the
-            // server has never assigned it a `rev`. Soft-delete first and sync:
-            // the tombstone propagates, and *then* the row may go.
             let rev: i64 = conn
                 .query_row("SELECT rev FROM notes WHERE id = ?1", [&note_id], |row| {
                     row.get(0)
@@ -402,7 +334,6 @@ impl NotesRepo for SqliteNotesRepo {
             }
             let base_rev = base_rev(conn, &note_id)?;
             let tx = conn.transaction()?;
-            // The FTS row goes with it: AFTER DELETE trigger in 0002_fts.sql.
             tx.execute("DELETE FROM notes WHERE id = ?1", [&note_id])?;
             append_outbox(&tx, "note", &note_id, "delete", None, base_rev)?;
             tx.commit()?;
@@ -412,9 +343,6 @@ impl NotesRepo for SqliteNotesRepo {
 
     fn empty_trash(&self) -> Result<i64, AppError> {
         self.db.with_conn(|conn| {
-            // Same §5.4 guard, per row rather than for the whole call: notes
-            // that have never been pushed stay in the trash until they sync,
-            // and the returned count names only what actually left.
             let trashed: Vec<(String, i64)> = {
                 let mut stmt = conn.prepare(
                     "SELECT id, rev FROM notes WHERE deleted_at IS NOT NULL AND rev > 0",
@@ -443,18 +371,12 @@ fn folder_is_live(conn: &rusqlite::Connection, id: &str) -> Result<bool, AppErro
     Ok(hit)
 }
 
-/// A note carries exactly one folder, so a tag-set change collapses into the
-/// note's own outbox row rather than one row per pair.
-/// `07-sync-plan.md` §5.3 covers what that means when two devices change the
-/// same tag set concurrently.
 fn replace_tags(
     tx: &rusqlite::Transaction<'_>,
     note_id: &str,
     tag_ids: &[String],
 ) -> Result<(), rusqlite::Error> {
     tx.execute("DELETE FROM note_tags WHERE note_id = ?1", [note_id])?;
-    /* Only live tags: `OR IGNORE` covers a duplicate, not a foreign key, so a
-    tag deleted while the note was open failed the whole save (see `save`). */
     for tag_id in tag_ids {
         tx.execute(
             "INSERT OR IGNORE INTO note_tags (note_id, tag_id, created_at)

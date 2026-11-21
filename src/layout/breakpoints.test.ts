@@ -9,11 +9,6 @@ import {
 } from './breakpoints';
 import { INITIAL_STACK, canPop, currentView, popView, pushView } from './viewStack';
 
-/* The two layout rules of `05-ui-ux.md` §9 and §2.4. Both are pure functions on
-   purpose: the view stack in particular is the thing the Android back button
-   will drive in M7, and "what does back do at depth 1" is a rule rather than a
-   handler. */
-
 describe('breakpointOf', () => {
   it('treats anything under 768 px as mobile', () => {
     expect(breakpointOf(360)).toBe('mobile');
@@ -41,9 +36,6 @@ describe('breakpointOf', () => {
 });
 
 describe('isAndroidWebView', () => {
-  /* Found on a phone: rotation to landscape widened the viewport past 768 px
-     and flipped the navigation model, yanking the list into the editor with
-     desktop chrome. Width bands govern desktop windows; the device decides. */
   const ANDROID_PHONE =
     'Mozilla/5.0 (Linux; Android 13; X6836 Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/153.0.8010.57 Mobile Safari/537.36';
 

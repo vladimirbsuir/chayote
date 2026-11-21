@@ -15,28 +15,6 @@ type NoteEditorProps = {
   onDispose: () => void;
 };
 
-/**
- * One editor instance per mount. `04-editor.md` §6 is explicit that undo must
- * not reach into another note, and `setContent` does not clear history, so
- * `EditorPane` passes `key={noteId}` and React builds a fresh instance — and
- * therefore a fresh history — whenever the note changes.
- *
- * `onDispose` is the flush hook for a note switch: React runs this cleanup
- * before the replacement editor mounts, so the outgoing document is still the
- * one on screen and `06-platform.md` §3.2's "flush, then close" has a real hook.
- *
- * Blur is `onFlush`, not `onChange`. ProseMirror fires blur on mount when
- * `autofocus` settles, and routing that through `onChange` would put "Unsaved
- * changes" on a note nobody has touched. The autosave's serialisation check
- * would skip the write; the status bar would still lie.
- *
- * §2.1 `immediatelyRender: false` keeps construction out of render, which is
- * what makes the same component usable under StrictMode and in jsdom.
- */
-/* Built once. `useEditor` compares its options by identity on every render and
-   calls `setOptions` — and through it `view.setProps` — when any differ, so a
-   fresh object here re-configured ProseMirror on every render of the pane: each
-   title keystroke, each save-state change, each minute tick. */
 const EDITOR_PROPS = buildEditorProps();
 
 export function NoteEditor({
@@ -79,13 +57,6 @@ export function NoteEditor({
   return (
     <EditorContent
       editor={editor}
-      /* The padding, the scroll container and the click routing that goes with them
-         live on the wrapper `EditorPane` renders around this, which is also where the
-         title sits — the whole note is one scrolling column, title and date included,
-         as `prototype/index.html` §2.5 and `.m-editor` both have it. All that is left
-         here is to fill the height that column hands it: `flex-1` plus the floor on
-         `.note-editor` below, so a tap under short text still lands in the editable
-         element rather than in the container's own padding. */
       className="flex-1"
       data-testid="note-editor-pane"
     />

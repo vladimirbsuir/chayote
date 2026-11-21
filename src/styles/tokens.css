@@ -1,6 +1,3 @@
-/* Tokens are the visual source of truth in prototype/index.html (ADR-016).
-   05-ui-ux.md §3 documents why each value exists. */
-
 :root {
   --surface: #ffffff;
   --surface-raised: #f7f7f8;
@@ -8,25 +5,9 @@
   --border: #e3e3e6;
   --border-strong: #c9c9cf;
   --text: #18181b;
-  /* Text is a four-step ladder, and every step clears the AA body bar of 4.5:1
-   against both surfaces in both themes. It was three steps with a broken bottom
-   one: `--text-subtle` carried note timestamps and the "Untitled" title at
-   2.60:1 on `--surface-raised` in the light theme, and no test asserted any of
-   it, so the failure shipped. Lifting it alone would have put it within 0.04:1 of
-   `--text-muted`, so muted deepens to 7:1 to keep a step between them. */
   --text-muted: #54545c;
   --text-subtle: #70707d;
-  /* The accent resolves through the cascade rather than through an inline style,
-     because an inline `--accent` on the same element that carries `data-theme`
-     beats this theme's value and makes the dark accent unreachable. `05-ui-ux.md`
-     §6.6 gives each preset a value per theme: the light half here, the dark half
-     in the `[data-theme='dark']` block, the same six variables either way. A
-     custom accent is the one case that writes inline, and only when one is set. */
   --accent: var(--accent-preset-1);
-  /* Derived from whatever `--accent` resolves to, so a preset picked in the
-     settings dialog brings its soft variant with it for free. `color-mix` is
-     already used by `ConfirmDialog`'s scrim, so this adds nothing to the
-     WebView baseline `06-platform.md` §1 warns about. */
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
   --danger: #c0392b;
   --warning: #b26a00;
@@ -53,10 +34,6 @@
   --icon-stroke-lg: 1.75;
   --icon-stroke-xl: 1.5;
 
-  /* Each hue is the lightness that clears 4.5:1 against `--surface-raised`, its
-   theme's harder surface. Four of the six light values are the reviewed palette
-   unchanged; Default and Violet are the two that did not hold, and the
-   `src/styles/tokens.test.ts` contrast check is what keeps the claim true. */
   --accent-preset-1: #2769ec;
   --accent-preset-2: #1f7a4d;
   --accent-preset-3: #814ef5;

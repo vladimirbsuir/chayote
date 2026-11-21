@@ -180,8 +180,6 @@ export function buildDatabase(options: BuildOptions = {}): MockDatabase {
     return {
       id: uuidFrom(`n-${index}`),
       doc: makeDoc(index),
-      /* Every generated note is `auto`, like every note written before ADR-023:
-         its title is its first line, which is what the scroll tests read. */
       title: '',
       titleSource: 'auto' as const,
       folderId,

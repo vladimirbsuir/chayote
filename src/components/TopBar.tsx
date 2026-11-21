@@ -4,33 +4,16 @@ import { FilePlus, Menu, MoreHorizontal, Search, Settings as SettingsIcon, X } f
 import { IconButton } from './IconButton';
 import { ThemeIcon } from './ThemeToggle';
 
-/* `05-ui-ux.md` §4. Search field, new note, theme toggle, overflow menu;
-   variant `mobile` for the Android list view. Metrics are copied from the
-   prototype: 52 px tall, 140 px brand, 32 px search field capped at 460 px,
-   and the mobile field's own 40 px row at 12 px inset. */
-
 type TopBarProps = {
   variant?: 'desktop' | 'mobile';
   searchValue: string;
-  /** The field is owned by the shell, because `Ctrl/Cmd+F` must focus it from
-      anywhere in the app (§7) and a shell-held ref is the only way to do that
-      without a second owner of the value. */
   inputRef: RefObject<HTMLInputElement | null>;
   onSearchChange: (value: string) => void;
   onNewNote: () => void;
   onToggleTheme: () => void;
-  /** The theme in effect, so the button's icon shows what is on screen rather
-      than what a press would change it to. */
   theme: 'light' | 'dark';
-  /** Only meaningful where the sidebar can be hidden — the tablet drawer.
-      `Ctrl/Cmd+\` covers the desktop collapse (§7). Absent on mobile, where the
-      list *is* the sidebar and there is nothing to toggle. */
   onToggleSidebar?: () => void;
-  /** `true` in the tablet band, where the sidebar is a drawer. */
   showSidebarToggle?: boolean;
-  /** Desktop/tablet: opens the overflow menu whose Settings item opens the
-      dialog. Mobile: opens the settings dialog directly — the bar has no room
-      for an overflow menu, so the gear is the button itself. */
   onOpenOverflow: () => void;
 };
 
@@ -50,14 +33,6 @@ export function TopBar({
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  /* The overflow menu is a popover over the bar, so it dismisses the three ways
-     a popover does in the rest of the app (`05-ui-ux.md` §6.2, §6.4): `Esc`, a
-     click outside, and the trigger again. Listening on the document rather than
-     on the bar means a click anywhere in the app closes it, which is what a user
-     who has just changed their mind expects.
-     Closing restores focus to the trigger, because a menu that leaves focus on
-     the body strands a keyboard user — the next `Tab` would restart from the top
-     of the page. */
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent): void => {
@@ -76,9 +51,6 @@ export function TopBar({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open]);
-  /* §6.5: "Esc clears and restores the previous list". It does not blur — someone
-     who dismissed one query to type a different one would lose the caret, and
-     moving focus out of the field is a change the key did not ask for. */
   const onFieldKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
     if (event.key !== 'Escape') return;
     event.preventDefault();
@@ -86,18 +58,8 @@ export function TopBar({
   };
 
   if (variant === 'mobile') {
-    /* The left slot was a `menu` "Open sidebar" button wired to a no-op: on the
-       single-pane list view the sidebar content *is* the view, so there was
-       nothing to open and the control only looked tappable. It now opens the
-       settings dialog directly — a gear, not a hamburger, since it never opened
-       a navigation drawer — which also closes the gap where mobile had no path
-       to Settings at all. Theme stays inside the dialog; the bar has no room
-       for a second control. */
     return (
       <>
-        {/* Bar chrome is not selectable: brand, field box and buttons are read
-            and pressed, never copied. The search input opts back in with
-            `select-text`, so it keeps its selection toolbar. */}
         <header className="flex h-[52px] flex-none items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 select-none">
           <IconButton label="Open settings" onClick={onOpenOverflow} size="mobile">
             <SettingsIcon className="icon i-24" aria-hidden="true" />
@@ -107,16 +69,6 @@ export function TopBar({
             <FilePlus className="icon i-24" aria-hidden="true" />
           </IconButton>
         </header>
-        {/* The prototype's mobile list view carries its own field under the bar
-            rather than a field inside it: at 360 px the bar's two controls and
-            a usable field do not fit on one row, and §9's reason for not putting
-            the desktop bar on this view at all applies to the field with it. */}
-        {/* `relative focus-within:z-10`: the focus ring is drawn 2 px *outside*
-            the container, straight onto the sidebar below — which paints later
-            and covers the ring's bottom edge. Lifting the container above the
-            sidebar while focused keeps the whole ring visible, with no layout
-            change. The desktop field sits inside its 52 px bar with room to
-            spare, so it needs none of this. */}
         <div className="relative mx-3 mt-3 flex h-10 flex-none items-center gap-2 rounded-[var(--r-input)] border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text-subtle)] focus-within:z-10 focus-within:border-[var(--border-strong)] focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)]">
           <Search className="icon i-18" aria-hidden="true" />
           <input
@@ -129,8 +81,6 @@ export function TopBar({
               onSearchChange(event.target.value);
             }}
             onKeyDown={onFieldKeyDown}
-            /* Explicitly selectable: an ancestor may carry `select-none`, and a
-               field the user types in must keep its selection toolbar. */
             className="min-w-0 flex-1 bg-transparent text-[var(--text)] outline-none select-text placeholder:text-[var(--text-subtle)]"
           />
           {searchValue.length > 0 ? <ClearButton onClear={() => { onSearchChange(''); }} /> : null}
@@ -140,15 +90,7 @@ export function TopBar({
   }
 
   return (
-    /* Bar chrome is not selectable: brand, field box, buttons and the Ctrl-F
-       hint are read and pressed, never copied. The search input opts back in
-       with `select-text`, so it keeps its selection toolbar. */
     <header className="flex h-[52px] flex-none items-center gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-4 select-none">
-      {/* `05-ui-ux.md` §2.3 puts a toggle in the top bar for the tablet drawer.
-          The prototype's desktop bar has no such control, so it is rendered only
-          in the tablet band: on desktop the sidebar is always shown, and a button
-          whose only effect would be to hide something that must be visible is a
-          control that changes nothing. `Ctrl/Cmd+\` (§7) covers desktop. */}
       {showSidebarToggle && onToggleSidebar ? (
         <IconButton label="Toggle sidebar" onClick={onToggleSidebar}>
           <Menu className="icon i-20" aria-hidden="true" />
@@ -169,8 +111,6 @@ export function TopBar({
             onSearchChange(event.target.value);
           }}
           onKeyDown={onFieldKeyDown}
-          /* Explicitly selectable: an ancestor may carry `select-none`, and a
-             field the user types in must keep its selection toolbar. */
           className="min-w-0 flex-1 bg-transparent text-[var(--text)] outline-none select-text placeholder:text-[var(--text-subtle)]"
         />
         {searchValue.length > 0 ? (
@@ -190,10 +130,6 @@ export function TopBar({
       <IconButton label="Change theme" onClick={onToggleTheme}>
         <ThemeIcon effective={theme} className="icon i-20" />
       </IconButton>
-      {/* `05-ui-ux.md` §4 gives the top bar an overflow menu and §6.6 puts the
-          settings dialog behind the `settings` icon. The trigger is wrapped
-          rather than followed by an absolutely-positioned sibling so the menu
-          can be dismissed by clicking the trigger again. */}
       <div className="relative" ref={wrapRef}>
         <IconButton
           ref={triggerRef}
@@ -218,14 +154,6 @@ export function TopBar({
               data-testid="topbar-overflow-settings"
               onClick={() => {
                 setOpen(false);
-                /* Focus moves to the trigger *before* the settings dialog
-                   mounts. `useDialogFocus` captures `document.activeElement` as
-                   the element to return to on close, and the menu item — which
-                   is what currently has focus — is about to unmount. Returning
-                   focus to a removed element is the "nowhere to return to" case
-                   its own comment warns about, and the symptom is focus landing
-                   on the body, so the next `Tab` restarts at the top of the
-                   page. */
                 triggerRef.current?.focus();
                 onOpenOverflow();
               }}

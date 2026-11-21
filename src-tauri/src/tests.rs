@@ -1,13 +1,3 @@
-//! Repository and service tests.
-//!
-//! Every test opens a real SQLite file in a temp directory, not `:memory:`:
-//! `journal_mode = WAL`, the foreign-key cascades and the FTS triggers are all
-//! part of what is being tested, and none of them behave the same way in an
-//! in-memory database.
-//!
-//! The ten required tests from `10-conventions.md` §10 are marked below by
-//! their number.
-
 use std::sync::Arc;
 
 use serde_json::json;
@@ -74,7 +64,6 @@ fn note_with_text(text: &str) -> SaveNoteInput {
     }
 }
 
-/// Points an input at the note it will be saved into.
 fn on(note_id: &str, input: SaveNoteInput) -> SaveNoteInput {
     SaveNoteInput {
         id: note_id.to_owned(),
@@ -87,9 +76,6 @@ fn scalar(db: &Arc<Database>, sql: &str) -> i64 {
         .expect("scalar query")
 }
 
-/// Simulates a sync push for `id`: the server has assigned a `rev`, so the
-/// §5.4 permanent-delete guard lets the row go. Direct SQL, not a sync cycle —
-/// these are data-layer tests and there is no server here.
 fn mark_synced(db: &Arc<Database>, id: &str) {
     db.with_conn(|conn| {
         conn.execute("UPDATE notes SET rev = 7, dirty = 0 WHERE id = ?1", [id])?;
@@ -97,8 +83,6 @@ fn mark_synced(db: &Arc<Database>, id: &str) {
     })
     .expect("mark synced");
 }
-
-// ---------------------------------------------------------------- migration
 
 #[test]
 fn applies_every_migration_once_and_is_idempotent_on_reopen() {
@@ -119,15 +103,11 @@ fn applies_every_migration_once_and_is_idempotent_on_reopen() {
     );
     assert_eq!(applied[0].0, 1);
 
-    // Reopening must apply nothing new (R8).
     let reopened = Arc::new(Database::open(f._dir.path()).expect("reopen"));
     let again = crate::db::migrate::applied_all(&reopened).expect("readable again");
     assert_eq!(again.len(), 7);
 }
 
-/// 0007 dropped the table-level `UNIQUE` on `tags.name`: a tombstoned `work`
-/// may sit beside a live `Work`, which is what `03-data-model.md` §3.4 says
-/// the partial index exists for. Live names stay unique, ignoring case.
 #[test]
 fn a_tag_tombstone_no_longer_blocks_a_live_tag_of_the_same_name() {
     let f = fixture("migrate-tags");
@@ -151,10 +131,6 @@ fn a_tag_tombstone_no_longer_blocks_a_live_tag_of_the_same_name() {
     .expect("a tombstone and a live tag coexist");
 }
 
-/// The rebuild copies the tag links aside: `DROP TABLE tags` with foreign
-/// keys on cascades every `note_tags` row away, so without the copy the
-/// migration would untag the whole library. Re-running the migration's SQL
-/// on a populated database proves the links come back.
 #[test]
 fn the_tags_rebuild_keeps_every_note_tag_link() {
     let f = fixture("migrate-tags-links");
@@ -182,8 +158,6 @@ fn the_tags_rebuild_keeps_every_note_tag_link() {
     assert_eq!(tags.list().expect("lists")[0].count, 1);
 }
 
-/// Renaming a tag onto another tag's name is the user's input to fix, not a
-/// storage failure: `VALIDATION`, never `DB_ERROR`.
 #[test]
 fn renaming_a_tag_onto_another_tags_name_is_a_validation_error() {
     let f = fixture("tag-rename-clash");
@@ -192,7 +166,6 @@ fn renaming_a_tag_onto_another_tags_name_is_a_validation_error() {
     let other = tags.create("Home").expect("creates");
     let err = tags.rename(&other.id, "work").expect_err("clashes");
     assert_eq!(err.code(), "VALIDATION");
-    // A new spelling of its own name is not a clash.
     let respelled = tags.rename(&other.id, "HOME").expect("respells");
     assert_eq!(respelled.name, "HOME");
 }
@@ -202,8 +175,6 @@ fn the_title_field_migration_moves_a_leading_heading_out_of_the_body() {
     let f = fixture("migrate-title");
     let repo = notes(&f.db);
 
-    /* Written the way every note was written before ADR-023: the title *is* the
-    document's leading H1, and `title_source` is `auto`. */
     let created = repo.create(None).expect("create");
     let id = created.summary.id.clone();
     repo.save(&on(
@@ -230,8 +201,6 @@ fn the_title_field_migration_moves_a_leading_heading_out_of_the_body() {
         0
     );
 
-    /* The migration already ran with the schema, so it is applied by hand here:
-    what is under test is the data pass, not the runner. */
     f.db.with_conn(|conn| {
         let tx = conn.transaction()?;
         crate::db::migrate::lift_leading_heading_into_title_for_tests(&tx)?;
@@ -267,8 +236,6 @@ fn the_title_field_migration_moves_a_leading_heading_out_of_the_body() {
         Some("the body")
     );
 
-    /* Queued like any other write: a change to a title another device has not
-    seen is exactly what the outbox is for (R5). */
     f.db.with_conn(|conn| {
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM outbox WHERE entity = 'note' AND entity_id = ?1",
@@ -311,10 +278,6 @@ fn the_title_field_migration_leaves_a_note_with_no_leading_heading_alone() {
     .expect("data pass");
 
     let after = repo.get(&id).expect("reload");
-    /* The note has no leading heading, so the migration leaves it alone. That
-     * used to be described as "still derived", because a save re-derived the
-     * title from the body; the title is no longer derived at all, so the note
-     * simply has none and reads as "Untitled". */
     assert_eq!(after.summary.title, "", "untouched, and untitled");
     assert_eq!(
         after.doc["content"][0]["content"][0]["text"].as_str(),
@@ -352,9 +315,6 @@ fn a_note_that_was_only_a_title_keeps_a_body_to_type_into() {
     })
     .expect("data pass");
 
-    /* An empty document is not a document: ProseMirror has no content model
-    without a block, so stripping the heading from a note that had nothing else
-    would leave the editor with nothing to put a caret in. */
     let migrated = repo.get(&id).expect("reload");
     assert_eq!(migrated.summary.title, "Only a title");
     assert_eq!(migrated.doc["content"].as_array().map(Vec::len), Some(1));
@@ -368,9 +328,6 @@ fn a_note_that_was_only_a_title_keeps_a_body_to_type_into() {
     );
 }
 
-/// An in-memory database cannot do WAL or cascades across connections, so every
-/// other test uses a real file. This one exists to keep the constructor honest
-/// about what it is for: a database that must never touch the user's notes.
 #[test]
 fn an_in_memory_database_gets_the_schema_and_the_pragmas() {
     let db = Database::open_in_memory().expect("in-memory database");
@@ -398,8 +355,6 @@ fn an_in_memory_database_gets_the_schema_and_the_pragmas() {
         );
     }
 
-    // WAL is a file-only journal mode; an in-memory database keeps its own.
-    // The pragmas that matter here are the ones that are not about files.
     let foreign_keys: i64 = db
         .with_conn(|conn| Ok(conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?))
         .unwrap_or(0);
@@ -410,7 +365,6 @@ fn an_in_memory_database_gets_the_schema_and_the_pragmas() {
 fn applies_pragmas_from_the_data_model() {
     let f = fixture("pragmas");
 
-    // journal_mode answers with a mode name; the rest answer with integers.
     let mode: String =
         f.db.with_conn(|conn| {
             Ok(conn.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?)
@@ -432,9 +386,6 @@ fn applies_pragmas_from_the_data_model() {
     }
 }
 
-// ------------------------------------------------- required tests 1 and 2
-
-/// Required test 1: every write appends an outbox row in the same transaction.
 #[test]
 fn every_write_appends_exactly_one_outbox_row() {
     let f = fixture("outbox-append");
@@ -453,16 +404,11 @@ fn every_write_appends_exactly_one_outbox_row() {
     repo.restore(&created.summary.id).expect("restore");
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 4);
 
-    // Permanent delete needs a synced row (§5.4): simulate the push first.
     mark_synced(&f.db, &created.summary.id);
     repo.destroy(&created.summary.id).expect("destroy");
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 5);
 }
 
-/// Required test 2: a failed write leaves no orphan outbox row.
-///
-/// The write fails because the note does not exist, so the transaction must
-/// roll back before the append.
 #[test]
 fn a_failed_write_leaves_no_orphan_outbox_row() {
     let f = fixture("outbox-rollback");
@@ -479,8 +425,6 @@ fn a_failed_write_leaves_no_orphan_outbox_row() {
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 0);
 }
 
-/// The dirty flag and the outbox must agree, or sync cannot tell "unchanged"
-/// from "changed and not yet sent" (R4, `07-sync-plan.md` §12).
 #[test]
 fn dirty_rows_and_outbox_rows_agree() {
     let f = fixture("dirty-agrees");
@@ -497,14 +441,6 @@ fn dirty_rows_and_outbox_rows_agree() {
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 2);
 }
 
-// ------------------------------------------------------- required test 3
-
-/// Required test 3: derived values are recomputed on every save.
-///
-/// The title is no longer one of them. `plain_text`, `excerpt` and `word_count`
-/// are derived from the document and change on every save; `title` is not derived
-/// at all, and asserting it here was what pinned the leak where typing in the
-/// first line of the body renamed the note.
 #[test]
 fn derived_values_are_recomputed_on_every_save() {
     let f = fixture("derived");
@@ -526,8 +462,6 @@ fn derived_values_are_recomputed_on_every_save() {
     assert_eq!(after_second.summary.title, "", "and stays that way");
     assert_eq!(after_second.summary.word_count, 3);
 
-    // A heading is still what the excerpt is built from, even though it is no
-    // longer what the title is built from.
     let heading = SaveNoteInput {
         id: created.summary.id.clone(),
         doc: json!({
@@ -559,9 +493,6 @@ fn a_typed_title_survives_every_later_save() {
     repo.save(&on(&id, note_with_text("body"))).expect("save");
     repo.set_title(&id, "The real title").expect("set title");
 
-    /* Rewriting the first line of the body used to rename the note. This is the
-     * regression that prompted the change, so it is asserted directly rather than
-     * inferred from the two tests above. */
     let after = repo
         .save(&on(
             &id,
@@ -574,9 +505,6 @@ fn a_typed_title_survives_every_later_save() {
     );
 }
 
-// --------------------------------------------------------- required test 4
-
-/// Required test 4: IDs are UUIDv7 and strictly increasing within a run.
 #[test]
 fn ids_are_uuidv7_and_strictly_increasing() {
     let f = fixture("uuidv7");
@@ -608,7 +536,6 @@ fn ids_are_uuidv7_and_strictly_increasing() {
     }
 }
 
-/// No ID is ever reused, even after the row is gone (R1).
 #[test]
 fn ids_are_never_reused_after_deletion() {
     let f = fixture("no-reuse");
@@ -625,9 +552,6 @@ fn ids_are_never_reused_after_deletion() {
     assert_ne!(second.summary.id, third.summary.id);
 }
 
-// --------------------------------------------------------- required test 5
-
-/// Required test 5: soft delete sets `deleted_at` and leaves the row present.
 #[test]
 fn soft_delete_sets_deleted_at_and_keeps_the_row() {
     let f = fixture("soft-delete");
@@ -645,7 +569,6 @@ fn soft_delete_sets_deleted_at_and_keeps_the_row() {
         1
     );
 
-    // It disappears from every live selection but stays in the trash.
     let all = repo
         .list(&NoteFilter::new(Selection::All))
         .expect("list all");
@@ -670,7 +593,6 @@ fn empty_trash_removes_only_soft_deleted_notes() {
     let keep = repo.create(None).expect("keep");
     let drop_one = repo.create(None).expect("drop");
     repo.soft_delete(&drop_one.summary.id).expect("soft delete");
-    // The trashed note must have been pushed before it may leave (§5.4).
     mark_synced(&f.db, &drop_one.summary.id);
 
     assert_eq!(repo.empty_trash().expect("empty"), 1);
@@ -687,9 +609,6 @@ fn empty_trash_removes_only_soft_deleted_notes() {
     );
 }
 
-/// `07-sync-plan.md` §5.4: permanent delete is refused while the server has
-/// never assigned the row a `rev` — a never-pushed note must soft-delete and
-/// sync first, so the tombstone propagates before the row goes.
 #[test]
 fn destroy_refuses_a_note_that_has_never_synced() {
     let f = fixture("destroy-guard");
@@ -698,7 +617,6 @@ fn destroy_refuses_a_note_that_has_never_synced() {
     let created = repo.create(None).expect("create");
     let err = repo.destroy(&created.summary.id).expect_err("refused");
     assert_eq!(err.code(), "VALIDATION");
-    // Refused before the transaction: no delete row was appended.
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM outbox"), 1);
     assert!(repo.get(&created.summary.id).is_ok());
 
@@ -706,8 +624,6 @@ fn destroy_refuses_a_note_that_has_never_synced() {
     repo.destroy(&created.summary.id).expect("goes after sync");
 }
 
-/// The same §5.4 rule, applied per row: `empty_trash` removes what has been
-/// pushed and leaves never-synced notes in the trash, naming only what left.
 #[test]
 fn empty_trash_leaves_never_synced_notes_behind() {
     let f = fixture("empty-trash-guard");
@@ -724,10 +640,6 @@ fn empty_trash_leaves_never_synced_notes_behind() {
     assert!(repo.get(&fresh.summary.id).is_ok());
 }
 
-// --------------------------------------------------------- required test 6
-
-/// Required test 6: the FTS index stays consistent with `notes` across
-/// insert, update, delete and hard delete.
 #[test]
 fn fts_index_tracks_notes_across_every_write() {
     let f = fixture("fts");
@@ -738,13 +650,11 @@ fn fts_index_tracks_notes_across_every_write() {
     repo.save(&input).expect("save");
     assert_eq!(fts_hits(&f.db, "kumquat"), 1, "indexed on write");
 
-    // Updating the derived text must drop the old term from the index.
     let renamed = on(&created.summary.id, note_with_text("satsuma"));
     repo.save(&renamed).expect("save");
     assert_eq!(fts_hits(&f.db, "kumquat"), 0, "old term gone");
     assert_eq!(fts_hits(&f.db, "satsuma"), 1, "new term present");
 
-    // Soft delete removes it from the live search scope.
     repo.soft_delete(&created.summary.id).expect("soft delete");
     let search = SearchService::new(Arc::clone(&f.db));
     let page = search
@@ -757,7 +667,6 @@ fn fts_index_tracks_notes_across_every_write() {
         .expect("search");
     assert!(page.hits.is_empty(), "trashed note is not a live hit");
 
-    // Hard delete removes it from the index entirely.
     mark_synced(&f.db, &created.summary.id);
     repo.destroy(&created.summary.id).expect("destroy");
     assert_eq!(fts_hits(&f.db, "satsuma"), 0, "row gone from index");
@@ -782,10 +691,6 @@ fn fts_hits(db: &Arc<Database>, term: &str) -> i64 {
     .unwrap_or(-1)
 }
 
-// --------------------------------------------------------- required test 7
-
-/// Required test 7: FTS operators in user input cannot produce an error or an
-/// injection.
 #[test]
 fn fts_operators_in_search_input_are_harmless() {
     let f = fixture("fts-injection");
@@ -828,7 +733,6 @@ fn fts_operators_in_search_input_are_harmless() {
         assert!(result.is_ok(), "query {query:?} must not error");
     }
 
-    // Nothing was executed, and the row survived.
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM notes"), 1);
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM notes_fts"), 1);
 }
@@ -952,10 +856,6 @@ fn search_that_sanitises_to_nothing_falls_back_instead_of_erroring() {
     }
 }
 
-// --------------------------------------------------------- required test 8
-
-/// Required test 8: a document violating an invariant is rejected and the
-/// stored version survives.
 #[test]
 fn an_invalid_document_is_rejected_and_the_stored_one_survives() {
     let f = fixture("doc-invalid");
@@ -966,21 +866,14 @@ fn an_invalid_document_is_rejected_and_the_stored_one_survives() {
     repo.save(&good).expect("save good");
 
     let invalid_documents = vec![
-        // Empty doc: invariant 1.
         json!({"type": "doc", "content": []}),
-        // Unknown node type: invariant 4.
         json!({"type": "doc", "content": [{"type": "video"}]}),
-        // Empty text node: invariant 6.
         json!({"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": ""}]}]}),
-        // Heading level out of range.
         json!({"type": "doc", "content": [{"type": "heading", "attrs": {"level": 4}, "content": [{"type": "text", "text": "x"}]}]}),
-        // Missing heading level.
         json!({"type": "doc", "content": [{"type": "heading", "content": [{"type": "text", "text": "x"}]}]}),
-        // Unknown mark: v1 has no link mark.
         json!({"type": "doc", "content": [{"type": "paragraph", "content": [
             {"type": "text", "text": "click", "marks": [{"type": "link", "attrs": {"href": "javascript:alert(1)"}}]}
         ]}]}),
-        // Not a doc at all.
         json!({"type": "paragraph"}),
     ];
 
@@ -1017,7 +910,6 @@ fn a_document_over_five_megabytes_is_rejected() {
     let error = repo.save(&attempt).expect_err("must reject");
     assert_eq!(error.code(), "DOC_TOO_LARGE");
 
-    // The buffer is the user's; the stored version is untouched.
     assert_eq!(
         repo.get(&created.summary.id).expect("stored").summary.title,
         ""
@@ -1053,7 +945,6 @@ fn indent_levels_zero_to_seven_save_and_eight_is_rejected() {
     let repo = notes(&f.db);
     let created = repo.create(None).expect("create");
 
-    // `04-editor.md` §1.2: paragraph, heading and blockquote carry 0–7.
     let indented = json!({"type": "doc", "content": [
         {"type": "paragraph", "attrs": {"indent": 3},
          "content": [{"type": "text", "text": "indented"}]},
@@ -1086,9 +977,6 @@ fn indent_levels_zero_to_seven_save_and_eight_is_rejected() {
     );
 }
 
-/// The pin belongs to `set_pinned`. A save carries whatever the editor last
-/// read, and writing it undid a pin made from the note's card while the note
-/// was open.
 #[test]
 fn a_save_never_moves_the_pin() {
     let f = fixture("save-pin");
@@ -1108,8 +996,6 @@ fn a_save_never_moves_the_pin() {
     assert!(saved.summary.is_pinned);
 }
 
-/// A folder or tag deleted under an open note is dropped from the save, not
-/// fatal to it: the foreign key used to roll back every save after the delete.
 #[test]
 fn a_save_drops_a_folder_or_tag_that_no_longer_exists() {
     let f = fixture("save-dangling");
@@ -1128,8 +1014,6 @@ fn a_save_drops_a_folder_or_tag_that_no_longer_exists() {
     assert_eq!(saved.summary.folder_id, None);
     assert!(saved.summary.tags.is_empty());
 }
-
-// ------------------------------------------------------- selection and order
 
 #[test]
 fn pinned_notes_sort_first_in_every_selection() {
@@ -1170,10 +1054,6 @@ fn a_typed_title_is_kept_verbatim_and_survives_every_later_save() {
         "document untouched"
     );
 
-    /* The property the whole feature rests on: a title the user typed is not
-    derivable from the document, so a later save must not recompute it. The
-    document here starts with a paragraph called something else entirely, which
-    is what derivation would have used. */
     let after = repo
         .save(&on(&id, note_with_text("A different first line")))
         .expect("save again");
@@ -1192,14 +1072,9 @@ fn clearing_a_typed_title_leaves_the_note_untitled() {
         .expect("save");
     repo.set_title(&id, "Typed").expect("set title");
 
-    /* Clearing the field used to hand the title back to derivation, so an empty
-    field meant "derive it again". It means no title now: the title is what was
-    typed and nothing else, so the note reads as "Untitled" until one is. */
     let cleared = repo.set_title(&id, "   ").expect("clear title");
     assert_eq!(cleared.summary.title, "");
 
-    /* And the body must not reach in and supply one — the whole point of the
-     * change, asserted from both sides. */
     let resaved = repo
         .save(&on(&id, note_with_text("Second line of the body")))
         .expect("save");
@@ -1254,9 +1129,6 @@ fn a_titled_note_reports_its_new_title_in_the_list_and_in_search() {
     let listed = repo.list(&NoteFilter::new(Selection::All)).expect("list");
     assert_eq!(listed[0].title, "Quarterly plan", "the list carries it");
 
-    /* The FTS index is built from `title` and `plain_text` by trigger, so a title
-    a device has never pushed is findable immediately — and a title-only hit is
-    the one case that would break if the trigger were not watching the column. */
     let hits = SearchService::new(Arc::clone(&f.db))
         .query(&SearchInput {
             query: "quarterly".into(),
@@ -1292,10 +1164,6 @@ fn pinning_flips_the_flag_without_touching_the_document() {
     let pinned = repo.set_pinned(&id, true).expect("pin");
 
     assert!(pinned.summary.is_pinned, "flag flipped");
-    /* The whole reason this command exists: the note list holds a summary with no
-    document, so pinning from a card must not send or rewrite one. Compared
-    against the note as it stood immediately before the pin, the body and every
-    derived column are byte-identical. */
     assert_eq!(pinned.doc, saved.doc, "document untouched");
     assert_eq!(pinned.summary.title, saved.summary.title);
     assert_eq!(pinned.summary.word_count, saved.summary.word_count);
@@ -1323,9 +1191,6 @@ fn pinning_raises_the_note_to_the_top_of_the_list() {
 
     repo.set_pinned(&oldest.summary.id, true).expect("pin");
 
-    /* `updated_at` moves with the flag, the same as `move_to`: a pinned note sorts
-    above everything in every selection, so pinning one is a change to where it
-    appears, not a change to what it contains. */
     let listed = repo.list(&NoteFilter::new(Selection::All)).expect("list");
     assert_eq!(
         listed[0].id, oldest.summary.id,
@@ -1375,7 +1240,6 @@ fn pinning_appends_exactly_one_outbox_row_and_a_failed_pin_leaves_none() {
         .expect("count");
     assert_eq!(after, before + 1, "row and outbox commit together (R5)");
 
-    // A refused pin writes nothing at all: no flag change, no outbox row (R5).
     assert_eq!(
         repo.set_pinned("missing", true)
             .expect_err("must fail")
@@ -1454,8 +1318,6 @@ fn pagination_counts_notes_not_join_rows() {
     assert_eq!(page[0].id, all[1].id);
 }
 
-// -------------------------------------------------------------- folders
-
 #[test]
 fn folder_tree_nests_and_orders_by_position() {
     let f = fixture("folders");
@@ -1478,7 +1340,6 @@ fn folder_tree_nests_and_orders_by_position() {
     assert_eq!(tree[0].children[1].id, meetings.id);
     assert_eq!(tree[1].id, personal.id);
 
-    // Reordering inside the parent moves the node.
     folders
         .move_to(&meetings.id, Some(&work.id), 0)
         .expect("reorder");
@@ -1502,7 +1363,6 @@ fn moving_a_folder_into_its_own_descendant_is_refused() {
         .expect_err("cycle refused");
     assert_eq!(error.code(), "CYCLE_DETECTED");
 
-    // Into itself is also a cycle.
     assert_eq!(
         folders
             .move_to(&work.id, Some(&work.id), 0)
@@ -1511,7 +1371,6 @@ fn moving_a_folder_into_its_own_descendant_is_refused() {
         "CYCLE_DETECTED"
     );
 
-    // The refused moves changed nothing.
     let tree = folders.list().expect("tree");
     assert_eq!(tree[0].id, work.id);
     assert_eq!(tree[0].children[0].id, projects.id);
@@ -1536,7 +1395,6 @@ fn deleting_a_folder_takes_the_subtree_and_unfiles_the_notes() {
     assert!(folders.list().expect("tree").is_empty(), "subtree gone");
     assert_eq!(scalar(&f.db, "SELECT COUNT(*) FROM folders"), 0);
 
-    // A note survives its folder and becomes unfiled.
     let survivor = repo.get(&inside.summary.id).expect("note survives");
     assert_eq!(survivor.summary.folder_id, None);
     assert!(repo.get(&outside.summary.id).is_ok());
@@ -1562,8 +1420,6 @@ fn renaming_a_folder_rejects_an_empty_name_and_updates_the_summary() {
     let reloaded = repo.get(&note.summary.id).expect("note");
     assert_eq!(reloaded.summary.folder_name.as_deref(), Some("Studio"));
 }
-
-// ------------------------------------------------------------------ tags
 
 #[test]
 fn tag_names_are_case_insensitive_and_normalised_to_the_first_spelling() {
@@ -1602,8 +1458,6 @@ fn tag_counts_exclude_notes_in_the_trash_and_show_empty_tags() {
         .expect("tag the note");
     }
 
-    /* ADR-021: a tag with no live notes stays listed at a zero count, so tags
-    can be created before any note carries them. Ordered by name. */
     let listed = tags.list().expect("list");
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].id, lonely.id);
@@ -1616,7 +1470,6 @@ fn tag_counts_exclude_notes_in_the_trash_and_show_empty_tags() {
     assert_eq!(after.len(), 2);
     assert_eq!(after[1].count, 1, "trashed note does not count");
 
-    // Removing the tag itself takes it out of the sidebar; the unused one stays.
     tags.delete(&work.id).expect("delete tag");
     let remaining = tags.list().expect("list");
     assert_eq!(remaining.len(), 1);
@@ -1653,8 +1506,6 @@ fn removing_a_tag_from_a_note_leaves_the_tag_alone() {
 
     let reloaded = repo.get(&note.summary.id).expect("note");
     assert!(reloaded.summary.tags.is_empty(), "detached from the note");
-    /* ADR-021: detaching the last note leaves a visible zero-count tag rather
-    than hiding the row — the tag itself survives either way. */
     let listed = tags.list().expect("list");
     assert_eq!(listed.len(), 1, "the tag itself survives");
     assert_eq!(listed[0].count, 0);
@@ -1697,7 +1548,6 @@ fn unknown_ids_report_not_found() {
     );
 }
 
-/// Timestamps are UTC epoch milliseconds and never repeat within a run (R2).
 #[test]
 fn timestamps_are_epoch_milliseconds_and_strictly_increasing() {
     let f = fixture("timestamps");
@@ -1707,18 +1557,13 @@ fn timestamps_are_epoch_milliseconds_and_strictly_increasing() {
     for _ in 0..8 {
         let created = repo.create(None).expect("create");
         assert!(created.summary.updated_at > previous, "monotonic");
-        // Milliseconds, not seconds: well past any 2001 epoch in seconds.
         assert!(created.summary.updated_at > 1_000_000_000_000, "epoch ms");
         previous = created.summary.updated_at;
     }
 }
 
-/// The IPC wire shape is a contract with `src/types/ipc.ts`. A field renamed on
-/// one side only is a silent break that no repository test would catch, so the
-/// JSON is asserted here rather than trusted.
 #[test]
 fn the_wire_shape_matches_the_typescript_types() {
-    // A selection is an internally tagged union, flattened into the filter.
     let filter: NoteFilter = serde_json::from_value(json!({
         "kind": "folder", "id": "f1", "limit": 20, "offset": 0
     }))
@@ -1737,7 +1582,6 @@ fn the_wire_shape_matches_the_typescript_types() {
         assert_eq!(parsed.selection.kind(), kind);
     }
 
-    // Outgoing shapes.
     let note = json!({
         "id": "n1",
         "title": "Meeting notes",
@@ -1770,14 +1614,12 @@ fn the_wire_shape_matches_the_typescript_types() {
         assert!(value.get(field).is_some(), "Note carries {field}");
     }
 
-    // An AppError carries a stable code and a user-facing message.
     let error = crate::error::AppError::CycleDetected;
     let wire = serde_json::to_value(&error).expect("error serialises");
     assert_eq!(wire["code"], "CYCLE_DETECTED");
     assert!(wire["message"].is_string());
     assert!(wire.get("details").is_none(), "no detail, so no key at all");
 
-    // A validation error carries its detail, which the message shows.
     let wire = serde_json::to_value(crate::error::AppError::Validation(
         "Give the tag a name.".into(),
     ))
@@ -1786,7 +1628,6 @@ fn the_wire_shape_matches_the_typescript_types() {
     assert_eq!(wire["message"], "Give the tag a name.");
 }
 
-/// `NOT_FOUND` for a row that exists but is not visible in the requested scope.
 #[test]
 fn a_trashed_note_is_still_gettable_by_id() {
     let f = fixture("trash-visible");
@@ -1802,15 +1643,6 @@ fn a_trashed_note_is_still_gettable_by_id() {
         .is_empty());
 }
 
-/// ADR-024, ADR-025: the Updates tab builds both its button state and its
-/// explanation from `app_info`, so the flag has to agree with the platform it
-/// runs on. A Windows build claiming otherwise would offer a button whose only
-/// possible outcome is a failure — and a macOS build claiming support would
-/// offer the same button with nothing behind it.
-///
-/// Android is in the supported set as of ADR-025, which is what the assertion
-/// says: it is here because the Kotlin installer works, not because the flag was
-/// widened to make a test pass.
 #[test]
 fn update_support_follows_the_platform() {
     assert_eq!(
@@ -1823,8 +1655,6 @@ fn update_support_follows_the_platform() {
     );
 }
 
-/// The label is interpolated into the sentence that explains why updating is
-/// unavailable, so an empty value would reach the reader verbatim.
 #[test]
 fn update_support_names_a_real_platform() {
     let label = crate::commands::os_label();
@@ -1835,9 +1665,6 @@ fn update_support_names_a_real_platform() {
     );
 }
 
-/// An updater failure reaches the user as `NETWORK`, the code the frontend reads
-/// as "try again later" (`10-conventions.md` §6). The technical detail stays in
-/// `details` and the log; the message the reader sees is the plain sentence.
 #[cfg(desktop)]
 #[test]
 fn an_updater_failure_is_a_network_error_that_keeps_its_detail_back() {
@@ -1861,10 +1688,6 @@ fn an_updater_failure_is_a_network_error_that_keeps_its_detail_back() {
     );
 }
 
-/// The download events cross the channel as `{ event, data }`, and the tab's
-/// discriminated union in `src/types/update.ts` has to name the same three
-/// strings with the same field spellings. Renaming one side alone would leave
-/// the progress bar silently frozen at zero.
 #[cfg(desktop)]
 #[test]
 fn download_events_match_the_typescript_channel_shape() {
@@ -1885,8 +1708,6 @@ fn download_events_match_the_typescript_channel_shape() {
     let finished = serde_json::to_value(DownloadEvent::Finished).expect("serialises");
     assert_eq!(finished["event"], "finished");
 
-    /* A server that omits the length leaves `null`, and the bar has to degrade
-    to indeterminate rather than divide by null. */
     let unknown = serde_json::to_value(DownloadEvent::Started {
         content_length: None,
     })
@@ -1894,8 +1715,6 @@ fn download_events_match_the_typescript_channel_shape() {
     assert!(unknown["data"]["contentLength"].is_null());
 }
 
-/// `AppInfo` and `UpdateSummary` are the two payloads the tab renders from, so
-/// their field names are a contract too.
 #[test]
 fn update_payloads_match_the_typescript_types() {
     let info = serde_json::json!({

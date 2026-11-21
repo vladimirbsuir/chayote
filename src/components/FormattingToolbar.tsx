@@ -26,20 +26,10 @@ type FormattingToolbarProps = {
   variant?: 'desktop' | 'mobile';
 };
 
-/* `01-product.md` §5.1 promises a WYSIWYG block editor with text styles, and
-   `05-ui-ux.md` §7 binds the four marks to shortcuts — but until this row
-   nothing visible reached them, which §1 principle 4 ("every shortcut has a
-   visible, discoverable control") forbids. One static row above the content,
-   the same component on desktop and mobile: a bubble menu is `04-editor.md`
-   §10's deferred item and stays deferred, and a selection-only menu is
-   undiscoverable on touch where a long-press already opens the row menus. */
 export function FormattingToolbar({
   editor,
   variant = 'desktop',
 }: FormattingToolbarProps): React.ReactElement {
-  /* `isActive` and `can` read editor state, which lives outside React: without
-     a subscription the pressed state freezes at the mount value. One counter
-     bumped on both events ProseMirror emits for a state change. */
   const [, setTick] = useState(0);
   useEffect(() => {
     if (editor === null) return;
@@ -57,9 +47,6 @@ export function FormattingToolbar({
   const mobile = variant === 'mobile';
   const editable = editor?.isEditable ?? false;
 
-  /* Read once per render so the buttons below stay declarations rather than
-     sixteen copies of the same optional chain. `?? false` turns the nullable
-     read into a plain boolean, which is what the strict boolean rules want. */
   const activeBold = editor?.isActive('bold') ?? false;
   const activeItalic = editor?.isActive('italic') ?? false;
   const activeStrike = editor?.isActive('strike') ?? false;
@@ -307,10 +294,6 @@ function ToolButton({
       {...(pressed === undefined ? {} : { 'aria-pressed': pressed })}
       disabled={disabled}
       onMouseDown={(event) => {
-        /* A mousedown on the button would blur the editor before the click
-           runs, losing the selection the mark applies to. Preventing the
-           default keeps the caret where it is; the chain still focuses, which
-           covers touch where no mousedown precedes the tap. */
         event.preventDefault();
       }}
       onClick={onRun}

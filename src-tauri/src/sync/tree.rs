@@ -1,26 +1,8 @@
-//! Folder tree integrity across devices (`07-sync-plan.md` §5.2).
-//!
-//! Two properties a pull must not break, and the server enforces neither:
-//!
-//! - **A parent before its child.** Pulls fetch by `rev`, and a parent that
-//!   was renamed or moved after its child was created has the higher rev, so
-//!   on a fresh device the child arrives first and fails the foreign key. That
-//!   failure aborted the whole cycle, every cycle, before notes were pulled.
-//! - **No cycles.** Two devices moving X under Y and Y under X each pass the
-//!   local check, and the server takes both. A local cycle hangs every walk of
-//!   the subtree and hides both folders from the tree.
-//!
-//! The push refuses a move that would close a cycle on the server (the first
-//! push wins, the second rebases onto it); this module is the pull's half.
-
 use std::collections::HashSet;
 
 use super::RemoteFolder;
 use crate::error::AppError;
 
-/// Whether filing `id` under `new_parent` would make `id` its own ancestor.
-/// The walk is bounded by a visited set, so a cycle already on disk (written
-/// by an older build) terminates instead of spinning.
 pub(super) fn would_cycle(
     conn: &rusqlite::Connection,
     id: &str,
@@ -56,14 +38,6 @@ fn exists(conn: &rusqlite::Connection, id: &str) -> Result<bool, AppError> {
         .is_some())
 }
 
-/// Writes a remote folder row into the local tree, inside `tx`.
-///
-/// The parent is checked first. One this device does not hold (deleted here,
-/// or a tombstone on the server) files the folder at the root — the same
-/// rule a pulled note gets for a missing folder, and what the tree already
-/// does for an orphan. A parent that would close a cycle, or `force_root`,
-/// also files it at the root, and then the row is queued back to the server
-/// so the server's cycle is broken too and every device converges on it.
 pub(super) fn upsert_remote_folder(
     tx: &rusqlite::Transaction<'_>,
     remote: &RemoteFolder,
@@ -108,9 +82,6 @@ pub(super) fn upsert_remote_folder(
     Ok(())
 }
 
-/// Applies one pulled folder. True when the local store visibly changed. A
-/// dirty local row is never touched here: the push phase already arbitrated
-/// it, and marking it clean would drop the queued write.
 fn apply_one(
     conn: &mut rusqlite::Connection,
     remote: &RemoteFolder,
@@ -143,15 +114,6 @@ fn apply_one(
     Ok(true)
 }
 
-/// Applies a pulled set of folder rows parent-first. Returns how many changed
-/// the local store.
-///
-/// Rows go in `rev` order wherever they can — a tombstone and a move must not
-/// swap places — but a row whose parent is still waiting in this set waits
-/// for it. A row whose parent is neither here nor waiting is applied at once
-/// (`upsert_remote_folder` files it at the root). When every waiting row is
-/// waiting on another, the set holds a cycle: the lowest-rev row is filed at
-/// the root and sent back, and the rest then apply under it.
 pub(super) fn apply_remote_folders(
     conn: &mut rusqlite::Connection,
     rows: &[RemoteFolder],
@@ -221,8 +183,6 @@ mod tests {
         .expect("folder reads")
     }
 
-    /// The child's rev is lower than its parent's (the parent was renamed
-    /// later): a fresh device still lands both, parent first.
     #[test]
     fn a_child_pulled_before_its_parent_lands_under_it() {
         let db = Database::open_in_memory().expect("memory db");
@@ -237,8 +197,6 @@ mod tests {
         assert_eq!(parent_of(&db, "child").as_deref(), Some("parent"));
     }
 
-    /// A parent this device does not hold files the child at the root
-    /// instead of failing the cycle.
     #[test]
     fn a_missing_parent_files_the_folder_at_the_root() {
         let db = Database::open_in_memory().expect("memory db");
@@ -249,8 +207,6 @@ mod tests {
         assert_eq!(dirty_of(&db, "orphan"), 0, "nothing to heal");
     }
 
-    /// X under Y here, the server says Y under X: the pull breaks the cycle
-    /// by filing Y at the root and queueing it back.
     #[test]
     fn a_pull_that_would_close_a_cycle_files_the_folder_at_the_root() {
         let db = Arc::new(Database::open_in_memory().expect("memory db"));
@@ -274,13 +230,10 @@ mod tests {
             1,
             "and is sent back to heal the server"
         );
-        // And the tree walks terminate.
         assert_eq!(folders.list().expect("lists").len(), 1);
         folders.delete(&y.id).expect("deletes the whole subtree");
     }
 
-    /// A cycle entirely inside the pulled set (a fresh device pulling a
-    /// server that already holds one) still lands every row.
     #[test]
     fn a_cycle_inside_the_pulled_rows_is_broken_once() {
         let db = Database::open_in_memory().expect("memory db");

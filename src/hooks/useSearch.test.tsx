@@ -6,22 +6,6 @@ import { SEARCH_DEBOUNCE_MS, SEARCH_MIN_LENGTH, useSearch } from './useSearch';
 import type { NoteSummary, Selection } from '../types/ipc';
 import type { SearchHit, SearchInput, SearchPage } from '../types/search';
 
-/* `10-conventions.md` §8 and `01-product.md` §8, which are the two rules this
-   hook exists to satisfy. The debounce is what stops the index being queried per
-   keystroke, and the kept previous page is what stops the note list flashing
-   empty on every one of them — "without a visible loading state" is a rule about
-   what the user sees, not about how fast the query is.
-
-   The backend is a promise this file controls rather than the mock adapter,
-   because two of these tests are about ordering: what the hook does while a query
-   is still in flight, and how many queries a typing burst produces. A backend
-   that resolved immediately could not show either.
-
-   Real timers throughout, except in the burst test: the delay is a real 150 ms and
-   the rest of the suite waits on it honestly. Fake timers break `waitFor` here,
-   because it advances Jest's clock and Vitest's fake timers leave it out of step
-   with the promise chain the query resolves on. */
-
 const calls: SearchInput[] = [];
 let respond: (input: SearchInput) => Promise<SearchPage>;
 
@@ -69,16 +53,10 @@ function renderSearch(query: string, selection: Selection = ALL) {
   );
 }
 
-/** Retries `assertion` until it passes, with a budget far longer than the
-    debounce. It takes an assertion rather than a predicate because `waitFor`
-    decides "still waiting" from a thrown error — a callback that merely returns
-    `false` resolves on its first call and asserts nothing. */
 async function eventually(assertion: () => void): Promise<void> {
   await waitFor(assertion, { timeout: 2_000 });
 }
 
-/** Runs `act` and lets the microtask queue drain, so a promise the call resolved
-    has reached the cache before the next assertion reads it. */
 async function settle(action: () => void): Promise<void> {
   await act(async () => {
     action();
@@ -127,9 +105,6 @@ describe('useSearch', () => {
     const short = 'x'.repeat(SEARCH_MIN_LENGTH - 1);
     const { result, rerender } = renderSearch(short);
 
-    /* The query never settles into anything searchable, so there is nothing to
-       wait for: the assertion is the absence of a call, and the debounce has had
-       its full duration by the time the field is lengthened. */
     await new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS * 2));
     expect(result.current.active).toBe(false);
     expect(calls).toHaveLength(0);
@@ -165,9 +140,6 @@ describe('useSearch', () => {
       expect(ids(result.current.hits)).toEqual(['first']);
     });
 
-    /* The second query is held open. `01-product.md` §8 asks for no visible
-       loading state, so what the user must still be looking at is the first
-       result set — not an empty list waiting for the second one. */
     let release = (): void => {};
     respond = () =>
       new Promise<SearchPage>((done) => {

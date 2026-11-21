@@ -1,7 +1,3 @@
--- 0002_fts.sql — external-content FTS5 index and its triggers
--- `03-data-model.md` §3.6. Triggers, not application-side updates, so the
--- index can never drift from `notes`.
-
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
   title,
   plain_text,

@@ -2,18 +2,6 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { seedSettings } from './helpers';
 
-/* ADR-024, in a browser. The whole point of the mock backend (ADR-018) is that
-   the Updates tab is a real screen a test can drive, so these are not tests of a
-   stub — they are tests of the tab, with the updater's two possible answers
-   supplied by `?seed=`.
-
-   The install path ends in a process restart on a real platform. Here it ends in
-   a resolved promise, which is the most that can honestly be asserted without a
-   Tauri window (§11-verification §3.4). */
-
-/** The only route to Settings is the top bar's overflow menu — the same journey
-    `settings.spec.ts` walks, so this spec is not testing a shortcut nothing else
-    uses. */
 async function openSettings(page: Page): Promise<void> {
   await expect(page.locator('[data-testid="app-shell"]')).toBeVisible();
   await page.getByRole('button', { name: 'More' }).click();
@@ -38,9 +26,6 @@ test.describe('Updates', () => {
 
     await expect(page.getByTestId('update-version')).toHaveText('Chayote 0.2.1');
     await expect(page.getByTestId('update-check')).toBeEnabled();
-    /* Nothing has been reported into the tab, so nothing is claimed — "up to
-       date" here would be an assertion about a version the tab has not asked
-       for. */
     await expect(page.getByTestId('update-current')).toHaveCount(0);
     await expect(page.getByTestId('update-available')).toHaveCount(0);
   });
@@ -50,9 +35,6 @@ test.describe('Updates', () => {
   }) => {
     await page.goto('/?seed=update');
     await openUpdates(page);
-    /* The daily check runs once at launch and writes the timestamp — so a "last
-       checked" line is expected. What it must not do is push its finding into
-       the tab: an update found silently stays silent until the user asks. */
     await expect(page.getByTestId('update-last-checked')).toContainText('Last checked');
     await expect(page.getByTestId('update-available')).toHaveCount(0);
     await expect(page.getByTestId('update-current')).toHaveCount(0);
@@ -67,7 +49,6 @@ test.describe('Updates', () => {
 
     await expect(page.getByTestId('update-available')).toContainText('Version 0.3.0 is available.');
     await expect(page.getByTestId('update-install')).toBeEnabled();
-    /* Not both: an available update is not also an up-to-date one. */
     await expect(page.getByTestId('update-current')).toHaveCount(0);
   });
 
@@ -99,15 +80,12 @@ test.describe('Updates', () => {
     await openUpdates(page);
     await page.getByTestId('update-check').click();
 
-    /* The error contract's `NETWORK` message names the sync server, which an
-       update check never touches — the tab says its own sentence instead. */
     await expect(page.getByTestId('update-check-error')).toHaveText(
       'Could not check for updates. Check your connection and try again.',
     );
     await expect(page.getByTestId('update-check-error')).toHaveAttribute('role', 'alert');
     await expect(page.getByTestId('update-current')).toHaveCount(0);
     await expect(page.getByTestId('update-install')).toHaveCount(0);
-    /* Recoverable: the button comes back rather than staying dead. */
     await expect(page.getByTestId('update-check')).toBeEnabled();
   });
 
@@ -118,9 +96,6 @@ test.describe('Updates', () => {
     await expect(page.getByTestId('update-install')).toBeEnabled();
 
     await page.getByTestId('update-install').click();
-    /* A browser has no process to replace, so the real restart cannot happen
-       here (`11-verification.md` §3.4). What is asserted is that the command
-       resolves and the tab does not get stuck showing progress. */
     await expect(page.getByTestId('update-check')).toBeEnabled();
     await expect(page.getByTestId('update-progress')).toHaveCount(0);
   });
@@ -134,16 +109,12 @@ test.describe('Updates', () => {
     await expect(page.getByTestId('update-check')).toBeDisabled();
     await expect(page.getByTestId('update-unsupported')).toContainText('macOS');
     await expect(page.getByTestId('update-unsupported')).toContainText('not code-signed');
-    /* No result line beside the reason: the tab never claimed to be current. */
     await expect(page.getByTestId('update-current')).toHaveCount(0);
   });
 
   test('tells an Android user to grant the install permission, and keeps the button', async ({
     page,
   }) => {
-    /* ADR-025. The grant lives in system settings and has no prompt, so the tab
-       has to say what to do; the Install button stays live because pressing it
-       again after the grant is the whole fix. */
     await page.goto('/?seed=needs-permission');
     await openUpdates(page);
     await page.getByTestId('update-check').click();
@@ -153,7 +124,6 @@ test.describe('Updates', () => {
     await expect(page.getByTestId('update-install-error')).toContainText(
       'will not let Chayote install updates until you allow it',
     );
-    /* Still actionable, and not dressed as a dead end. */
     await expect(page.getByTestId('update-install')).toBeEnabled();
   });
 
@@ -163,7 +133,6 @@ test.describe('Updates', () => {
 
     await expect(page.getByTestId('settings-tabs').getByRole('tab')).toHaveCount(3);
 
-    /* The general tab still applies as it changes, and the footer still closes. */
     await page.getByRole('radio', { name: 'Teal' }).click();
     await page.getByRole('tab', { name: 'Sync' }).click();
     await expect(page.getByTestId('sync-pane')).toBeVisible();
@@ -184,7 +153,6 @@ test.describe('Updates', () => {
     await expect(list.getByRole('tab', { selected: true })).toHaveText('Sync');
     await list.press('ArrowRight');
     await expect(list.getByRole('tab', { selected: true })).toHaveText('Updates');
-    /* Wraps rather than stopping, which is what a tablist does. */
     await list.press('ArrowRight');
     await expect(list.getByRole('tab', { selected: true })).toHaveText('General');
     await list.press('End');

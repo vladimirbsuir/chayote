@@ -5,11 +5,6 @@ import { EditorOverflowMenu } from './EditorOverflowMenu';
 import { EmptyState } from './EmptyState';
 import { TagRowMenu } from './TagRowMenu';
 
-/* `05-ui-ux.md` §9: chrome text is not selectable — only text inputs and the
-   editor content are. These three surfaces have no dedicated test file of their
-   own; what is asserted is the one class each carries, following the
-   danger-token pattern in `NoteList.trash.test.tsx`. */
-
 describe('chrome selection', () => {
   it('renders the tag menu unselectable so a hold presses, never selects', () => {
     render(

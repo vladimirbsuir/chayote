@@ -3,10 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { SettingsDialog } from './SettingsDialog';
 import type { FolderNode } from '../types/folder';
 
-/* `05-ui-ux.md` §6.6: theme, accent, default folder, reset. §10 adds the focus
-   obligations, and `05-ui-ux.md` §6.6's accent paragraph adds the one thing the
-   dialog has to do that no other control does: measure a colour the user typed. */
-
 const FOLDERS: FolderNode[] = [
   {
     id: 'f-work',
@@ -82,11 +78,6 @@ describe('SettingsDialog', () => {
   });
 
 it('a preset click names that preset, and the first one is the theme default', () => {
-    /* By *index*, never by hex. The index becomes `var(--accent-preset-N)`
-       inline, which the dark theme resolves to its own value; a hex would be a
-       literal and would defeat the cascade — ADR-019. All six mapping to one
-       value is the bug this shape exists to prevent: picking Teal would
-       otherwise leave the default blue in place. */
     const { onAccentChange } = open({ accent: { kind: 'custom', hex: '#123456' } });
 
     fireEvent.click(screen.getByRole('radio', { name: 'Teal' }));
@@ -98,8 +89,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('marks the chosen preset selected, and only it', () => {
-    /* §10: the ring is not carrying the meaning alone, so `aria-checked` has to
-       agree with the ring. */
     open({ accent: { kind: 'preset', index: 4 } });
     expect(screen.getByRole('radio', { name: 'Rust' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('radio', { name: 'Teal' }).getAttribute('aria-checked')).toBe('false');
@@ -109,9 +98,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('marks the first preset selected when no accent is stored', () => {
-    /* Caught by looking at `screenshots/settings-dark.png`, which is what level 2
-       of `11-verification.md` §4 is for. `null` is the first preset — the theme's
-       own default — and the readout says so, but no swatch carried the ring. */
     open({ accent: null });
     expect(screen.getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe(
       'true',
@@ -124,10 +110,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('is one tab stop across all seven accent choices', () => {
-    /* Seven radios in one row: seven tab stops to get past would be the same
-       mistake §10.1 records for the folder tree. Scoped to the accent group —
-       the dialog has two radiogroups and the theme one legitimately has its own
-       tab stop. */
     open({ accent: null });
     const group = screen.getByRole('radiogroup', { name: 'Accent colour' });
     const stops = Array.from(group.querySelectorAll('[role="radio"]')).filter(
@@ -206,8 +188,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('restores the remembered custom colour behind a preset', () => {
-    /* Switching to a preset must not forget the custom colour: reopening the
-       palette offers what was picked, not the fallback. */
     const { onAccentChange } = open({
       accent: { kind: 'preset', index: 2 },
       lastCustomHex: '#123456',
@@ -220,8 +200,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('syncs the editor when the stored accent lands after mount', () => {
-    /* On a cold start hydration can resolve after the dialog mounts: the ring
-       follows the live prop but the editor flag was snapshotted shut. */
     const props = {
       theme: 'light' as const,
       effective: 'light' as const,
@@ -268,8 +246,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('shows no readout at all for a custom colour, weak or not', () => {
-    /* A custom colour carries no "Custom #hex — ratio" string, whatever its
-       contrast. */
     open({ accent: { kind: 'custom', hex: '#cccccc' } });
     expect(screen.queryByText(/below the 4\.5:1/)).toBeNull();
     expect(screen.queryByText(/Custom #/)).toBeNull();
@@ -319,9 +295,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('offers "None" for the default folder and indents children', () => {
-    /* §6.1 resolves a new note's folder from this, and ADR-014 means "None" is
-       the state first launch is in. The picker is the shared `FolderPicker` —
-       flattened depth-first and indented by depth, as the status-bar one is. */
     open();
 
     expect(
@@ -335,9 +308,6 @@ it('a preset click names that preset, and the first one is the theme default', (
       'Work',
       'Projects',
     ]);
-    /* Indented by depth in the option's own padding, not by whitespace: Work
-       sits one level in at 20 px, its child Projects two at 34 px — the None
-       option occupies depth zero. */
     expect(options[1]?.style.paddingLeft).toBe('20px');
     expect(options[2]?.style.paddingLeft).toBe('34px');
   });
@@ -374,8 +344,6 @@ it('a preset click names that preset, and the first one is the theme default', (
     fireEvent.click(screen.getByRole('button', { name: 'Default folder for new notes' }));
     expect(screen.getByTestId('folder-picker-list')).toBeDefined();
 
-    /* The picker's own document listener consumes the key; the panel trap
-       ignores keys from outside the panel's DOM, so the dialog stays. */
     fireEvent.keyDown(screen.getByTestId('folder-picker-list'), { key: 'Escape' });
 
     expect(screen.queryByTestId('folder-picker-list')).toBeNull();
@@ -384,8 +352,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('closes the picker by pressing the button again', () => {
-    /* The panel never covers the button, so pressing it again is always the
-       fastest way to dismiss the list. */
     open();
     const button = screen.getByRole('button', { name: 'Default folder for new notes' });
 
@@ -415,9 +381,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('has no Cancel: every field applies as it changes', () => {
-    /* A Cancel over settings that are already applied is a button that closes
-       the dialog without doing anything — the same objection 05-ui-ux.md §9
-       raises about a desktop sidebar toggle. */
     open();
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
   });
@@ -432,8 +395,6 @@ it('a preset click names that preset, and the first one is the theme default', (
   });
 
   it('never names the reset control by colour alone', () => {
-    /* §10: colour is never the only signal, so the danger tint on the reset
-       button is not carrying the meaning — the words "Reset all settings" are. */
     open();
     const button = screen.getByTestId('settings-reset');
     expect(button.textContent).toContain('Reset all settings');

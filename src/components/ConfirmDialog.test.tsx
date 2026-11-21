@@ -3,12 +3,6 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { ConfirmDialog } from './ConfirmDialog';
 
-/* `05-ui-ux.md` §10: "Opening a dialog moves focus in and traps it; `Esc` closes
-   and restores focus to the trigger." All three are about focus, and none of them
-   is visible in a screenshot — a dialog that lets `Tab` walk behind it looks
-   perfect and lets the next keystroke land in a note the user thinks is not being
-   edited. So these assert on `document.activeElement` throughout. */
-
 describe('ConfirmDialog', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -27,11 +21,6 @@ describe('ConfirmDialog', () => {
     return props;
   }
 
-  /* A button that opens the dialog, so the focus-restore round trip can be
-     asserted end to end. The dialog captures `document.activeElement` on mount,
-     which is why the trigger has to hold focus *before* the dialog renders — the
-     real ordering, and the only one where "restores focus to the trigger" means
-     anything. */
   function Harness({ onConfirm }: { onConfirm: () => void }) {
     const [open, setOpen] = useState(false);
     return (
@@ -105,8 +94,6 @@ describe('ConfirmDialog', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     });
 
-    /* Focus is back where the user left it, so the next `Tab` continues from the
-       row they acted on rather than from the top of the document. */
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
@@ -136,8 +123,6 @@ describe('ConfirmDialog', () => {
     act(() => {
       confirm.focus();
     });
-    /* `preventDefault` is what stops the browser's own Tab from moving focus out
-       of the dialog; observing the wrap is how that is asserted from outside. */
     const notPrevented = fireEvent.keyDown(confirm, { key: 'Tab' });
 
     expect(notPrevented).toBe(false);
@@ -169,12 +154,8 @@ describe('ConfirmDialog', () => {
   it('puts Cancel first in the tab order, so Enter means Cancel by default', () => {
     renderDialog();
 
-    /* Destructive confirmation: the safe action is the one `Enter` reaches first.
-       The visual order matches, so the focus order cannot disagree with what the
-       user sees. */
     const buttons = screen.getAllByRole('button');
     expect(buttons.map((button) => button.textContent)).toEqual(['Cancel', 'Delete folder']);
-    /* And focus actually lands there, rather than on the destructive one. */
     expect(document.activeElement).toBe(buttons[0]);
   });
 
@@ -183,8 +164,6 @@ describe('ConfirmDialog', () => {
 
     const cancel = screen.getByRole('button', { name: 'Cancel' });
 
-    /* Not prevented, so the browser's own order applies. The trap must fire only
-       at the two ends of the list, or the dialog becomes unusable. */
     expect(fireEvent.keyDown(cancel, { key: 'Tab' })).toBe(true);
   });
 

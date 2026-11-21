@@ -36,8 +36,6 @@ function note(overrides: Partial<NoteRow> = {}): NoteRow {
   };
 }
 
-/* Resolved rather than rejected: the tests here assert on layout and copy, and an
-   unhandled rejection in a test that never triggers a write would be noise. */
 const noWrite = (): Promise<void> => Promise.resolve();
 const noMove = (): Promise<void> => Promise.resolve();
 
@@ -98,9 +96,6 @@ describe('Sidebar', () => {
   });
 
   it('renders its chrome unselectable so a hold is a gesture, never a selection', () => {
-    /* The whole aside: filters, headers, folder and tag rows. Text inputs opt
-       back in with `select-text`, so the inline create/rename fields keep
-       their selection toolbar. */
     renderSidebar();
 
     expect(screen.getByTestId('sidebar').className).toContain('select-none');
@@ -120,8 +115,6 @@ describe('Sidebar', () => {
   });
 
   it('offers an add control for tags that opens an inline input', () => {
-    /* ADR-021: tags stay listed at a zero count, so creating one from the
-       sidebar is a live control rather than the dead one M8 removed. */
     renderSidebar();
 
     expect(screen.getByRole('button', { name: 'New folder' })).toBeDefined();
@@ -179,9 +172,6 @@ describe('Sidebar', () => {
   });
 
   it('swallows the release click after a hold that opened the tag menu', () => {
-    /* The release after a long-press synthesises a click on engines that do —
-       measured on the phone, where the hold selected the tag under its own
-       menu. The flag eats exactly that one; the next real click selects. */
     const onSelect = vi.fn();
     renderSidebar({ onSelect });
 
@@ -230,8 +220,6 @@ describe('Sidebar', () => {
     fireEvent.contextMenu(tagRow());
     fireEvent.click(screen.getByTestId('tag-menu-delete'));
 
-    /* The confirmation names the count, because deleting detaches the tag from
-       every note carrying it while the notes themselves survive. */
     expect(screen.getByText('Delete “work”?')).toBeDefined();
     expect(screen.getByText(/removed from 2 notes/)).toBeDefined();
     fireEvent.click(screen.getByRole('button', { name: 'Delete tag' }));
@@ -332,8 +320,6 @@ describe('Sidebar', () => {
   });
 
   it('collapses the whole Folders list from its header, keeping the header and the notes', () => {
-    /* The twisty hides one branch; the section toggle hides the high-level list
-       itself, which is what a long top-level list needs. */
     renderSidebar();
 
     expect(screen.getByRole('tree', { name: /folder/i })).toBeDefined();
@@ -392,8 +378,6 @@ describe('Sidebar', () => {
   });
 
   it('expands a collapsed Folders section when a folder is added from its header', () => {
-    /* `+` opens an input inside the tree, so from a collapsed section it expands
-       first — otherwise it would open an input nobody can see. */
     renderSidebar();
 
     fireEvent.click(screen.getByTestId('section-toggle-folders'));
@@ -410,7 +394,6 @@ describe('Sidebar', () => {
   });
 
   it('emits no emoji and no raw colour values', () => {
-    /* ADR-015: icons are Lucide vectors and colour comes from tokens only. */
     const html = renderToStaticMarkup(
       <Sidebar
         selection={{ kind: 'all' }}
@@ -447,9 +430,6 @@ describe('Sidebar', () => {
   });
 });
 
-/* `05-ui-ux.md` §6.5 and §8. A search changes what the third region is showing and
-   nothing else, so these are about the sidebar keeping the other two regions — and
-   its own honesty about how much of the result set is on screen. */
 describe('Sidebar while searching', () => {
   const query = { query: 'roadmap', total: 1 };
 
@@ -466,8 +446,6 @@ describe('Sidebar while searching', () => {
       notes: [note(), note({ id: 'n-2' }), note({ id: 'n-3' })],
     });
 
-    /* A header reporting the loaded rows alone would tell someone searching for
-       a common word that they had found everything. */
     expect(screen.getByTestId('list-count').textContent).toBe('3 of 4123 results');
   });
 
@@ -502,9 +480,6 @@ describe('Sidebar while searching', () => {
   });
 
   it('does not claim the device is empty while a search has no hits', () => {
-    /* ADR-014's first-launch state is a fact about the database, not about the
-       list. Reaching it with the field full would say the opposite of what the
-       user just saw. */
     renderSidebar({ search: { query: 'kumquat', total: 0 }, notes: [], firstLaunch: true });
 
     expect(screen.queryByText('No notes yet')).toBeNull();
@@ -514,8 +489,6 @@ describe('Sidebar while searching', () => {
   it('announces the count politely, as §10 requires', () => {
     renderSidebar({ search: query, notes: [note()] });
 
-    /* A live region added to the page already holding the value announces
-       nothing, so the count is always one rather than only during a search. */
     expect(screen.getByTestId('list-count').getAttribute('aria-live')).toBe('polite');
   });
 
@@ -537,11 +510,6 @@ describe('Sidebar while searching', () => {
   });
 
   it('fills the column with no divider when the width is null (mobile list view)', () => {
-    /* Found on a phone: the desktop width ended the list early with a stray
-       border at the viewport edge (`05-ui-ux.md` §2.4 draws no divider there).
-       jsdom computes no layout, so this asserts the classes and the style the
-       layout comes from rather than any geometry; `e2e/mobile.spec.ts` measures
-       the real box at 360 px. */
     renderSidebar({ width: null });
 
     const sidebar = screen.getByTestId('sidebar');
