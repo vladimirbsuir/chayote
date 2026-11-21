@@ -5,11 +5,31 @@ server works — hosted Postgres or a local container: paste its connection
 string into **Settings → Sync** and the app behaves identically. There is
 no provider-specific code anywhere.
 
-## 1. Create the server tables (once)
+## 1. The server tables create themselves
 
-1. Open your provider's SQL editor (or connect with `psql`).
-2. Paste the whole of `schema.sql` from this folder and run it.
-3. Re-running is safe (everything is `IF NOT EXISTS`).
+There is nothing to run by hand. Every sync cycle starts by reading the
+highest version in `chayote_schema_migrations`; if the server is behind the
+app, the app applies the missing files from `migrations/` in order, inside
+one transaction, under a Postgres advisory lock so two devices syncing at the
+same moment apply each step once. An empty database therefore becomes a
+Chayote server on the first **Sync now**, and an app update that changes the
+server schema upgrades it on its first sync. A server whose tables were
+created by hand from `0001_initial.sql` before this existed is adopted: the
+file is all `IF NOT EXISTS`, so it applies as a no-op and is recorded.
+
+If the server is *ahead* of the app (another device runs a newer Chayote),
+sync stops with "update Chayote on this device" rather than writing rows the
+newer schema may not expect.
+
+**By hand, only if the role may not create tables:** run every file in
+`migrations/` in order in your provider's SQL editor. Each file is
+idempotent, so the app re-running them on its next sync, and recording them
+as it does, changes nothing.
+
+Rules for a new server migration: add `NNNN_name.sql` with the next number,
+list it in `SERVER_MIGRATIONS` (`src-tauri/src/sync/schema.rs`; a test fails
+if the folder and the list disagree), never edit one that has shipped, and
+keep every statement idempotent (`IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`).
 
 No RLS, no auth, no extensions: single-user mode, the connection string
 itself is the credential.
@@ -99,3 +119,14 @@ TRUNCATE note_tags, notes, tags, folders RESTART IDENTITY;
 `RESTART IDENTITY` resets `sync_rev_seq`; afterwards every device should
 sync once with an empty server before writing, or stale `rev` watermarks
 will skip rows. The device keeps its notes regardless.
+
+To remove Chayote from the database entirely, drop the tables instead:
+
+```sql
+DROP TABLE note_tags, notes, tags, folders, chayote_schema_migrations;
+DROP SEQUENCE sync_rev_seq;
+```
+
+The next sync from any device creates them again, empty. As after any wipe,
+each device then needs **Re-upload everything** to push its library again
+(`07-sync-plan.md` §6).

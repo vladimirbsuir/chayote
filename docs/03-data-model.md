@@ -461,7 +461,7 @@ Rules:
 
 ## 7. Migration path to Postgres
 
-The mapping for sync, as built on `feat/sync-mvp`. `07-sync-plan.md` covers the protocol; this table is the schema contract, and `postgres/schema.sql` is its executable form.
+The mapping for sync, as built on `feat/sync-mvp`. `07-sync-plan.md` covers the protocol; this table is the schema contract, and `postgres/migrations/` is its executable form, applied by the app (ADR-030).
 
 | SQLite | Postgres | Notes |
 |--------|----------|-------|

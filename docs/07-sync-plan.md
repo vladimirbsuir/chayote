@@ -44,7 +44,7 @@ is not in the dependency tree at all (`11-verification.md` §4.1e).
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| A | Server schema (`postgres/schema.sql`), single-user, no RLS, no Auth | done on `feat/sync-mvp` |
+| A | Server schema (`postgres/migrations/`), single-user, no RLS, no Auth; applied by the app since ADR-030 | done on `feat/sync-mvp` |
 | B | Push: outbox drain loop, tags → folders → notes | done |
 | C | Pull: incremental fetch by `rev` watermark, apply with conflict checks | done |
 | D | Bootstrap: falls out of the drain; switching servers re-queues everything | done |
@@ -52,7 +52,9 @@ is not in the dependency tree at all (`11-verification.md` §4.1e).
 
 ## 4. Server schema
 
-Authoritative SQL lives in `postgres/schema.sql`, applied once per server.
+Authoritative SQL lives in `postgres/migrations/`, numbered files the app
+applies itself at the start of every sync cycle (ADR-030, `postgres/README.md`
+§1); the applied versions are recorded in `chayote_schema_migrations`.
 Single user: no `user_id` column, no RLS, no Auth — the connection string is
 the credential. Every table carries `rev bigint` from one global sequence
 (`sync_rev_seq`), assigned by the server on every accepted write and echoed

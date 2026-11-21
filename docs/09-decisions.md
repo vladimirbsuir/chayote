@@ -37,6 +37,58 @@ Status values: **Accepted** · **Superseded by ADR-NNN** · **Reversed**
 | 027 | Sync merges the fields each device touched; the server's copy wins a tag-name or folder-cycle clash | Accepted |
 | 028 | The trash empties whether or not the note ever synced | Accepted |
 | 029 | One desktop instance, and a startup failure that says why | Accepted |
+| 030 | The app creates and upgrades the server schema itself | Accepted |
+
+---
+
+## ADR-030 - The app creates and upgrades the server schema itself
+
+**Status:** Accepted · **Date:** 2026-11-21 · **Changes:** `07-sync-plan.md` §4, `postgres/README.md` §1
+
+**Context.** Sync needed the user to paste `postgres/schema.sql` into the
+server by hand before the first sync. A user who skipped it, as the first real
+setup did, got a sync error instead of a working server. Nothing recorded
+which version of the schema a server had, so a later schema change could only
+be another manual step on every server, with no way for an old app to notice
+it was out of date.
+
+**Decision.**
+
+1. Server SQL lives in numbered files under `postgres/migrations/`, embedded in
+   the app as `SERVER_MIGRATIONS`. `0001_initial.sql` is the former
+   `schema.sql`, unchanged.
+2. Every sync cycle, right after connecting, reads `max(version)` from
+   `chayote_schema_migrations` (a missing table reads as 0). If the server is
+   behind, the app applies the missing files in one transaction, after
+   `pg_advisory_xact_lock` and a second read under the lock, and records each
+   version. Postgres DDL is transactional, so a failure leaves the server where
+   it was.
+3. A server ahead of the app stops sync with a `VALIDATION` error asking to
+   update Chayote on this device. A role that may not create tables gets a
+   `VALIDATION` error naming the manual route.
+4. Every server migration is idempotent, so running the files by hand stays a
+   valid fallback, and a server set up by hand before this ADR is adopted as
+   version 1 without change.
+
+The user approved this design on 2026-11-21.
+
+**Alternatives rejected.**
+
+| Option | Rejected because |
+|--------|------------------|
+| Create the tables only on an empty server, no versions | Solves the first sync and none of the later ones: every schema change would again be a manual step per server. |
+| Check once per app launch and cache it | A device that upgrades the server mid-session would leave the others writing to a schema they do not know until restart. The check is one indexed read per cycle. |
+| Let an older app keep syncing against a newer server | Safe only if every future migration is additive and every older engine ignores what it does not know; nothing enforces that. Stopping with a reason is recoverable, silent drift is not. |
+| A migration tool (sqlx, refinery) | A second migration runner beside the SQLite one, for a handful of files, plus its own bookkeeping table format. |
+
+**Consequences.**
+
+- One extra round trip per sync cycle on an up-to-date server.
+- Upgrading the server is irreversible from the old app's side: after one
+  device migrates, every other device must update before it syncs again.
+- The four `live_*` sync tests set up their server through the same path, and
+  four more cover an empty server, two devices migrating at once, a
+  hand-applied server and a server ahead of the app.
 
 ---
 
