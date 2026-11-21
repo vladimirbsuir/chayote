@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Pin, Inbox } from 'lucide-react';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -56,6 +56,42 @@ describe('NoteList', () => {
     await waitFor(() => {
       expect(document.querySelectorAll('[data-testid="note-card"]')).toHaveLength(6);
     });
+  });
+
+  it('is one tab stop with no note open, and arrows walk the rows', async () => {
+    const summaries = await seededSummaries(6);
+    render(
+      <QueryClientProvider client={client()}>
+        <NoteList
+          notes={summaries}
+          openNoteId={null}
+          now={Date.now()}
+          folderNames={new Map()}
+          showFolder
+          onOpen={() => {}}
+          empty={EMPTY_STATE}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-testid="note-card"]')).toHaveLength(6);
+    });
+    const cards = (): HTMLElement[] =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-testid="note-card"]'));
+    expect(cards().filter((card) => card.tabIndex === 0)).toHaveLength(1);
+    expect(cards()[0]?.tabIndex).toBe(0);
+
+    cards()[0]?.focus();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(cards()[1]);
+    expect(cards()[1]?.tabIndex).toBe(0);
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'End' });
+    expect(document.activeElement).toBe(cards()[5]);
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+    expect(document.activeElement).toBe(cards()[0]);
   });
 
   it('mounts a bounded number of cards at 10 000 notes', async () => {

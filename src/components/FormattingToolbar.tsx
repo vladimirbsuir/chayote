@@ -37,10 +37,8 @@ export function FormattingToolbar({
       setTick((n) => n + 1);
     };
     editor.on('transaction', bump);
-    editor.on('selectionUpdate', bump);
     return () => {
       editor.off('transaction', bump);
-      editor.off('selectionUpdate', bump);
     };
   }, [editor]);
 

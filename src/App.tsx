@@ -60,7 +60,7 @@ import { useBreakpoint } from './layout/useBreakpoint';
 import { canPop, currentView, popView, pushView } from './layout/viewStack';
 import type { ViewStack } from './layout/viewStack';
 import type { Uuid } from './types/note';
-import type { NoteSummary } from './types/ipc';
+import type { NoteFilter, NoteSummary } from './types/ipc';
 
 const EditorPane = lazy(() =>
   import('./components/EditorPane').then((module) => ({ default: module.EditorPane })),
@@ -117,7 +117,6 @@ function Shell() {
 
   const { folders } = useFolders();
   const { tags } = useTags();
-  const { togglePin, pendingId: pinPendingId } = useTogglePin();
   const { toast: undoToast, show: showUndoToast } = useUndoToast();
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -141,6 +140,7 @@ function Shell() {
     },
     [showActionError],
   );
+  const { togglePin, pendingId: pinPendingId } = useTogglePin(reportActionError);
 
   const trash = useTrashActions({
     onOpenNoteGone: (goneId) => {
@@ -239,7 +239,8 @@ function Shell() {
   }, [reupload]);
 
   const folderNames = useMemo(() => folderNamesById(folders ?? []), [folders]);
-  const folderCounts = useMemo(() => countByFolder(notes ?? []), [notes]);
+  const { notes: allNotes } = useNotes(ALL_NOTES);
+  const folderCounts = useMemo(() => countByFolder(allNotes ?? []), [allNotes]);
 
   const firstLaunch = !isPending && selection.kind === 'all' && (notes?.length ?? 0) === 0;
 
@@ -304,13 +305,19 @@ function Shell() {
 
   const createNote = useCallback(async (): Promise<void> => {
     const current = useSelectionStore.getState().selection;
-    const folderId = current.kind === 'folder' ? current.id : defaultFolderId;
+    const fallback =
+      defaultFolderId !== null && folderNames.has(defaultFolderId) ? defaultFolderId : null;
+    const folderId = current.kind === 'folder' ? current.id : fallback;
 
-    const note = await notesApi.create(folderId);
-    setOpenNote(note.id);
-    void queryClient.invalidateQueries({ queryKey: ['notes'] });
-    if (mobile) setStack(PUSH_EDITOR);
-  }, [defaultFolderId, mobile, queryClient]);
+    try {
+      const note = await notesApi.create(folderId);
+      setOpenNote(note.id);
+      void queryClient.invalidateQueries({ queryKey: ['notes'] });
+      if (mobile) setStack(PUSH_EDITOR);
+    } catch (error) {
+      reportActionError(error);
+    }
+  }, [defaultFolderId, folderNames, mobile, queryClient, reportActionError]);
 
   const foldersChanged = useCallback((): void => {
     void queryClient.invalidateQueries({ queryKey: ['folders'] });
@@ -413,6 +420,7 @@ function Shell() {
 
       if (isLetterShortcut(event, 'n')) {
         event.preventDefault();
+        if (event.repeat) return;
         void createNote();
         return;
       }
@@ -485,20 +493,22 @@ function Shell() {
   useEffect(() => {
     leaveEditorRef.current = leaveEditor;
   }, [leaveEditor]);
-  useEffect(() =>
-    installBackHandler(() => {
-      if (confirmRef.current !== null) {
-        setConfirm(null);
+  useEffect(
+    () =>
+      installBackHandler(() => {
+        if (confirmRef.current !== null) {
+          setConfirm(null);
+          return true;
+        }
+        if (settingsOpenRef.current) {
+          setSettingsOpen(false);
+          return true;
+        }
+        if (!canPop(stackRef.current)) return false;
+        leaveEditorRef.current();
         return true;
-      }
-      if (settingsOpenRef.current) {
-        setSettingsOpen(false);
-        return true;
-      }
-      if (!canPop(stackRef.current)) return false;
-      leaveEditorRef.current();
-      return true;
-    }),
+      }),
+    [],
   );
 
   useEffect(() => {
@@ -815,6 +825,7 @@ function Shell() {
 }
 
 const EMPTY_NOTES: NoteSummary[] = [];
+const ALL_NOTES: NoteFilter = { kind: 'all' };
 
 function messageOf(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {

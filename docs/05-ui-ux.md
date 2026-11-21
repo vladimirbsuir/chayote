@@ -504,6 +504,8 @@ Settings live in the Tauri store, never in the notes database, so resetting or s
 | Move focus: sidebar → editor | `Ctrl/Cmd+Enter` (from the list) |
 | Dismiss: search, dialog, sidebar | `Esc` |
 
+Letter shortcuts follow the Latin letter the layout prints, so on Dvorak `Ctrl/Cmd+B` is bold wherever the B sits. Only when the layout prints no Latin letter (Cyrillic, Greek) do they fall back to the physical key, so `Ctrl+С` on a Russian layout still saves. A chord with `Alt` never matches: Windows reports `AltGr` as `Ctrl+Alt`, and `AltGr+N` types "ń" on a Polish layout rather than creating a note. Holding `Ctrl/Cmd+N` creates one note, not one per key repeat.
+
 Inside the editor, `Tab` inserts two spaces inside `codeBlock` and indents list items; `Shift+Tab` outdents; `Tab` in a paragraph inserts two spaces, which keeps focus inside the editor and never cycles focus rings. Paragraph, heading and blockquote indent is on the toolbar's increase / decrease buttons and on `Ctrl/Cmd+]` / `Ctrl/Cmd+[` — `Tab` deliberately stays as spaces so prose editing never changes a block's indent by accident. Escape is deliberately unbound in the editor. Standard text navigation keys are untouched, including `Ctrl/Cmd+A`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`, `Ctrl/Cmd+X`.
 
 **Strike is `Ctrl/Cmd+Shift+X`, not `Ctrl/Cmd+S`.** An earlier revision of this
@@ -583,7 +585,7 @@ carries its own bar with a `settings` gear button, the app name, and a new-note 
 
 | Concern | Requirement |
 |---------|-------------|
-| Keyboard operation | Every action reachable by keyboard. `FolderTree` implements the tree pattern (§10.1) and folder actions are context-menu-driven, with `F2` and `Delete` as the shortcuts that reach the same actions (§7). |
+| Keyboard operation | Every action reachable by keyboard. `FolderTree` implements the tree pattern (§10.1) and folder actions are context-menu-driven, with `F2` and `Delete` as the shortcuts that reach the same actions (§7). The note list is one tab stop as well: the focused card, else the open note's, else the first carries `tabIndex={0}`; `ArrowUp` / `ArrowDown` / `Home` / `End` move between cards and `Enter` opens one. Before this, a list with no note open had no keyboard entry at all. |
 | Focus visibility | 2 px accent ring, 2 px offset, never removed without a replacement |
 | Focus management | Opening a dialog moves focus in and traps it; `Esc` closes and restores focus to the trigger |
 | Labels | Icon-only buttons carry `aria-label`. Inputs have associated labels. |
