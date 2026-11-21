@@ -86,6 +86,7 @@ fn apply_one(
     conn: &mut rusqlite::Connection,
     remote: &RemoteFolder,
     force_root: bool,
+    incoming: &HashSet<&str>,
 ) -> Result<bool, AppError> {
     use rusqlite::OptionalExtension as _;
     let tx = conn.transaction()?;
@@ -102,6 +103,11 @@ fn apply_one(
         _ => {}
     }
     if remote.deleted_at.is_some() {
+        for (descendant, rev) in descendants(&tx, &remote.id)? {
+            if !incoming.contains(descendant.as_str()) {
+                crate::repo::append_outbox(&tx, "folder", &descendant, "delete", None, rev)?;
+            }
+        }
         tx.execute("DELETE FROM folders WHERE id = ?1", [&remote.id])?;
         tx.execute(
             "UPDATE notes SET folder_id = NULL WHERE folder_id = ?1",
@@ -114,10 +120,26 @@ fn apply_one(
     Ok(true)
 }
 
+fn descendants(conn: &rusqlite::Connection, root: &str) -> Result<Vec<(String, i64)>, AppError> {
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE subtree(id, rev) AS (
+           SELECT id, rev FROM folders WHERE parent_id = ?1
+           UNION
+           SELECT f.id, f.rev FROM folders f JOIN subtree s ON f.parent_id = s.id
+         )
+         SELECT id, rev FROM subtree",
+    )?;
+    let rows = stmt
+        .query_map([root], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 pub(super) fn apply_remote_folders(
     conn: &mut rusqlite::Connection,
     rows: &[RemoteFolder],
 ) -> Result<i64, AppError> {
+    let incoming: HashSet<&str> = rows.iter().map(|row| row.id.as_str()).collect();
     let mut waiting: Vec<&RemoteFolder> = rows.iter().collect();
     waiting.sort_by_key(|row| row.rev);
     let mut applied = 0;
@@ -135,7 +157,7 @@ pub(super) fn apply_remote_folders(
             None => (0, true),
         };
         let row = waiting.remove(index);
-        if apply_one(conn, row, force_root)? {
+        if apply_one(conn, row, force_root, &incoming)? {
             applied += 1;
         }
     }
